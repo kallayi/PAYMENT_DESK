@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
+import { getCurrentUserAndProfile } from '@/lib/auth';
 import { PaymentsWorkspace } from '@/components/payments/payments-workspace';
 import { Loader2 } from 'lucide-react';
 import type { CompanyBank, PaymentItem, Vendor } from '@/types/database';
@@ -20,24 +21,13 @@ function PaymentsLoadingSkeleton() {
 }
 
 export default async function PaymentsPage() {
-  const supabase = await createClient();
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { user, profile } = await getCurrentUserAndProfile();
 
   if (!user) {
     redirect('/login');
   }
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('role, is_active')
-    .eq('id', user.id)
-    .single();
-
   if (!profile || !profile.is_active) {
-    await supabase.auth.signOut();
     redirect('/login?error=disabled');
   }
 
@@ -46,16 +36,18 @@ export default async function PaymentsPage() {
     redirect('/login');
   }
 
-  // Fetch vendors, banks, and payment ledger in parallel
+  const supabase = await createClient();
+
+  // Concurrently fetch active vendors, banks, and payment ledger in parallel
   const [vendorsRes, banksRes, paymentsRes] = await Promise.all([
     supabase
       .from('vendors')
-      .select('*')
+      .select('id, name, gstin, bank_account_no, ifsc_code, notes, is_active, created_by, created_at')
       .eq('is_active', true)
       .order('name', { ascending: true }),
     supabase
       .from('company_banks')
-      .select('*')
+      .select('id, short_name, full_name, account_mask, is_active, created_at')
       .eq('is_active', true)
       .order('short_name', { ascending: true }),
     supabase

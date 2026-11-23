@@ -1,31 +1,29 @@
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
+import { getCurrentUserAndProfile } from '@/lib/auth';
 import { VendorManagement } from '@/components/vendors/vendor-management';
 
-export default async function VendorsPage() {
-  const supabase = await createClient();
+export const metadata = {
+  title: 'Vendors | INDFURN',
+  description: 'Manage verified vendors, bank accounts, and GSTIN details.',
+};
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+export default async function VendorsPage() {
+  const { user, profile } = await getCurrentUserAndProfile();
 
   if (!user) {
     redirect('/login');
   }
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('role, is_active')
-    .eq('id', user.id)
-    .single();
-
   if (!profile || !profile.is_active) {
-    redirect('/login');
+    redirect('/login?error=disabled');
   }
+
+  const supabase = await createClient();
 
   const { data: vendors } = await supabase
     .from('vendors')
-    .select('*')
+    .select('id, name, gstin, bank_account_no, ifsc_code, notes, is_active, created_by, created_at')
     .order('name', { ascending: true });
 
   return <VendorManagement initialVendors={vendors || []} />;

@@ -119,43 +119,64 @@ export function PaymentsWorkspace({
     }
   };
 
-  // Quick submit a draft payment directly from table row
+  // Quick submit a draft payment directly from table row (Optimistic UI)
   const handleSubmitDraft = async (paymentId: string) => {
+    const previousPayments = payments;
+
+    // Immediate UI update
+    setPayments((prev) =>
+      prev.map((p) =>
+        p.id === paymentId
+          ? { ...p, status: 'PENDING_APPROVAL', submitted_at: new Date().toISOString() }
+          : p
+      )
+    );
+    toast.success('Payment submitted for Owner approval');
+
     setSubmittingPaymentId(paymentId);
     try {
       const res = await submitPayment(paymentId);
       if (!res.success) {
-        toast.error(res.error);
+        // Rollback on error
+        setPayments(previousPayments);
+        toast.error(res.error || 'Failed to submit payment.');
         return;
       }
-      toast.success('Payment submitted for Owner approval');
       setPayments((prev) =>
         prev.map((p) => (p.id === paymentId ? res.data : p))
       );
     } catch {
-      toast.error('Failed to submit payment.');
+      setPayments(previousPayments);
+      toast.error('Failed to submit payment. Rolled back.');
     } finally {
       setSubmittingPaymentId(null);
     }
   };
 
-  // Delete draft payment
+  // Delete draft payment (Optimistic UI)
   const handleDeleteDraft = async (paymentId: string) => {
     if (!window.confirm('Are you sure you want to delete this draft entry?')) {
       return;
     }
 
+    const previousPayments = payments;
+
+    // Immediate UI update
+    setPayments((prev) => prev.filter((p) => p.id !== paymentId));
+    toast.success('Draft payment deleted');
+
     setDeletingPaymentId(paymentId);
     try {
       const res = await deleteDraftPayment(paymentId);
       if (!res.success) {
-        toast.error(res.error);
+        // Rollback on error
+        setPayments(previousPayments);
+        toast.error(res.error || 'Failed to delete draft payment.');
         return;
       }
-      toast.success('Draft payment deleted');
-      setPayments((prev) => prev.filter((p) => p.id !== paymentId));
     } catch {
-      toast.error('Failed to delete draft payment.');
+      setPayments(previousPayments);
+      toast.error('Failed to delete draft payment. Rolled back.');
     } finally {
       setDeletingPaymentId(null);
     }

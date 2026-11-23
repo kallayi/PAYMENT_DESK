@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
+import { getCurrentUserAndProfile } from '@/lib/auth';
 import { OwnerApprovalsView } from '@/components/payments/owner-approvals-view';
 import { Loader2 } from 'lucide-react';
 import type { CompanyBank, PaymentItem } from '@/types/database';
@@ -20,24 +21,13 @@ function ApprovalsLoadingSkeleton() {
 }
 
 export default async function ApprovalsPage() {
-  const supabase = await createClient();
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { user, profile } = await getCurrentUserAndProfile();
 
   if (!user) {
     redirect('/login');
   }
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('role, is_active')
-    .eq('id', user.id)
-    .single();
-
   if (!profile || !profile.is_active) {
-    await supabase.auth.signOut();
     redirect('/login?error=disabled');
   }
 
@@ -46,11 +36,13 @@ export default async function ApprovalsPage() {
     redirect('/payments');
   }
 
-  // Fetch company banks and pending/on-hold payment items in parallel
+  const supabase = await createClient();
+
+  // Fetch company banks and pending/on-hold payment items concurrently
   const [banksRes, paymentsRes] = await Promise.all([
     supabase
       .from('company_banks')
-      .select('*')
+      .select('id, short_name, full_name, account_mask, is_active, created_at')
       .eq('is_active', true)
       .order('short_name', { ascending: true }),
     supabase

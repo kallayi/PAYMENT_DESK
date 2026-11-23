@@ -83,6 +83,7 @@ function DesktopNavLinks({ navItems }: { navItems: NavItem[] }) {
           <Link
             key={item.id}
             href={item.href}
+            prefetch={true}
             className={`w-full h-10 px-3 rounded-lg text-sm font-medium flex items-center justify-between transition-colors ${
               active
                 ? 'bg-slate-100 text-slate-900'
@@ -128,6 +129,7 @@ function MobileBottomNavLinks({
           <Link
             key={item.id}
             href={item.href}
+            prefetch={true}
             className={`flex flex-col items-center justify-center gap-1 text-[11px] font-medium transition-colors ${
               active ? 'text-slate-900 font-semibold' : 'text-slate-400 hover:text-slate-700'
             }`}

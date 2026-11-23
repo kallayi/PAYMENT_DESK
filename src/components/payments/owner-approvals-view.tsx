@@ -87,61 +87,84 @@ export function OwnerApprovalsView({
   });
   const sortedDates = Object.keys(groupedByDate).sort((a, b) => b.localeCompare(a));
 
-  // Handler: Confirm Approve
+  // Handler: Confirm Approve (Optimistic UI)
   const handleConfirmApprove = async () => {
     if (!approvingItem) return;
 
-    setIsApproving(true);
+    const targetItem = approvingItem;
+    const previousPayments = payments;
+    const optimisticApproved: PaymentItem = {
+      ...targetItem,
+      status: 'APPROVED',
+      approved_at: new Date().toISOString(),
+    };
+
+    // Immediate UI update
+    setPayments((prev) =>
+      prev.map((p) => (p.id === targetItem.id ? optimisticApproved : p))
+    );
+    setApprovingItem(null);
+    setIsApproving(false);
+
+    toast.success(
+      `Approved ${formatINR(targetItem.net_payable)} for ${targetItem.vendor?.name || 'Vendor'}`
+    );
+
     try {
-      const res = await ownerApprovePayment(approvingItem.id);
+      const res = await ownerApprovePayment(targetItem.id);
       if (!res.success) {
-        toast.error(res.error);
+        // Rollback on failure
+        setPayments(previousPayments);
+        toast.error(res.error || 'Failed to approve payment.');
         return;
       }
-
-      toast.success(
-        `Approved ${formatINR(approvingItem.net_payable)} for ${approvingItem.vendor?.name || 'Vendor'}`
-      );
-
+      // Reconcile with server response
       setPayments((prev) =>
-        prev.map((p) => (p.id === approvingItem.id ? res.data : p))
+        prev.map((p) => (p.id === targetItem.id ? res.data : p))
       );
-      setApprovingItem(null);
     } catch {
-      toast.error('Failed to approve payment.');
-    } finally {
-      setIsApproving(false);
+      setPayments(previousPayments);
+      toast.error('Failed to approve payment. Rolled back.');
     }
   };
 
-  // Handler: Hold / Resume
+  // Handler: Hold / Resume (Optimistic UI)
   const handleToggleHold = async (item: PaymentItem) => {
+    const previousPayments = payments;
+    const willBeOnHold = item.status !== 'ON_HOLD';
+    const optimisticStatus = willBeOnHold ? 'ON_HOLD' : 'PENDING_APPROVAL';
+
+    // Immediate UI update
+    setPayments((prev) =>
+      prev.map((p) => (p.id === item.id ? { ...p, status: optimisticStatus } : p))
+    );
+
+    toast.success(
+      willBeOnHold
+        ? `Placed payment for ${item.vendor?.name || 'Vendor'} on hold`
+        : `Resumed payment for ${item.vendor?.name || 'Vendor'} to pending queue`
+    );
+
     setActionLoadingId(item.id);
     try {
       const res = await ownerHoldPayment(item.id);
       if (!res.success) {
-        toast.error(res.error);
+        setPayments(previousPayments);
+        toast.error(res.error || 'Failed to update hold status.');
         return;
       }
-
-      const isNowHold = res.data.status === 'ON_HOLD';
-      toast.success(
-        isNowHold
-          ? `Placed payment for ${item.vendor?.name || 'Vendor'} on hold`
-          : `Resumed payment for ${item.vendor?.name || 'Vendor'} to pending queue`
-      );
-
       setPayments((prev) =>
         prev.map((p) => (p.id === item.id ? res.data : p))
       );
     } catch {
-      toast.error('Failed to update hold status.');
+      setPayments(previousPayments);
+      toast.error('Failed to update hold status. Rolled back.');
     } finally {
       setActionLoadingId(null);
     }
   };
 
-  // Handler: Confirm Reject
+  // Handler: Confirm Reject (Optimistic UI)
   const handleConfirmReject = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!rejectingItem) return;
@@ -151,49 +174,78 @@ export function OwnerApprovalsView({
       return;
     }
 
-    setIsRejecting(true);
+    const targetItem = rejectingItem;
+    const reason = rejectionReason.trim();
+    const previousPayments = payments;
+
+    // Immediate UI update
+    setPayments((prev) =>
+      prev.map((p) =>
+        p.id === targetItem.id
+          ? { ...p, status: 'REJECTED', rejection_reason: reason }
+          : p
+      )
+    );
+    setRejectingItem(null);
+    setRejectionReason('');
+    setIsRejecting(false);
+
+    toast.success(`Payment rejected and returned to Accounts team`);
+
     try {
-      const res = await ownerRejectPayment(rejectingItem.id, rejectionReason.trim());
+      const res = await ownerRejectPayment(targetItem.id, reason);
       if (!res.success) {
-        toast.error(res.error);
+        setPayments(previousPayments);
+        toast.error(res.error || 'Failed to reject payment.');
         return;
       }
-
-      toast.success(`Payment rejected and returned to Accounts team`);
       setPayments((prev) =>
-        prev.map((p) => (p.id === rejectingItem.id ? res.data : p))
+        prev.map((p) => (p.id === targetItem.id ? res.data : p))
       );
-      setRejectingItem(null);
-      setRejectionReason('');
     } catch {
-      toast.error('Failed to reject payment.');
-    } finally {
-      setIsRejecting(false);
+      setPayments(previousPayments);
+      toast.error('Failed to reject payment. Rolled back.');
     }
   };
 
-  // Handler: Inline Bank Switch
+  // Handler: Inline Bank Switch (Optimistic UI)
   const handleBankSwitch = async (item: PaymentItem, newBankId: string) => {
     if (item.source_bank_id === newBankId) return;
 
     const chosenBank = banks.find((b) => b.id === newBankId);
+    const previousPayments = payments;
+
+    // Immediate UI update
+    setPayments((prev) =>
+      prev.map((p) =>
+        p.id === item.id
+          ? {
+              ...p,
+              source_bank_id: newBankId,
+              source_bank: chosenBank || p.source_bank,
+            }
+          : p
+      )
+    );
+
+    toast.success(
+      `Disbursement bank switched to ${chosenBank?.short_name || 'Bank'}`
+    );
+
     setActionLoadingId(item.id);
     try {
       const res = await ownerSwitchBank(item.id, newBankId);
       if (!res.success) {
-        toast.error(res.error);
+        setPayments(previousPayments);
+        toast.error(res.error || 'Failed to switch bank.');
         return;
       }
-
-      toast.success(
-        `Disbursement bank switched to ${chosenBank?.short_name || 'Bank'}`
-      );
-
       setPayments((prev) =>
         prev.map((p) => (p.id === item.id ? res.data : p))
       );
     } catch {
-      toast.error('Failed to switch bank.');
+      setPayments(previousPayments);
+      toast.error('Failed to switch bank. Rolled back.');
     } finally {
       setActionLoadingId(null);
     }

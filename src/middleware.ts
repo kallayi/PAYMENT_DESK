@@ -2,12 +2,11 @@ import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Database, UserRole } from '@/types/database';
-import { createAdminClient } from '@/lib/supabase/admin';
 
 export async function middleware(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
 
-  // 0. Completely bypass middleware & auth checks for static assets, PWA files, icons, fonts, and images
+  // 0. Completely bypass middleware for static assets, PWA files, icons, fonts, and images
   if (
     pathname === '/manifest.webmanifest' ||
     pathname === '/sw.js' ||
@@ -52,7 +51,7 @@ export async function middleware(request: NextRequest) {
     },
   }) as unknown as SupabaseClient<Database>;
 
-  // Strict: Always use getUser() on server, never getSession() alone
+  // Session refresh & verification
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -67,55 +66,13 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(redirectUrl);
   }
 
-  // 2. Fetch authenticated user profile
-  let profile: { role: UserRole; is_active: boolean } | null = null;
-
-  const profileRes = await supabase
-    .from('profiles')
-    .select('role, is_active')
-    .eq('id', user.id)
-    .maybeSingle();
-
-  if (profileRes.error) {
-    console.error('Middleware profile fetch error:', profileRes.error);
-    if (process.env.SUPABASE_SERVICE_ROLE_KEY) {
-      try {
-        const admin = createAdminClient();
-        const adminRes = await admin
-          .from('profiles')
-          .select('role, is_active')
-          .eq('id', user.id)
-          .maybeSingle();
-
-        if (adminRes.data) {
-          profile = adminRes.data as { role: UserRole; is_active: boolean };
-        } else if (adminRes.error) {
-          console.error('Middleware admin profile fallback error:', adminRes.error);
-        }
-      } catch (adminErr) {
-        console.error('Middleware admin client initialization error:', adminErr);
-      }
-    }
-  } else {
-    profile = profileRes.data as { role: UserRole; is_active: boolean } | null;
-  }
-
-  // If user account is disabled
-  if (profile && !profile.is_active) {
-    await supabase.auth.signOut();
-    const redirectUrl = request.nextUrl.clone();
-    redirectUrl.pathname = '/login';
-    redirectUrl.searchParams.set('error', 'disabled');
-    return NextResponse.redirect(redirectUrl);
-  }
-
-  // Robust role fallback: profile role -> user metadata role -> ACCOUNTANT default
-  const fallbackRole = (user.user_metadata?.role as UserRole) || 'ACCOUNTANT';
-  const role: UserRole = (profile?.role as UserRole) || fallbackRole;
-
+  // 2. Authenticated users:
+  // Role is read from user_metadata without expensive database queries on every navigation.
+  // Full database role & is_active verification is cached in (dashboard)/layout.tsx.
+  const role: UserRole = (user.user_metadata?.role as UserRole) || 'ACCOUNTANT';
   const defaultRoute = role === 'OWNER' ? '/approvals' : '/payments';
 
-  // 3. Authenticated user visiting / or /login -> redirect to default role page
+  // Redirect authenticated user visiting / or /login to default role route
   if (pathname === '/' || pathname === '/login') {
     const redirectUrl = request.nextUrl.clone();
     redirectUrl.pathname = defaultRoute;
@@ -123,9 +80,8 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(redirectUrl);
   }
 
-  // 4. Strict Role Guards (Only ACCOUNTANT and OWNER)
+  // Strict role guards
   if (role === 'ACCOUNTANT') {
-    // ACCOUNTANT cannot visit /approvals or /settings
     const accountantBlocked =
       pathname === '/approvals' ||
       pathname.startsWith('/approvals/') ||

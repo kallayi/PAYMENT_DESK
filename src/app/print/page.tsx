@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
+import { getCurrentUserAndProfile } from '@/lib/auth';
 import { PrintSheetView } from '@/components/print/print-sheet-view';
 import type { PaymentItem } from '@/types/database';
 
@@ -19,24 +20,13 @@ export default async function PrintPage({ searchParams }: PrintPageProps) {
   const resolvedParams = await searchParams;
   const selectedDate = resolvedParams?.date || 'ALL';
 
-  const supabase = await createClient();
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { user, profile } = await getCurrentUserAndProfile();
 
   if (!user) {
     redirect('/login');
   }
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('role, full_name, is_active')
-    .eq('id', user.id)
-    .single();
-
   if (!profile || !profile.is_active) {
-    await supabase.auth.signOut();
     redirect('/login?error=disabled');
   }
 
@@ -44,6 +34,8 @@ export default async function PrintPage({ searchParams }: PrintPageProps) {
   if (profile.role !== 'OWNER' && profile.role !== 'ACCOUNTANT') {
     redirect('/login');
   }
+
+  const supabase = await createClient();
 
   // Build query
   let query = supabase

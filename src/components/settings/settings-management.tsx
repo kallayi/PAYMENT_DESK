@@ -99,9 +99,15 @@ export function SettingsManagement({
   }
 
   function handleToggleUser(userId: string) {
+    const prevUsers = users;
+    setUsers((prev) =>
+      prev.map((u) => (u.id === userId ? { ...u, is_active: !u.is_active } : u))
+    );
+
     startTransition(async () => {
       const res = await toggleUserActive(userId);
       if (!res.success) {
+        setUsers(prevUsers);
         toast.error(res.error);
       } else {
         toast.info(`${res.data.full_name} is now ${res.data.is_active ? 'Active' : 'Disabled'}`);
@@ -135,9 +141,15 @@ export function SettingsManagement({
   }
 
   function handleToggleBank(bankId: string) {
+    const prevBanks = banks;
+    setBanks((prev) =>
+      prev.map((b) => (b.id === bankId ? { ...b, is_active: !b.is_active } : b))
+    );
+
     startTransition(async () => {
       const res = await toggleCompanyBankActive(bankId);
       if (!res.success) {
+        setBanks(prevBanks);
         toast.error(res.error);
       } else {
         toast.info(
