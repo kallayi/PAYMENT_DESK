@@ -5,6 +5,23 @@ import type { Database, UserRole } from '@/types/database';
 import { createAdminClient } from '@/lib/supabase/admin';
 
 export async function middleware(request: NextRequest) {
+  const pathname = request.nextUrl.pathname;
+
+  // 0. Completely bypass middleware & auth checks for static assets, PWA files, icons, fonts, and images
+  if (
+    pathname === '/manifest.webmanifest' ||
+    pathname === '/sw.js' ||
+    pathname === '/favicon.ico' ||
+    pathname === '/logo.png' ||
+    pathname === '/icon-192.png' ||
+    pathname === '/icon-512.png' ||
+    pathname.startsWith('/_next') ||
+    pathname.startsWith('/icons/') ||
+    /\.(?:svg|png|jpg|jpeg|gif|webp|ico|webmanifest|woff|woff2|ttf|eot)$/i.test(pathname)
+  ) {
+    return NextResponse.next();
+  }
+
   let response = NextResponse.next({
     request: {
       headers: request.headers,
@@ -39,8 +56,6 @@ export async function middleware(request: NextRequest) {
   const {
     data: { user },
   } = await supabase.auth.getUser();
-
-  const pathname = request.nextUrl.pathname;
 
   // 1. Unauthenticated users:
   if (!user) {
@@ -133,9 +148,11 @@ export const config = {
      * Match all request paths except for:
      * - _next/static (static files)
      * - _next/image (image optimization files)
-     * - favicon.ico (favicon file)
-     * - public files (icons, sw.js, images)
+     * - favicon.ico, sitemap.xml, robots.txt
+     * - manifest.webmanifest (PWA manifest)
+     * - sw.js (service worker)
+     * - public files (icons, images, fonts)
      */
-    '/((?!_next/static|_next/image|favicon.ico|icons/|sw.js|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+    '/((?!_next/static|_next/image|favicon.ico|manifest\\.webmanifest|sw\\.js|logo\\.png|icon-192\\.png|icon-512\\.png|icons/|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|webmanifest|woff|woff2|ttf|eot)$).*)',
   ],
 };

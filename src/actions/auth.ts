@@ -65,7 +65,7 @@ export async function login(formData: FormData): Promise<ActionResult<{ redirect
     await supabase.auth.signOut();
     return {
       success: false,
-      error: `Profile fetch error: ${profileError.message || 'Database error'}`,
+      error: 'Unable to retrieve user profile. Please contact the administrator.',
     };
   }
 
@@ -162,11 +162,12 @@ export async function createUser(input: CreateUserInput): Promise<ActionResult<P
     .single();
 
   if (profileError || !newProfile) {
+    console.error('Failed to create profile row in admin:', profileError);
     // Rollback auth user if profile insertion failed
     await admin.auth.admin.deleteUser(authRecord.user.id);
     return {
       success: false,
-      error: profileError?.message || 'Failed to create profile row.',
+      error: 'Failed to create team member profile. Please try again.',
     };
   }
 
@@ -227,7 +228,8 @@ export async function toggleUserActive(targetUserId: string): Promise<ActionResu
     .single();
 
   if (error || !updated) {
-    return { success: false, error: error?.message || 'Failed to update user status.' };
+    console.error('Failed to update user status in admin:', error);
+    return { success: false, error: 'Failed to update user status. Please try again.' };
   }
 
   revalidatePath('/settings');
