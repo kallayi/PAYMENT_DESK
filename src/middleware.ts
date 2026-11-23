@@ -2,6 +2,7 @@ import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Database, UserRole } from '@/types/database';
+import { createAdminClient } from '@/lib/supabase/admin';
 
 export async function middleware(request: NextRequest) {
   let response = NextResponse.next({
@@ -52,13 +53,37 @@ export async function middleware(request: NextRequest) {
   }
 
   // 2. Fetch authenticated user profile
+  let profile: { role: UserRole; is_active: boolean } | null = null;
+
   const profileRes = await supabase
     .from('profiles')
     .select('role, is_active')
     .eq('id', user.id)
-    .single();
+    .maybeSingle();
 
-  const profile = profileRes.data;
+  if (profileRes.error) {
+    console.error('Middleware profile fetch error:', profileRes.error);
+    if (process.env.SUPABASE_SERVICE_ROLE_KEY) {
+      try {
+        const admin = createAdminClient();
+        const adminRes = await admin
+          .from('profiles')
+          .select('role, is_active')
+          .eq('id', user.id)
+          .maybeSingle();
+
+        if (adminRes.data) {
+          profile = adminRes.data as { role: UserRole; is_active: boolean };
+        } else if (adminRes.error) {
+          console.error('Middleware admin profile fallback error:', adminRes.error);
+        }
+      } catch (adminErr) {
+        console.error('Middleware admin client initialization error:', adminErr);
+      }
+    }
+  } else {
+    profile = profileRes.data as { role: UserRole; is_active: boolean } | null;
+  }
 
   // If user account is disabled
   if (profile && !profile.is_active) {
@@ -69,7 +94,9 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(redirectUrl);
   }
 
-  const role: UserRole = (profile?.role as UserRole) || 'ACCOUNTANT';
+  // Robust role fallback: profile role -> user metadata role -> ACCOUNTANT default
+  const fallbackRole = (user.user_metadata?.role as UserRole) || 'ACCOUNTANT';
+  const role: UserRole = (profile?.role as UserRole) || fallbackRole;
 
   const defaultRoute = role === 'OWNER' ? '/approvals' : '/payments';
 

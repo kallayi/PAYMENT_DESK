@@ -23,31 +23,60 @@ export async function login(formData: FormData): Promise<ActionResult<{ redirect
 
   const supabase = await createClient();
 
-  const { data, error } = await supabase.auth.signInWithPassword({
+  const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
     email,
     password,
   });
 
-  if (error || !data.user) {
-    return { success: false, error: error?.message || 'Invalid username/email or password.' };
+  if (authError || !authData.user) {
+    return { success: false, error: authError?.message || 'Invalid username/email or password.' };
   }
 
-  // Check if profile is active and fetch role
-  const profileRes = await supabase
-    .from('profiles')
-    .select('role, is_active')
-    .eq('id', data.user.id)
-    .single();
+  // Fetch user profile using createAdminClient strictly by authData.user.id
+  // This bypasses RLS and session cookie propagation delays immediately after signInWithPassword
+  let profile: { id: string; full_name: string; role: 'OWNER' | 'ACCOUNTANT'; is_active: boolean } | null = null;
+  let profileError: any = null;
 
-  if (profileRes.error || !profileRes.data) {
+  try {
+    const admin = createAdminClient();
+    const adminRes = await admin
+      .from('profiles')
+      .select('id, full_name, role, is_active')
+      .eq('id', authData.user.id)
+      .maybeSingle();
+
+    profile = adminRes.data;
+    profileError = adminRes.error;
+  } catch (adminClientErr) {
+    console.error('Error creating admin client:', adminClientErr);
+    // Fallback to standard client
+    const fallbackRes = await supabase
+      .from('profiles')
+      .select('id, full_name, role, is_active')
+      .eq('id', authData.user.id)
+      .maybeSingle();
+
+    profile = fallbackRes.data;
+    profileError = fallbackRes.error;
+  }
+
+  if (profileError) {
+    console.error('Profile fetch error:', profileError);
+    await supabase.auth.signOut();
+    return {
+      success: false,
+      error: `Profile fetch error: ${profileError.message || 'Database error'}`,
+    };
+  }
+
+  if (!profile) {
+    console.error('Profile fetch error: No profile record found for user id', authData.user.id);
     await supabase.auth.signOut();
     return {
       success: false,
       error: 'User profile not found. Please contact the administrator.',
     };
   }
-
-  const profile = profileRes.data;
 
   if (!profile.is_active) {
     await supabase.auth.signOut();
