@@ -43,7 +43,7 @@ export default async function ApprovalsPage() {
 
   // Strict role check: Only Owner can access /approvals
   if (profile.role !== 'OWNER') {
-    redirect(profile.role === 'ACCOUNTANT' ? '/payments' : '/bills');
+    redirect('/payments');
   }
 
   // Fetch company banks and pending/on-hold payment items in parallel

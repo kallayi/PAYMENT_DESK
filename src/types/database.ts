@@ -1,8 +1,9 @@
 // ==========================================
 // Strict Database & Application Types for INDFURN PayFlow
+// Simplified 2-Role Architecture: ACCOUNTANT and OWNER
 // ==========================================
 
-export type UserRole = 'STAFF' | 'ACCOUNTANT' | 'OWNER';
+export type UserRole = 'ACCOUNTANT' | 'OWNER';
 
 export type PaymentStatus =
   | 'DRAFT'
@@ -12,8 +13,6 @@ export type PaymentStatus =
   | 'PAID'
   | 'REJECTED'
   | 'CANCELLED';
-
-export type IncomingBillStatus = 'NEW' | 'CONVERTED' | 'DISMISSED';
 
 export type Profile = {
   id: string;
@@ -45,27 +44,9 @@ export type CompanyBank = {
   created_at: string;
 };
 
-export type IncomingBill = {
-  id: string;
-  vendor_id: string | null;
-  vendor_name_fallback: string | null;
-  invoice_ref: string;
-  estimated_amount: number | null;
-  file_path: string;
-  notes: string | null;
-  status: IncomingBillStatus;
-  uploaded_by: string;
-  created_at: string;
-
-  // Joined relations
-  vendor?: Vendor | null;
-  uploader?: Profile | null;
-};
-
 export type PaymentItem = {
   id: string;
   sheet_date: string;
-  incoming_bill_id: string | null;
   vendor_id: string;
   invoice_ref: string;
   due_date: string;
@@ -155,29 +136,11 @@ export type Database = {
         Update: Partial<Omit<CompanyBank, 'id'>>;
         Relationships: [];
       };
-      incoming_bills: {
-        Row: IncomingBill;
-        Insert: {
-          id?: string;
-          vendor_id?: string | null;
-          vendor_name_fallback?: string | null;
-          invoice_ref: string;
-          estimated_amount?: number | null;
-          file_path: string;
-          notes?: string | null;
-          status?: IncomingBillStatus;
-          uploaded_by: string;
-          created_at?: string;
-        };
-        Update: Partial<Omit<IncomingBill, 'id'>>;
-        Relationships: [];
-      };
       payment_items: {
         Row: PaymentItem;
         Insert: {
           id?: string;
           sheet_date: string;
-          incoming_bill_id?: string | null;
           vendor_id: string;
           invoice_ref: string;
           due_date: string;
@@ -231,7 +194,6 @@ export type Database = {
     Enums: {
       user_role: UserRole;
       payment_status: PaymentStatus;
-      incoming_bill_status: IncomingBillStatus;
     };
     CompositeTypes: {
       [_ in never]: never;

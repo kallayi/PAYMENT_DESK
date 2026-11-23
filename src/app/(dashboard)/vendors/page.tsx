@@ -19,8 +19,8 @@ export default async function VendorsPage() {
     .eq('id', user.id)
     .single();
 
-  if (!profile || !profile.is_active || profile.role === 'STAFF') {
-    redirect('/bills');
+  if (!profile || !profile.is_active) {
+    redirect('/login');
   }
 
   const { data: vendors } = await supabase

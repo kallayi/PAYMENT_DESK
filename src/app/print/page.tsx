@@ -42,7 +42,7 @@ export default async function PrintPage({ searchParams }: PrintPageProps) {
 
   // Strict role check: Only Owner and Accountant can view print approval forms
   if (profile.role !== 'OWNER' && profile.role !== 'ACCOUNTANT') {
-    redirect('/bills');
+    redirect('/login');
   }
 
   // Build query

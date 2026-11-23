@@ -43,7 +43,7 @@ export default async function HistoryPage() {
 
   // Strict role check: Only Owner and Accountant can access history
   if (profile.role !== 'OWNER' && profile.role !== 'ACCOUNTANT') {
-    redirect('/bills');
+    redirect('/login');
   }
 
   // Parallel fetch: active banks and all payment items

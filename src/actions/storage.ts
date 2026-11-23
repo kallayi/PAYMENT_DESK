@@ -7,7 +7,7 @@ export type StorageBucket = 'supplier-invoices' | 'bank-receipts';
 
 /**
  * Generate a short-lived (5-minute) signed URL for private bucket file access.
- * Strictly enforces role separation: STAFF is completely blocked from bank-receipts.
+ * Strictly verifies role: Only ACCOUNTANT and OWNER can access.
  * NEVER calls getPublicUrl().
  */
 export async function getSignedFileUrl(
@@ -38,28 +38,12 @@ export async function getSignedFileUrl(
     return { success: false, error: 'Account disabled or profile not found.' };
   }
 
-  // Strict: STAFF cannot access bank-receipts under any circumstance
-  if (bucket === 'bank-receipts' && profile.role === 'STAFF') {
+  // Only ACCOUNTANT and OWNER can access files
+  if (profile.role !== 'ACCOUNTANT' && profile.role !== 'OWNER') {
     return {
       success: false,
-      error: 'Access denied: Staff members cannot view bank disbursement receipts.',
+      error: 'Access denied: You do not have permission to view documents.',
     };
-  }
-
-  // If STAFF requests a supplier invoice, ensure they either uploaded it or it's allowed
-  if (bucket === 'supplier-invoices' && profile.role === 'STAFF') {
-    const { data: bill } = await supabase
-      .from('incoming_bills')
-      .select('id, uploaded_by')
-      .eq('file_path', filePath)
-      .maybeSingle();
-
-    if (bill && bill.uploaded_by !== user.id) {
-      return {
-        success: false,
-        error: 'Access denied: You can only view invoices you uploaded.',
-      };
-    }
   }
 
   // Create temporary signed URL with 300 seconds (5 minutes) expiry

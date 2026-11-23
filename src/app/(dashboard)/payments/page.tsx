@@ -3,11 +3,11 @@ import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import { PaymentsWorkspace } from '@/components/payments/payments-workspace';
 import { Loader2 } from 'lucide-react';
-import type { CompanyBank, IncomingBill, PaymentItem, Vendor } from '@/types/database';
+import type { CompanyBank, PaymentItem, Vendor } from '@/types/database';
 
 export const metadata = {
   title: 'Payments | INDFURN',
-  description: 'Manage payments ledger, incoming staff bills, and submit for owner approval.',
+  description: 'Manage payments ledger and submit for owner approval.',
 };
 
 function PaymentsLoadingSkeleton() {
@@ -43,11 +43,11 @@ export default async function PaymentsPage() {
 
   // Strict role check: Only Accountant and Owner can access /payments
   if (profile.role !== 'ACCOUNTANT' && profile.role !== 'OWNER') {
-    redirect('/bills');
+    redirect('/login');
   }
 
-  // Fetch vendors, banks, incoming bills, and payment ledger in parallel
-  const [vendorsRes, banksRes, incomingBillsRes, paymentsRes] = await Promise.all([
+  // Fetch vendors, banks, and payment ledger in parallel
+  const [vendorsRes, banksRes, paymentsRes] = await Promise.all([
     supabase
       .from('vendors')
       .select('*')
@@ -59,11 +59,6 @@ export default async function PaymentsPage() {
       .eq('is_active', true)
       .order('short_name', { ascending: true }),
     supabase
-      .from('incoming_bills')
-      .select('*, vendor:vendors(id, name, gstin)')
-      .eq('status', 'NEW')
-      .order('created_at', { ascending: false }),
-    supabase
       .from('payment_items')
       .select(
         '*, vendor:vendors(id, name, gstin, bank_account_no, ifsc_code), source_bank:company_banks(id, short_name, full_name)'
@@ -73,14 +68,12 @@ export default async function PaymentsPage() {
 
   const vendors = (vendorsRes.data || []) as Vendor[];
   const banks = (banksRes.data || []) as CompanyBank[];
-  const incomingBills = (incomingBillsRes.data || []) as IncomingBill[];
   const payments = (paymentsRes.data || []) as PaymentItem[];
 
   return (
     <React.Suspense fallback={<PaymentsLoadingSkeleton />}>
       <PaymentsWorkspace
         initialPayments={payments}
-        initialIncomingBills={incomingBills}
         vendors={vendors}
         banks={banks}
       />

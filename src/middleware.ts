@@ -69,14 +69,9 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(redirectUrl);
   }
 
-  const role: UserRole = profile?.role || 'STAFF';
+  const role: UserRole = (profile?.role as UserRole) || 'ACCOUNTANT';
 
-  const defaultRoute =
-    role === 'OWNER'
-      ? '/approvals'
-      : role === 'ACCOUNTANT'
-        ? '/payments'
-        : '/bills';
+  const defaultRoute = role === 'OWNER' ? '/approvals' : '/payments';
 
   // 3. Authenticated user visiting / or /login -> redirect to default role page
   if (pathname === '/' || pathname === '/login') {
@@ -86,16 +81,8 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(redirectUrl);
   }
 
-  // 4. Strict Role Guards
-  if (role === 'STAFF') {
-    // STAFF can only visit /bills (and its subroutes)
-    const staffAllowed = pathname === '/bills' || pathname.startsWith('/bills/');
-    if (!staffAllowed) {
-      const redirectUrl = request.nextUrl.clone();
-      redirectUrl.pathname = '/bills';
-      return NextResponse.redirect(redirectUrl);
-    }
-  } else if (role === 'ACCOUNTANT') {
+  // 4. Strict Role Guards (Only ACCOUNTANT and OWNER)
+  if (role === 'ACCOUNTANT') {
     // ACCOUNTANT cannot visit /approvals or /settings
     const accountantBlocked =
       pathname === '/approvals' ||

@@ -38,7 +38,7 @@ export function SettingsManagement({
   const [fullName, setFullName] = React.useState('');
   const [email, setEmail] = React.useState('');
   const [password, setPassword] = React.useState('');
-  const [role, setRole] = React.useState<'STAFF' | 'ACCOUNTANT'>('ACCOUNTANT');
+  const [role, setRole] = React.useState<'ACCOUNTANT' | 'OWNER'>('ACCOUNTANT');
   const [userError, setUserError] = React.useState<string | null>(null);
 
   // Bank modal state
@@ -433,12 +433,12 @@ export function SettingsManagement({
               <select
                 id="cu-role"
                 value={role}
-                onChange={(e) => setRole(e.target.value as 'STAFF' | 'ACCOUNTANT')}
+                onChange={(e) => setRole(e.target.value as 'ACCOUNTANT' | 'OWNER')}
                 disabled={isPending}
                 className="w-full min-h-[44px] px-3 rounded-lg border border-slate-200 bg-white text-sm outline-none focus:border-slate-900"
               >
-                <option value="ACCOUNTANT">Accountant (Payments, UTR & Vendors)</option>
-                <option value="STAFF">Stock Staff (Upload Supplier Bills Only)</option>
+                <option value="ACCOUNTANT">Accountant (Payments, Ledger & Vendors)</option>
+                <option value="OWNER">Owner / Admin (Approvals, Bank Switcher & Settings)</option>
               </select>
             </div>
           </form>

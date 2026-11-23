@@ -20,9 +20,7 @@ export default async function HomePage() {
   const role = profileRes.data?.role;
   if (role === 'OWNER') {
     redirect('/approvals');
-  } else if (role === 'ACCOUNTANT') {
-    redirect('/payments');
   } else {
-    redirect('/bills');
+    redirect('/payments');
   }
 }

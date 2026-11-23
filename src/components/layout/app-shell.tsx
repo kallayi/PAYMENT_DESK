@@ -2,15 +2,13 @@
 
 import * as React from 'react';
 import Link from 'next/link';
-import { usePathname, useSearchParams } from 'next/navigation';
+import { usePathname } from 'next/navigation';
 import {
   CheckCircle2,
   Clock,
   Settings,
   Receipt,
   Building2,
-  Upload,
-  FileText,
   LogOut,
   Loader2,
 } from 'lucide-react';
@@ -37,8 +35,6 @@ function getRoleLabel(role: UserRole): string {
       return 'Owner / Admin';
     case 'ACCOUNTANT':
       return 'Accountant';
-    case 'STAFF':
-      return 'Stock Staff';
     default:
       return role;
   }
@@ -53,17 +49,11 @@ function getNavItems(role: UserRole, pendingCount: number = 0): NavItem[] {
       { id: 'settings', label: 'Settings', href: '/settings', icon: Settings },
     ];
   }
-  if (role === 'ACCOUNTANT') {
-    return [
-      { id: 'payments', label: 'Payments', href: '/payments', icon: Receipt, badge: pendingCount },
-      { id: 'history', label: 'History', href: '/history', icon: Clock },
-      { id: 'vendors', label: 'Vendors', href: '/vendors', icon: Building2 },
-    ];
-  }
-  // STAFF
+  // ACCOUNTANT
   return [
-    { id: 'bills', label: 'Upload Bill', href: '/bills', icon: Upload },
-    { id: 'uploads', label: 'My Uploads', href: '/bills?tab=uploads', icon: FileText },
+    { id: 'payments', label: 'Payments', href: '/payments', icon: Receipt, badge: pendingCount },
+    { id: 'history', label: 'History', href: '/history', icon: Clock },
+    { id: 'vendors', label: 'Vendors', href: '/vendors', icon: Building2 },
   ];
 }
 
@@ -73,30 +63,21 @@ function getPageTitle(pathname: string): string {
   if (pathname.startsWith('/history')) return 'History';
   if (pathname.startsWith('/vendors')) return 'Vendors';
   if (pathname.startsWith('/settings')) return 'Settings';
-  if (pathname.startsWith('/bills')) return 'Stock Bills';
   return 'INDFURN';
 }
 
-function isItemActive(item: NavItem, pathname: string, currentTab: string | null): boolean {
-  if (item.href === '/bills?tab=uploads') {
-    return pathname === '/bills' && currentTab === 'uploads';
-  }
-  if (item.href === '/bills') {
-    return pathname === '/bills' && currentTab !== 'uploads';
-  }
+function isItemActive(item: NavItem, pathname: string): boolean {
   return pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href));
 }
 
 function DesktopNavLinks({ navItems }: { navItems: NavItem[] }) {
   const pathname = usePathname();
-  const searchParams = useSearchParams();
-  const currentTab = searchParams.get('tab');
 
   return (
     <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
       {navItems.map((item) => {
         const Icon = item.icon;
-        const active = isItemActive(item, pathname, currentTab);
+        const active = isItemActive(item, pathname);
 
         return (
           <Link
@@ -136,14 +117,12 @@ function MobileBottomNavLinks({
   bottomGridCols: string;
 }) {
   const pathname = usePathname();
-  const searchParams = useSearchParams();
-  const currentTab = searchParams.get('tab');
 
   return (
     <div className={`grid ${bottomGridCols} h-16`}>
       {navItems.map((item) => {
         const Icon = item.icon;
-        const active = isItemActive(item, pathname, currentTab);
+        const active = isItemActive(item, pathname);
 
         return (
           <Link

@@ -27,7 +27,7 @@ import {
 import { createVendor } from '@/actions/vendors';
 import { getSignedFileUrl } from '@/actions/storage';
 import { formatINR } from '@/lib/format';
-import type { CompanyBank, IncomingBill, PaymentItem, Vendor } from '@/types/database';
+import type { CompanyBank, PaymentItem, Vendor } from '@/types/database';
 
 interface PaymentFormSheetProps {
   open: boolean;
@@ -35,7 +35,6 @@ interface PaymentFormSheetProps {
   vendors: Vendor[];
   banks: CompanyBank[];
   editPayment?: PaymentItem | null;
-  incomingBill?: IncomingBill | null;
   onSuccess: (payment: PaymentItem) => void;
   onVendorCreated?: (vendor: Vendor) => void;
 }
@@ -71,7 +70,6 @@ export function PaymentFormSheet({
   vendors: initialVendors,
   banks,
   editPayment,
-  incomingBill,
   onSuccess,
   onVendorCreated,
 }: PaymentFormSheetProps) {
@@ -140,35 +138,6 @@ export function PaymentFormSheet({
           ? editPayment.invoice_file_path.split('/').pop() || 'Attached Invoice'
           : null
       );
-    } else if (incomingBill) {
-      setSheetDate(getTodayString());
-      setDueDate(getThreeDaysLaterString());
-
-      // If incoming bill has vendor_id, use it; otherwise fallback to first vendor
-      let selectedVendor = incomingBill.vendor_id || '';
-      if (!selectedVendor && incomingBill.vendor_name_fallback) {
-        const found = vendorsList.find(
-          (v) => v.name.toLowerCase() === incomingBill.vendor_name_fallback?.toLowerCase()
-        );
-        if (found) selectedVendor = found.id;
-      }
-      if (!selectedVendor && vendorsList.length > 0) {
-        selectedVendor = vendorsList[0].id;
-      }
-
-      setVendorId(selectedVendor);
-      setInvoiceRef(incomingBill.invoice_ref || '');
-      setPurpose('Against Bill');
-      setAmount(
-        incomingBill.estimated_amount ? String(incomingBill.estimated_amount) : ''
-      );
-      setTds('0');
-      setSourceBankId(banks[0] ? banks[0].id : '');
-      setRemarks(incomingBill.notes || '');
-      setInvoiceFilePath(incomingBill.file_path);
-      setUploadedFileName(
-        incomingBill.file_path.split('/').pop() || 'Attached Supplier Invoice'
-      );
     } else {
       setSheetDate(getTodayString());
       setDueDate(getThreeDaysLaterString());
@@ -182,7 +151,7 @@ export function PaymentFormSheet({
       setInvoiceFilePath(null);
       setUploadedFileName(null);
     }
-  }, [open, editPayment, incomingBill, vendorsList, banks]);
+  }, [open, editPayment, vendorsList, banks]);
 
   // Live duplicate invoice detection with debounce
   React.useEffect(() => {
@@ -340,7 +309,6 @@ export function PaymentFormSheet({
         source_bank_id: sourceBankId,
         remarks: remarks.trim() || null,
         invoice_file_path: invoiceFilePath,
-        incoming_bill_id: incomingBill?.id || editPayment?.incoming_bill_id || null,
       };
 
       let result;
@@ -374,11 +342,7 @@ export function PaymentFormSheet({
     }
   };
 
-  const sheetTitle = editPayment
-    ? 'Edit Draft Entry'
-    : incomingBill
-      ? 'Convert Incoming Bill'
-      : 'New Payment Entry';
+  const sheetTitle = editPayment ? 'Edit Draft Entry' : 'New Payment Entry';
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>

@@ -58,12 +58,7 @@ export async function login(formData: FormData): Promise<ActionResult<{ redirect
   }
 
   const role = profile.role;
-  const redirectUrl =
-    role === 'OWNER'
-      ? '/approvals'
-      : role === 'ACCOUNTANT'
-        ? '/payments'
-        : '/bills';
+  const redirectUrl = role === 'OWNER' ? '/approvals' : '/payments';
 
   revalidatePath('/', 'layout');
   return { success: true, data: { redirectUrl } };
@@ -77,7 +72,7 @@ export async function logout(): Promise<void> {
 }
 
 /**
- * Owner-only action to create new team accounts (STAFF or ACCOUNTANT)
+ * Owner-only action to create new team accounts (ACCOUNTANT or OWNER)
  */
 export async function createUser(input: CreateUserInput): Promise<ActionResult<Profile>> {
   const supabase = await createClient();

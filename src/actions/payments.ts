@@ -218,7 +218,6 @@ export async function createPayment(
     source_bank_id,
     remarks,
     invoice_file_path,
-    incoming_bill_id,
   } = parsed.data;
 
   // Safe rounding to 2 decimal places
@@ -240,7 +239,6 @@ export async function createPayment(
       source_bank_id,
       invoice_file_path: invoice_file_path || null,
       remarks: remarks?.trim() || null,
-      incoming_bill_id: incoming_bill_id || null,
       status: initialStatus,
       created_by: user.id,
       submitted_at: initialStatus === 'PENDING_APPROVAL' ? nowIso : null,
@@ -255,15 +253,6 @@ export async function createPayment(
       success: false,
       error: insertError?.message || 'Failed to create payment entry.',
     };
-  }
-
-  // If this entry was created from an incoming bill, mark the bill as CONVERTED
-  if (incoming_bill_id) {
-    await supabase
-      .from('incoming_bills')
-      .update({ status: 'CONVERTED' })
-      .eq('id', incoming_bill_id);
-    revalidatePath('/bills');
   }
 
   revalidatePath('/payments');
@@ -325,7 +314,6 @@ export async function updateDraftPayment(
     source_bank_id,
     remarks,
     invoice_file_path,
-    incoming_bill_id,
   } = parsed.data;
 
   // Verify payment exists and is in DRAFT status
@@ -360,7 +348,6 @@ export async function updateDraftPayment(
     source_bank_id,
     invoice_file_path: invoice_file_path || null,
     remarks: remarks?.trim() || null,
-    incoming_bill_id: incoming_bill_id || null,
     updated_at: new Date().toISOString(),
   };
 
@@ -512,7 +499,7 @@ export async function deleteDraftPayment(
 
   const { data: existing, error: fetchError } = await supabase
     .from('payment_items')
-    .select('id, status, incoming_bill_id')
+    .select('id, status')
     .eq('id', paymentId)
     .single();
 
@@ -523,7 +510,7 @@ export async function deleteDraftPayment(
   if (existing.status !== 'DRAFT') {
     return {
       success: false,
-      error: `Cannot delete record in '${existing.status}' status. Only DRAFT items can be deleted.`,
+      error: `Cannot edit or delete record in '${existing.status}' status. Only DRAFT items can be deleted.`,
     };
   }
 
@@ -537,15 +524,6 @@ export async function deleteDraftPayment(
       success: false,
       error: deleteError.message || 'Failed to delete draft payment.',
     };
-  }
-
-  // If this draft was linked to an incoming bill, revert bill back to NEW
-  if (existing.incoming_bill_id) {
-    await supabase
-      .from('incoming_bills')
-      .update({ status: 'NEW' })
-      .eq('id', existing.incoming_bill_id);
-    revalidatePath('/bills');
   }
 
   revalidatePath('/payments');

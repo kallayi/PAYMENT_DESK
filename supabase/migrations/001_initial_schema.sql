@@ -1,9 +1,10 @@
 -- ==========================================
 -- 001_initial_schema.sql: INDFURN Payment Approval System
+-- Simplified 2-Role Architecture: ACCOUNTANT and OWNER
 -- ==========================================
 
 -- 1. ENUMS
-CREATE TYPE public.user_role AS ENUM ('STAFF', 'ACCOUNTANT', 'OWNER');
+CREATE TYPE public.user_role AS ENUM ('ACCOUNTANT', 'OWNER');
 
 CREATE TYPE public.payment_status AS ENUM (
   'DRAFT',
@@ -15,15 +16,13 @@ CREATE TYPE public.payment_status AS ENUM (
   'CANCELLED'
 );
 
-CREATE TYPE public.incoming_bill_status AS ENUM ('NEW', 'CONVERTED', 'DISMISSED');
-
 -- ==========================================
 -- 2. PROFILES (Linked to auth.users)
 -- ==========================================
 CREATE TABLE public.profiles (
   id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   full_name TEXT NOT NULL,
-  role public.user_role NOT NULL DEFAULT 'STAFF',
+  role public.user_role NOT NULL DEFAULT 'ACCOUNTANT',
   is_active BOOLEAN NOT NULL DEFAULT TRUE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -61,28 +60,11 @@ VALUES
 ON CONFLICT (short_name) DO NOTHING;
 
 -- ==========================================
--- 4. INCOMING BILLS (Uploaded by Stock Staff)
--- ==========================================
-CREATE TABLE public.incoming_bills (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  vendor_id UUID REFERENCES public.vendors(id),
-  vendor_name_fallback TEXT,             -- Used if vendor is not yet in master table
-  invoice_ref TEXT NOT NULL,
-  estimated_amount NUMERIC(12,2) CHECK (estimated_amount IS NULL OR estimated_amount > 0),
-  file_path TEXT NOT NULL,               -- Private storage path in 'supplier-invoices'
-  notes TEXT,
-  status public.incoming_bill_status NOT NULL DEFAULT 'NEW',
-  uploaded_by UUID NOT NULL REFERENCES public.profiles(id),
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
--- ==========================================
--- 5. PAYMENT ITEMS (Core Approval & UTR Ledger)
+-- 4. PAYMENT ITEMS (Core Approval & UTR Ledger)
 -- ==========================================
 CREATE TABLE public.payment_items (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   sheet_date DATE NOT NULL DEFAULT CURRENT_DATE,
-  incoming_bill_id UUID REFERENCES public.incoming_bills(id),
 
   vendor_id UUID NOT NULL REFERENCES public.vendors(id),
   invoice_ref TEXT NOT NULL,             -- e.g., '0282', 'On Account', 'Sep-Oct', 'NA'
@@ -135,13 +117,13 @@ CREATE INDEX idx_payment_items_status ON public.payment_items (status);
 CREATE INDEX idx_payment_items_vendor_invoice ON public.payment_items (vendor_id, LOWER(TRIM(invoice_ref)));
 
 -- ==========================================
--- 6. IMMUTABLE AUDIT LOGS
+-- 5. IMMUTABLE AUDIT LOGS
 -- ==========================================
 CREATE TABLE public.audit_logs (
   id BIGSERIAL PRIMARY KEY,
   table_name TEXT NOT NULL,
   record_id UUID NOT NULL,
-  action TEXT NOT NULL,                  -- 'CREATED', 'SUBMITTED', 'APPROVED', 'REJECTED', 'HOLD', 'BANK_CHANGED', 'PAID', 'UPDATED'
+  action TEXT NOT NULL,
   old_data JSONB,
   new_data JSONB,
   changed_by UUID REFERENCES public.profiles(id),
@@ -151,131 +133,149 @@ CREATE TABLE public.audit_logs (
 CREATE INDEX idx_audit_logs_record ON public.audit_logs (record_id, created_at DESC);
 
 -- ==========================================
--- 7. DATABASE-LEVEL SECURITY TRIGGERS
+-- 6. DATABASE HELPER FUNCTIONS
 -- ==========================================
 
--- Helper function to read current user's role safely
+-- Helper: Get user role safely inside RLS policies
 CREATE OR REPLACE FUNCTION public.get_my_role()
-RETURNS public.user_role
-LANGUAGE sql
-STABLE
-SECURITY DEFINER
-SET search_path = public
-AS $$
-  SELECT role FROM public.profiles WHERE id = auth.uid() AND is_active = TRUE;
-$$;
+RETURNS public.user_role AS $$
+  SELECT role FROM public.profiles WHERE id = auth.uid() LIMIT 1;
+$$ LANGUAGE sql STABLE SECURITY DEFINER;
 
--- TRIGGER 1: Enforce Workflow, Role Authority & Post-Approval Locking
+-- ==========================================
+-- 7. DATABASE TRIGGERS
+-- ==========================================
+
+-- 7.1 Auto-profile creation on auth.users sign-up
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS TRIGGER AS $$
+BEGIN
+  INSERT INTO public.profiles (id, full_name, role)
+  VALUES (
+    NEW.id,
+    COALESCE(NEW.raw_user_meta_data->>'full_name', 'INDFURN User'),
+    COALESCE((NEW.raw_user_meta_data->>'role')::public.user_role, 'ACCOUNTANT')
+  );
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+CREATE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
+
+-- 7.2 Updated_at timestamp sync
+CREATE OR REPLACE FUNCTION public.handle_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_profiles_updated_at ON public.profiles;
+CREATE TRIGGER trg_profiles_updated_at
+  BEFORE UPDATE ON public.profiles
+  FOR EACH ROW EXECUTE FUNCTION public.handle_updated_at();
+
+DROP TRIGGER IF EXISTS trg_payment_items_updated_at ON public.payment_items;
+CREATE TRIGGER trg_payment_items_updated_at
+  BEFORE UPDATE ON public.payment_items
+  FOR EACH ROW EXECUTE FUNCTION public.handle_updated_at();
+
+-- 7.3 Payment state transition validation & post-approval integrity
 CREATE OR REPLACE FUNCTION public.enforce_payment_integrity()
-RETURNS TRIGGER
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public
-AS $$
+RETURNS TRIGGER AS $$
 DECLARE
   v_role public.user_role;
 BEGIN
   v_role := public.get_my_role();
 
-  -- Block hard deletes on anything except DRAFT
+  -- Prevent deletion of any item unless it is still in DRAFT
   IF TG_OP = 'DELETE' THEN
     IF OLD.status <> 'DRAFT' THEN
-      RAISE EXCEPTION 'Submitted payment records cannot be deleted. Use CANCELLED status instead.';
+      RAISE EXCEPTION 'Only DRAFT payments can be deleted. Use CANCELLED for logged items.';
     END IF;
     RETURN OLD;
   END IF;
 
+  -- Timestamp tracking for state transitions
   IF TG_OP = 'UPDATE' THEN
-    NEW.updated_at := NOW();
-
-    -- 1. Only OWNER can transition to APPROVED, ON_HOLD, or REJECTED
-    IF NEW.status IS DISTINCT FROM OLD.status AND NEW.status IN ('APPROVED', 'ON_HOLD', 'REJECTED') THEN
-      IF v_role <> 'OWNER' THEN
-        RAISE EXCEPTION 'Only OWNER can approve, hold, or reject payment items.';
-      END IF;
+    -- Submitted to owner
+    IF OLD.status = 'DRAFT' AND NEW.status = 'PENDING_APPROVAL' THEN
+      NEW.submitted_at := NOW();
     END IF;
 
-    -- 2. Stamp approval metadata automatically
-    IF NEW.status = 'APPROVED' AND OLD.status <> 'APPROVED' THEN
+    -- Owner approval
+    IF OLD.status IN ('PENDING_APPROVAL', 'ON_HOLD') AND NEW.status = 'APPROVED' THEN
+      IF v_role <> 'OWNER' THEN
+        RAISE EXCEPTION 'Only an OWNER can approve payment items.';
+      END IF;
       NEW.approved_by := auth.uid();
       NEW.approved_at := NOW();
     END IF;
 
-    -- 3. Stamp paid metadata automatically
-    IF NEW.status = 'PAID' AND OLD.status <> 'PAID' THEN
-      IF OLD.status <> 'APPROVED' THEN
-        RAISE EXCEPTION 'Only APPROVED items can be marked as PAID.';
-      END IF;
+    -- Accountant marked as paid with UTR
+    IF OLD.status = 'APPROVED' AND NEW.status = 'PAID' THEN
       NEW.paid_by := auth.uid();
       NEW.paid_at := NOW();
     END IF;
 
-    -- 4. POST-APPROVAL IMMUTABILITY LOCK
-    -- Once APPROVED, lock core financial fields forever
-    IF OLD.status = 'APPROVED' THEN
-      IF NEW.vendor_id IS DISTINCT FROM OLD.vendor_id
-         OR NEW.invoice_ref IS DISTINCT FROM OLD.invoice_ref
-         OR NEW.amount IS DISTINCT FROM OLD.amount
-         OR NEW.tds IS DISTINCT FROM OLD.tds
-         OR NEW.purpose IS DISTINCT FROM OLD.purpose
-         OR NEW.sheet_date IS DISTINCT FROM OLD.sheet_date
-         OR NEW.source_bank_id IS DISTINCT FROM OLD.source_bank_id THEN
-        RAISE EXCEPTION 'Core financial fields are locked after Owner approval.';
+    -- Disallow editing financial parameters once approved or paid
+    IF OLD.status IN ('APPROVED', 'PAID') THEN
+      IF NEW.amount <> OLD.amount
+        OR NEW.vendor_id <> OLD.vendor_id
+        OR NEW.invoice_ref <> OLD.invoice_ref
+        OR NEW.tds <> OLD.tds
+        OR NEW.purpose <> OLD.purpose
+        OR NEW.sheet_date <> OLD.sheet_date
+        OR NEW.source_bank_id <> OLD.source_bank_id
+      THEN
+        RAISE EXCEPTION 'Cannot modify financial parameters (amount, vendor, bank, invoice) once a payment is APPROVED or PAID.';
       END IF;
-    END IF;
-
-    -- 5. TERMINAL STATE LOCK (PAID / REJECTED / CANCELLED cannot be mutated)
-    IF OLD.status IN ('PAID', 'REJECTED', 'CANCELLED') THEN
-      RAISE EXCEPTION 'Finalized payment records (% status) are completely immutable.', OLD.status;
     END IF;
   END IF;
 
   RETURN NEW;
 END;
-$$;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
+DROP TRIGGER IF EXISTS trg_enforce_payment_integrity ON public.payment_items;
 CREATE TRIGGER trg_enforce_payment_integrity
   BEFORE UPDATE OR DELETE ON public.payment_items
-  FOR EACH ROW
-  EXECUTE FUNCTION public.enforce_payment_integrity();
+  FOR EACH ROW EXECUTE FUNCTION public.enforce_payment_integrity();
 
--- TRIGGER 2: Automatic Audit Logging
+-- 7.4 Audit logging trigger for payment_items
 CREATE OR REPLACE FUNCTION public.log_payment_audit()
-RETURNS TRIGGER
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public
-AS $$
-DECLARE
-  v_action TEXT;
+RETURNS TRIGGER AS $$
 BEGIN
   IF TG_OP = 'INSERT' THEN
-    v_action := 'CREATED';
-    INSERT INTO public.audit_logs (table_name, record_id, action, old_data, new_data, changed_by)
-    VALUES ('payment_items', NEW.id, v_action, NULL, to_jsonb(NEW), auth.uid());
+    INSERT INTO public.audit_logs (table_name, record_id, action, new_data, changed_by)
+    VALUES ('payment_items', NEW.id, 'INSERT', to_jsonb(NEW), auth.uid());
     RETURN NEW;
-  END IF;
-
-  IF TG_OP = 'UPDATE' THEN
-    IF NEW.status IS DISTINCT FROM OLD.status THEN
-      v_action := 'STATUS_' || NEW.status::TEXT;
-    ELSIF NEW.source_bank_id IS DISTINCT FROM OLD.source_bank_id THEN
-      v_action := 'BANK_CHANGED';
-    ELSE
-      v_action := 'UPDATED';
+  ELSIF TG_OP = 'UPDATE' THEN
+    IF OLD.status <> NEW.status
+      OR OLD.source_bank_id <> NEW.source_bank_id
+      OR OLD.amount <> NEW.amount
+      OR OLD.utr_number IS DISTINCT FROM NEW.utr_number
+    THEN
+      INSERT INTO public.audit_logs (table_name, record_id, action, old_data, new_data, changed_by)
+      VALUES ('payment_items', NEW.id, 'STATUS_CHANGE', to_jsonb(OLD), to_jsonb(NEW), auth.uid());
     END IF;
-
-    INSERT INTO public.audit_logs (table_name, record_id, action, old_data, new_data, changed_by)
-    VALUES ('payment_items', NEW.id, v_action, to_jsonb(OLD), to_jsonb(NEW), auth.uid());
     RETURN NEW;
+  ELSIF TG_OP = 'DELETE' THEN
+    INSERT INTO public.audit_logs (table_name, record_id, action, old_data, changed_by)
+    VALUES ('payment_items', OLD.id, 'DELETE', to_jsonb(OLD), auth.uid());
+    RETURN OLD;
   END IF;
-
   RETURN NULL;
 END;
-$$;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
-CREATE TRIGGER trg_log_payment_audit
-  AFTER INSERT OR UPDATE ON public.payment_items
+DROP TRIGGER IF EXISTS trg_audit_payment_items ON public.payment_items;
+CREATE TRIGGER trg_audit_payment_items
+  AFTER INSERT OR UPDATE OR DELETE ON public.payment_items
   FOR EACH ROW
   EXECUTE FUNCTION public.log_payment_audit();
 
@@ -285,11 +285,10 @@ CREATE TRIGGER trg_log_payment_audit
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.vendors ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.company_banks ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.incoming_bills ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.payment_items ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.audit_logs ENABLE ROW LEVEL SECURITY;
 
--- PROFILES: Users see own profile; OWNER & ACCOUNTANT can view all names (for sign-offs)
+-- PROFILES: Users see own profile; OWNER & ACCOUNTANT can view all profiles
 CREATE POLICY "profiles_select" ON public.profiles
   FOR SELECT USING (id = auth.uid() OR public.get_my_role() IN ('OWNER', 'ACCOUNTANT'));
 
@@ -301,7 +300,7 @@ CREATE POLICY "vendors_select" ON public.vendors
   FOR SELECT USING (public.get_my_role() IS NOT NULL);
 
 CREATE POLICY "vendors_manage" ON public.vendors
-  FOR INSERT WITH CHECK (public.get_my_role() IN ('ACCOUNTANT', 'OWNER', 'STAFF'));
+  FOR INSERT WITH CHECK (public.get_my_role() IN ('ACCOUNTANT', 'OWNER'));
 
 CREATE POLICY "vendors_update" ON public.vendors
   FOR UPDATE USING (public.get_my_role() IN ('ACCOUNTANT', 'OWNER'));
@@ -313,23 +312,7 @@ CREATE POLICY "banks_select" ON public.company_banks
 CREATE POLICY "banks_owner_manage" ON public.company_banks
   FOR ALL USING (public.get_my_role() = 'OWNER');
 
--- INCOMING BILLS: STAFF can insert & view own uploads; ACCOUNTANT & OWNER see all
-CREATE POLICY "incoming_bills_select" ON public.incoming_bills
-  FOR SELECT USING (
-    public.get_my_role() IN ('ACCOUNTANT', 'OWNER')
-    OR uploaded_by = auth.uid()
-  );
-
-CREATE POLICY "incoming_bills_insert" ON public.incoming_bills
-  FOR INSERT WITH CHECK (
-    public.get_my_role() IN ('STAFF', 'ACCOUNTANT', 'OWNER')
-    AND uploaded_by = auth.uid()
-  );
-
-CREATE POLICY "incoming_bills_update" ON public.incoming_bills
-  FOR UPDATE USING (public.get_my_role() IN ('ACCOUNTANT', 'OWNER'));
-
--- PAYMENT ITEMS: Strictly hidden from STAFF! Only ACCOUNTANT & OWNER have access.
+-- PAYMENT ITEMS: Accessible only to ACCOUNTANT & OWNER
 CREATE POLICY "payment_items_select" ON public.payment_items
   FOR SELECT USING (public.get_my_role() IN ('ACCOUNTANT', 'OWNER'));
 

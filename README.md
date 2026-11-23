@@ -8,10 +8,10 @@ Built with Next.js 15 (App Router, Server Actions), TypeScript, Tailwind CSS, sh
 
 ## 🚀 Key Highlights & Architecture
 
-- **Role-Based Access Control (RBAC):** Three distinct operating tiers (`OWNER`, `ACCOUNTANT`, `STAFF`) with strict SSR route guards and PostgreSQL Row-Level Security (RLS).
+- **Streamlined 2-Role Access Control (RBAC):** Built strictly for `OWNER` (Admin) and `ACCOUNTANT` with SSR route guards and PostgreSQL Row-Level Security (RLS).
 - **Post-Approval Immutability:** Database triggers lock financial fields (`amount`, `vendor_id`, `invoice_ref`, `tds`, `source_bank_id`) immediately upon Owner approval.
 - **Duplicate Prevention:**
-  - Real-time client-side warning banner during draft payment creation.
+  - Real-time client-side warning banner during payment creation.
   - Case-insensitive database unique index on trimmed UTR references (`idx_payment_items_unique_utr`).
 - **Private Storage & 5-Minute Signed URLs:** Supplier bills and bank receipts are stored in private Supabase Storage buckets. File viewing uses short-lived, role-verified signed URLs—no file is ever made publicly accessible.
 - **Physical A4 Print Replica:** Pixel-perfect A4 printable replica of INDFURN's physical *Payment Approval Form* with sign-off blocks (`Prepared By`, `Checked By`, `Approved By`).
@@ -24,32 +24,24 @@ Built with Next.js 15 (App Router, Server Actions), TypeScript, Tailwind CSS, sh
 
 ```mermaid
 flowchart LR
-    A[Staff / Warehouse] -->|Uploads Bill| B(Incoming Bills Queue)
-    B -->|Converts to Payment Item| C[Accountant]
-    C -->|Drafts & Submits| D[Pending Owner Approval]
-    D -->|Approves / Switches Bank| E[Owner]
-    E -->|Approved / Ready to Pay| F[Accountant]
-    F -->|Enters UTR & Uploads Receipt| G[(Paid & Reconciled Archive)]
+    A[Accountant] -->|Creates Payment Entry| B(Draft Ledger)
+    B -->|Submits for Approval| C[Pending Owner Approval]
+    C -->|Approves / Switches Bank| D[Owner]
+    D -->|Approved / Ready to Pay| E[Accountant]
+    E -->|Enters UTR & Uploads Receipt| F[(Paid & Reconciled Archive)]
 ```
 
-### 1. Stock / Warehouse Staff (`STAFF`)
-- **Primary Route:** `/bills`
-- **Mobile-First Upload:** Snap a photo or attach an invoice PDF (up to 5MB) on mobile, specify vendor, invoice/PI reference number, optional amount, and receiving notes.
-- **Strict Isolation:** Stock staff are completely partitioned from company bank accounts, payment amounts, owner approval screens, and accountant ledgers.
-- **Tracking:** Staff can view the status of their own uploads (*Waiting for Accountant* or *Added to Payment Queue*).
-
-### 2. Accounts Team (`ACCOUNTANT`)
+### 1. Accounts Team (`ACCOUNTANT`)
 - **Primary Routes:** `/payments`, `/vendors`, `/history`
-- **Payments Workspace:** Real-time ledger organized into 6 status tabs:
-  - `Incoming Bills`: Queue of staff-uploaded invoices ready to convert into payment vouchers.
+- **Payments Workspace:** Real-time ledger organized into 5 status tabs:
   - `Draft`: Working ledger with live TDS calculations and duplicate invoice warning checks.
   - `Pending`: Submitted to Owner for payment authorization.
-  - `Ready to Pay`: Approved by Owner; awaiting bank execution.
+  - `Ready to Pay`: Approved by Owner; awaiting bank disbursement.
   - `Paid`: Completed payments with verified UTR numbers and attached receipts.
   - `Rejected`: Payments rejected by Owner with feedback reasons.
 - **UTR Reconciliation:** Uploads bank payment advice (Axis Bank or South Indian Bank), enters the UTR number, and archives the transaction.
 
-### 3. Business Owner (`OWNER`)
+### 2. Business Owner (`OWNER`)
 - **Primary Routes:** `/approvals`, `/history`, `/settings`, `/vendors`
 - **Daily Approvals Strip:** Compact top summary displaying total pending amount and automatic bank split (Axis vs. SIB).
 - **1-Tap Authorization:** Approves payments with confirmation dialogs, holds payments for inquiry, or rejects payments with a mandatory reason.
@@ -74,7 +66,7 @@ flowchart LR
 
 ## 🔒 Security Architecture
 
-1. **Row-Level Security (RLS):** Every PostgreSQL table (`profiles`, `vendors`, `company_banks`, `incoming_bills`, `payment_items`, `audit_logs`) has granular RLS policies.
+1. **Row-Level Security (RLS):** Every PostgreSQL table (`profiles`, `vendors`, `company_banks`, `payment_items`, `audit_logs`) has granular RLS policies.
 2. **Server-Side Verification:** Server actions re-verify user role and active status (`is_active === true`) directly from PostgreSQL, independent of JWT claims.
 3. **Database Integrity Triggers:**
    - `trg_enforce_payment_integrity`: Restricts `DELETE` operations strictly to `DRAFT` status; prevents changes to financial parameters post-approval.
@@ -119,7 +111,7 @@ In your Supabase project's **SQL Editor**, run the entire schema migration scrip
 supabase/migrations/001_initial_schema.sql
 ```
 This script creates:
-- Tables: `profiles`, `company_banks`, `vendors`, `incoming_bills`, `payment_items`, `audit_logs`
+- Tables: `profiles`, `company_banks`, `vendors`, `payment_items`, `audit_logs`
 - Indexes: Performance indexes on dates, vendors, and the unique UTR index
 - Triggers: Integrity constraints and audit trails
 - Row-Level Security: Comprehensive RLS policies for each role

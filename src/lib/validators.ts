@@ -1,5 +1,6 @@
 // ==========================================
 // Zod Validation Schemas for INDFURN PayFlow
+// Simplified 2-Role Architecture: ACCOUNTANT and OWNER
 // ==========================================
 
 import { z } from 'zod';
@@ -23,7 +24,6 @@ export const createPaymentSchema = z
     source_bank_id: z.string().uuid('Please select a valid bank'),
     remarks: z.string().trim().optional().nullable(),
     invoice_file_path: z.string().trim().optional().nullable(),
-    incoming_bill_id: z.string().uuid().optional().nullable(),
   })
   .refine((data) => data.tds <= data.amount, {
     message: 'TDS cannot exceed Gross Amount',
@@ -67,28 +67,6 @@ export const switchBankSchema = z.object({
 
 export type SwitchBankInput = z.infer<typeof switchBankSchema>;
 
-export const incomingBillSchema = z
-  .object({
-    vendor_id: z.string().uuid().optional().nullable(),
-    vendor_name_fallback: z.string().trim().optional().nullable(),
-    invoice_ref: z.string().trim().min(1, 'Invoice / PI Ref is required'),
-    estimated_amount: z.coerce.number().positive().optional().nullable(),
-    file_path: z.string().trim().min(1, 'Invoice file is required'),
-    notes: z.string().trim().optional().nullable(),
-  })
-  .refine((data) => data.vendor_id || (data.vendor_name_fallback && data.vendor_name_fallback.length > 0), {
-    message: 'Vendor selection or vendor name is required',
-    path: ['vendor_id'],
-  });
-
-export type IncomingBillInput = z.infer<typeof incomingBillSchema>;
-
-export const dismissIncomingBillSchema = z.object({
-  bill_id: z.string().uuid('Valid bill ID is required'),
-});
-
-export type DismissIncomingBillInput = z.infer<typeof dismissIncomingBillSchema>;
-
 export const vendorSchema = z.object({
   name: z.string().trim().min(1, 'Vendor name is required'),
   gstin: z.string().trim().toUpperCase().optional().nullable(),
@@ -111,8 +89,8 @@ export const createUserSchema = z.object({
   full_name: z.string().trim().min(1, 'Full name is required'),
   email: z.string().trim().email('Valid email address is required'),
   password: z.string().min(6, 'Password must be at least 6 characters'),
-  role: z.enum(['STAFF', 'ACCOUNTANT'], {
-    errorMap: () => ({ message: 'Role must be STAFF or ACCOUNTANT' }),
+  role: z.enum(['ACCOUNTANT', 'OWNER'], {
+    errorMap: () => ({ message: 'Role must be ACCOUNTANT or OWNER' }),
   }),
 });
 

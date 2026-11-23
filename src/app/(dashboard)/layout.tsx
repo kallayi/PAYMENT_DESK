@@ -38,9 +38,9 @@ export default async function DashboardLayout({
     pendingCount = count || 0;
   } else if (profile.role === 'ACCOUNTANT') {
     const { count } = await supabase
-      .from('incoming_bills')
+      .from('payment_items')
       .select('*', { count: 'exact', head: true })
-      .eq('status', 'NEW');
+      .eq('status', 'APPROVED');
     pendingCount = count || 0;
   }
 
