@@ -97,12 +97,17 @@ export function PrintSheetView({
       >
         {/* Header Block */}
         <div className="mb-6">
-          <h1 className="text-center text-xl font-bold tracking-tight text-slate-900 uppercase">
-            Payment Approval Form
-          </h1>
-          <div className="mt-4 flex items-center justify-between text-xs font-bold text-slate-900 border-b-2 border-slate-900 pb-2">
-            <span className="tracking-widest">INDFURN</span>
-            <span className="tabular-nums">
+          <div className="flex items-center justify-between pb-3 border-b-2 border-slate-900">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/logo.png"
+              alt="INDFURN"
+              className="h-9 max-h-[36px] w-auto object-contain"
+            />
+            <h1 className="text-center text-base sm:text-lg font-bold tracking-tight text-slate-900 uppercase">
+              Payment Approval Form
+            </h1>
+            <span className="text-xs font-bold text-slate-900 tabular-nums">
               Date: {selectedDate === 'ALL' ? 'All Dates' : formatDDMMYYYY(selectedDate)}
             </span>
           </div>

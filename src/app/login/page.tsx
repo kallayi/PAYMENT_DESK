@@ -49,21 +49,13 @@ function LoginForm() {
       <div className="bg-white rounded-xl border border-slate-200 p-6 sm:p-7 shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
         {/* Brand Mark */}
         <div className="flex flex-col items-center text-center mb-6">
-          <div className="w-10 h-10 rounded-lg bg-slate-900 text-white flex items-center justify-center mb-3 shadow-sm">
-            <svg
-              className="w-5 h-5"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.1"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M4 7h16M4 12h16M4 17h10" />
-            </svg>
-          </div>
-          <h1 className="text-lg font-bold tracking-tight text-slate-900">INDFURN</h1>
-          <p className="text-xs text-slate-500 mt-0.5">Payment Approval Portal</p>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/logo.png"
+            alt="INDFURN Logo"
+            className="h-12 max-h-[52px] w-auto object-contain mb-2"
+          />
+          <p className="text-xs text-slate-500 font-medium">Payment Approval Portal</p>
         </div>
 
         {/* Inline Error Banner */}

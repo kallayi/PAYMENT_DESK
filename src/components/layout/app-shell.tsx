@@ -195,21 +195,13 @@ export function AppShell({ profile, pendingCount = 0, children }: AppShellProps)
       {/* DESKTOP SLIM LEFT SIDEBAR (w-56, lg+) */}
       <aside className="hidden lg:flex lg:flex-col lg:w-56 lg:fixed lg:inset-y-0 bg-white border-r border-slate-200 z-30">
         {/* Brand Wordmark */}
-        <div className="h-14 px-5 flex items-center gap-2.5 border-b border-slate-200/80">
-          <div className="w-7 h-7 rounded-md bg-slate-900 text-white flex items-center justify-center shrink-0 shadow-sm">
-            <svg
-              className="w-3.5 h-3.5"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.3"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M4 7h16M4 12h16M4 17h10" />
-            </svg>
-          </div>
-          <span className="font-bold text-sm tracking-tight text-slate-900">INDFURN</span>
+        <div className="h-14 px-5 flex items-center border-b border-slate-200/80">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/logo.png"
+            alt="INDFURN Logo"
+            className="h-8 max-h-[34px] w-auto object-contain"
+          />
         </div>
 
         {/* Role Navigation Links with Suspense Boundary */}
@@ -243,20 +235,14 @@ export function AppShell({ profile, pendingCount = 0, children }: AppShellProps)
       <div className="flex-1 lg:pl-56 flex flex-col min-w-0 pb-20 lg:pb-8">
         {/* MOBILE MINIMAL TOP BAR (h-14, < lg) */}
         <header className="lg:hidden sticky top-0 z-20 h-14 bg-white/95 backdrop-blur border-b border-slate-200 px-4 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="w-6 h-6 rounded-md bg-slate-900 text-white flex items-center justify-center shadow-sm">
-              <svg
-                className="w-3.5 h-3.5"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.3"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M4 7h16M4 12h16M4 17h10" />
-              </svg>
-            </div>
+          <div className="flex items-center gap-2.5">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/logo.png"
+              alt="INDFURN"
+              className="h-7 w-auto object-contain"
+            />
+            <span className="text-slate-200">|</span>
             <span className="text-sm font-semibold text-slate-900">{pageTitle}</span>
           </div>
           <div className="flex items-center gap-2">

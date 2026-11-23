@@ -7,6 +7,11 @@ export const metadata: Metadata = {
   title: 'INDFURN — Payment Approval & UTR Tracking System',
   description: 'Digital payment authorization, bank reconciliation, and UTR tracking for INDFURN.',
   manifest: '/manifest.webmanifest',
+  icons: {
+    icon: '/logo.png',
+    shortcut: '/logo.png',
+    apple: '/logo.png',
+  },
   appleWebApp: {
     capable: true,
     statusBarStyle: 'default',
