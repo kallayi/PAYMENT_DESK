@@ -66,22 +66,24 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(redirectUrl);
   }
 
-  // 2. Authenticated users:
-  // Role is read from user_metadata without expensive database queries on every navigation.
-  // Full database role & is_active verification is cached in (dashboard)/layout.tsx.
-  const role: UserRole = (user.user_metadata?.role as UserRole) || 'ACCOUNTANT';
-  const defaultRoute = role === 'OWNER' ? '/approvals' : '/payments';
-
-  // Redirect authenticated user visiting / or /login to default role route
-  if (pathname === '/' || pathname === '/login') {
+  // 2. Authenticated user visiting /login -> redirect to / so src/app/page.tsx handles role landing
+  if (pathname === '/login') {
     const redirectUrl = request.nextUrl.clone();
-    redirectUrl.pathname = defaultRoute;
+    redirectUrl.pathname = '/';
     redirectUrl.searchParams.delete('error');
     return NextResponse.redirect(redirectUrl);
   }
 
-  // Strict role guards
+  // Allow root / to reach src/app/page.tsx for cached role-based redirection
+  if (pathname === '/') {
+    return response;
+  }
+
+  // 3. Strict Role Guards (based on user_metadata.role for zero-latency middleware checks)
+  const role: UserRole = (user.user_metadata?.role as UserRole) || 'ACCOUNTANT';
+
   if (role === 'ACCOUNTANT') {
+    // ACCOUNTANT cannot visit /approvals or /settings
     const accountantBlocked =
       pathname === '/approvals' ||
       pathname.startsWith('/approvals/') ||
@@ -91,6 +93,19 @@ export async function middleware(request: NextRequest) {
     if (accountantBlocked) {
       const redirectUrl = request.nextUrl.clone();
       redirectUrl.pathname = '/payments';
+      return NextResponse.redirect(redirectUrl);
+    }
+  }
+
+  if (role === 'OWNER') {
+    // OWNER belongs on /approvals, not the Accountant's payment entry workspace
+    const ownerBlocked =
+      pathname === '/payments' ||
+      pathname.startsWith('/payments/');
+
+    if (ownerBlocked) {
+      const redirectUrl = request.nextUrl.clone();
+      redirectUrl.pathname = '/approvals';
       return NextResponse.redirect(redirectUrl);
     }
   }

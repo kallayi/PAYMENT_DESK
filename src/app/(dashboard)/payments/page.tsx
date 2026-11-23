@@ -31,8 +31,12 @@ export default async function PaymentsPage() {
     redirect('/login?error=disabled');
   }
 
-  // Strict role check: Only Accountant and Owner can access /payments
-  if (profile.role !== 'ACCOUNTANT' && profile.role !== 'OWNER') {
+  // Strict role check: Owner belongs on /approvals, not Accountant draft workspace
+  if (profile.role === 'OWNER') {
+    redirect('/approvals');
+  }
+
+  if (profile.role !== 'ACCOUNTANT') {
     redirect('/login');
   }
 
