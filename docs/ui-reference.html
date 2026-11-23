@@ -1,0 +1,3139 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full bg-[#F8FAFC] antialiased">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#1E293B" />
+  <title>INDFURN — Payment Approval & UTR Tracking System</title>
+
+  <!-- Inter Font from Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'system-ui', '-apple-system', 'BlinkMacSystemFont', 'sans-serif'],
+          },
+        },
+      },
+    };
+  </script>
+
+  <!-- Lucide Icons CDN -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <style>
+    /* Strict tabular numerals for financial alignment */
+    .tabular-nums {
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* Subtle scrollbars */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #CBD5E1;
+      border-radius: 9999px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #94A3B8;
+    }
+
+    /* Smooth lightweight animations */
+    @keyframes fadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+    @keyframes slideInRight {
+      from { transform: translateX(100%); }
+      to { transform: translateX(0); }
+    }
+    @keyframes modalIn {
+      from { opacity: 0; transform: scale(0.97) translateY(6px); }
+      to { opacity: 1; transform: scale(1) translateY(0); }
+    }
+
+    .anim-fade { animation: fadeIn 0.16s ease-out forwards; }
+    .anim-drawer { animation: slideInRight 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+    .anim-modal { animation: modalIn 0.18s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+
+    /* Safe area padding for mobile PWA bottom nav */
+    .pb-safe {
+      padding-bottom: env(safe-area-inset-bottom, 0px);
+    }
+
+    /* Dedicated A4 Print Stylesheet: hides all app chrome and prints ONLY the official INDFURN sheet */
+    @media print {
+      @page {
+        size: A4 landscape;
+        margin: 12mm;
+      }
+      body * {
+        visibility: hidden !important;
+      }
+      #printable-sheet,
+      #printable-sheet * {
+        visibility: visible !important;
+      }
+      #printable-sheet {
+        position: fixed !important;
+        inset: 0 !important;
+        width: 100% !important;
+        max-width: none !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        border: none !important;
+        box-shadow: none !important;
+        background: #ffffff !important;
+      }
+      .no-print {
+        display: none !important;
+      }
+    }
+  </style>
+</head>
+<body class="h-full bg-[#F8FAFC] text-[#0F172A] font-sans selection:bg-slate-200 selection:text-slate-900">
+
+  <!-- ==================== ROOT MOUNT ==================== -->
+  <div id="app-root" class="min-h-screen"></div>
+
+  <!-- ==================== PAYMENT DETAIL SLIDE-OVER DRAWER ==================== -->
+  <div id="detail-drawer" class="hidden fixed inset-0 z-50 bg-slate-900/35 backdrop-blur-[1px] anim-fade" onclick="app.closeDetailDrawer()">
+    <div id="detail-drawer-panel" class="absolute right-0 top-0 bottom-0 w-full max-w-lg bg-white border-l border-slate-200 shadow-2xl flex flex-col anim-drawer" onclick="event.stopPropagation()"></div>
+  </div>
+
+  <!-- ==================== ACCOUNTANT NEW / EDIT ENTRY SLIDE-OVER DRAWER ==================== -->
+  <div id="entry-drawer" class="hidden fixed inset-0 z-50 bg-slate-900/35 backdrop-blur-[1px] anim-fade" onclick="app.closeEntryDrawer()">
+    <div id="entry-drawer-panel" class="absolute right-0 top-0 bottom-0 w-full max-w-lg bg-white border-l border-slate-200 shadow-2xl flex flex-col anim-drawer" onclick="event.stopPropagation()"></div>
+  </div>
+
+  <!-- ==================== LIGHTWEIGHT MODAL HOST ==================== -->
+  <div id="modal-root" class="hidden fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-[1px] flex items-center justify-center p-4 anim-fade" onclick="app.closeModal()">
+    <div id="modal-panel" class="w-full max-w-md bg-white rounded-xl border border-slate-200 shadow-xl overflow-hidden anim-modal" onclick="event.stopPropagation()"></div>
+  </div>
+
+  <!-- ==================== PRINTABLE A4 PAYMENT APPROVAL FORM MODAL ==================== -->
+  <div id="print-modal" class="hidden fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-[1px] flex items-center justify-center p-2 sm:p-5 anim-fade" onclick="app.closePrintModal()">
+    <div class="w-full max-w-5xl max-h-[92vh] bg-white rounded-xl border border-slate-200 shadow-2xl flex flex-col overflow-hidden anim-modal" onclick="event.stopPropagation()">
+      <!-- Print Toolbar -->
+      <div class="no-print px-4 sm:px-5 py-3 border-b border-slate-200 bg-slate-50 flex flex-wrap items-center justify-between gap-3">
+        <div class="flex items-center gap-3 flex-wrap">
+          <span class="text-sm font-semibold text-slate-900">Payment Approval Form (A4)</span>
+          <select id="print-date-select" onchange="app.renderPrintSheet()" class="h-9 px-3 rounded-lg border border-slate-300 bg-white text-xs font-medium text-slate-700 outline-none focus:border-slate-500">
+          </select>
+        </div>
+        <div class="flex items-center gap-2">
+          <button type="button" onclick="window.print()" class="h-9 px-3.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-medium inline-flex items-center gap-1.5 transition-colors">
+            <i data-lucide="printer" class="w-3.5 h-3.5"></i>
+            Print / Save PDF
+          </button>
+          <button type="button" onclick="app.closePrintModal()" class="h-9 px-3 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 text-xs font-medium text-slate-700 transition-colors">
+            Close
+          </button>
+        </div>
+      </div>
+
+      <!-- Print Preview Canvas -->
+      <div class="flex-1 overflow-auto p-4 sm:p-8 bg-slate-100">
+        <div id="printable-sheet" class="bg-white max-w-4xl mx-auto p-6 sm:p-10 border border-slate-300 shadow-sm text-slate-900"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== TOAST CONTAINER (Top-Center Mobile, Bottom-Right Desktop) ==================== -->
+  <div id="toast-container" class="fixed top-4 left-1/2 -translate-x-1/2 md:top-auto md:left-auto md:translate-x-0 md:bottom-6 md:right-6 z-[60] flex flex-col gap-2 w-[calc(100%-2rem)] max-w-sm pointer-events-none"></div>
+
+  <!-- ==================== APPLICATION SCRIPT ==================== -->
+  <script>
+    (function () {
+      'use strict';
+
+      // =========================================================================
+      // 1. STORAGE KEY & REALISTIC INDFURN SEED DATA
+      // =========================================================================
+      const STORAGE_KEY = 'indfurn_payflow_reference_v1';
+
+      function createSeedData() {
+        return {
+          users: [
+            { id: 'usr-owner-1', fullName: 'Managing Director', username: 'admin', password: 'admin123', role: 'OWNER', isActive: true },
+            { id: 'usr-acc-1', fullName: 'Ramesh K.', username: 'accountant', password: 'acc123', role: 'ACCOUNTANT', isActive: true },
+            { id: 'usr-staff-1', fullName: 'Faisal M.', username: 'staff', password: 'staff123', role: 'STAFF', isActive: true },
+          ],
+          banks: [
+            { id: 'bank-axis', fullName: 'Axis Bank', shortName: 'Axis', accountMask: 'XXXX0325', isActive: true },
+            { id: 'bank-sib', fullName: 'South Indian Bank', shortName: 'SIB', accountMask: 'XXXX0698', isActive: true },
+          ],
+          vendors: [
+            { id: 'vnd-1', name: 'VINMORE', gstin: '32AAMFV9012K1Z8', bankAccountNo: '925020039303325', ifscCode: 'UTIB0001462' },
+            { id: 'vnd-2', name: 'Ariham Industries', gstin: '32AAECA4819B1Z2', bankAccountNo: '50200001130145', ifscCode: 'HDFC0001420' },
+            { id: 'vnd-3', name: 'INDFURN (Axis)', gstin: '32AADCI2940M1Z1', bankAccountNo: '925030032885074', ifscCode: 'UTIB0001462' },
+            { id: 'vnd-4', name: 'KSEB', gstin: '32AAACK9981R1Z9', bankAccountNo: 'KSEB-11654002819', ifscCode: 'SBIN0070142' },
+            { id: 'vnd-5', name: 'Greenply Distributors', gstin: '32AABCG6190P1Z4', bankAccountNo: '0047053000018922', ifscCode: 'SIBL0000047' },
+            { id: 'vnd-6', name: 'Century Boards LLP', gstin: '32AACFC2218R1Z7', bankAccountNo: '40910200011842', ifscCode: 'FDRL0001190' },
+          ],
+          incomingBills: [
+            {
+              id: 'bill-101',
+              vendorId: 'vnd-6',
+              vendorName: 'Century Boards LLP',
+              invoiceRef: 'INV-9120',
+              estimatedAmount: 38400.00,
+              note: 'Urgent plywood restock order',
+              fileName: 'century_inv_9120.pdf',
+              status: 'NEW', // 'NEW' | 'CONVERTED' | 'DISMISSED'
+              uploadedBy: 'usr-staff-1',
+              uploadedByName: 'Faisal M.',
+              createdAt: '2026-11-23',
+            },
+          ],
+          payments: [
+            {
+              id: 'pay-101',
+              sheetDate: '2026-11-19',
+              vendorId: 'vnd-1',
+              vendorName: 'VINMORE',
+              invoiceRef: 'On Account',
+              dueDate: '2026-11-19',
+              purpose: 'Against Bill',
+              amount: 50000.00,
+              tds: 0,
+              bankId: 'bank-axis',
+              status: 'PAID',
+              utrNumber: '997461727',
+              invoiceFileName: 'Vinmore_Ledger_Nov26.pdf',
+              receiptFileName: 'Axis_Neo_Report_19Nov.pdf',
+              remarks: 'Axis Corporate Neo one-time transfer',
+              rejectionReason: '',
+              preparedBy: 'Ramesh K.',
+              preparedAt: '19 Nov 2026, 10:40 AM',
+              approvedBy: 'Managing Director',
+              approvedAt: '19 Nov 2026, 02:15 PM',
+              paidBy: 'Ramesh K.',
+              paidAt: '19 Nov 2026, 04:30 PM',
+              auditLogs: [
+                { action: 'CREATED', detail: 'Prepared payment entry for ₹50,000.00 via Axis Bank', actor: 'Ramesh K.', time: '19 Nov 2026, 10:40 AM' },
+                { action: 'APPROVED', detail: 'Approved and locked financial fields', actor: 'Managing Director', time: '19 Nov 2026, 02:15 PM' },
+                { action: 'PAID', detail: 'Recorded UTR 997461727 with Axis_Neo_Report_19Nov.pdf', actor: 'Ramesh K.', time: '19 Nov 2026, 04:30 PM' },
+              ],
+            },
+            {
+              id: 'pay-102',
+              sheetDate: '2026-11-19',
+              vendorId: 'vnd-2',
+              vendorName: 'Ariham Industries',
+              invoiceRef: '0282',
+              dueDate: '2026-11-19',
+              purpose: 'Against PI',
+              amount: 72996.00,
+              tds: 0,
+              bankId: 'bank-axis',
+              status: 'APPROVED',
+              utrNumber: '',
+              invoiceFileName: 'Ariham_PI_0282.pdf',
+              receiptFileName: '',
+              remarks: 'Frame hardware proforma',
+              rejectionReason: '',
+              preparedBy: 'Ramesh K.',
+              preparedAt: '19 Nov 2026, 10:45 AM',
+              approvedBy: 'Managing Director',
+              approvedAt: '19 Nov 2026, 02:16 PM',
+              paidBy: '',
+              paidAt: '',
+              auditLogs: [
+                { action: 'CREATED', detail: 'Prepared payment entry for ₹72,996.00 via Axis Bank', actor: 'Ramesh K.', time: '19 Nov 2026, 10:45 AM' },
+                { action: 'APPROVED', detail: 'Approved and locked financial fields', actor: 'Managing Director', time: '19 Nov 2026, 02:16 PM' },
+              ],
+            },
+            {
+              id: 'pay-103',
+              sheetDate: '2026-11-19',
+              vendorId: 'vnd-3',
+              vendorName: 'INDFURN (Axis)',
+              invoiceRef: 'NA',
+              dueDate: '2026-11-19',
+              purpose: 'Transfer',
+              amount: 250000.00,
+              tds: 0,
+              bankId: 'bank-sib',
+              status: 'PENDING_APPROVAL',
+              utrNumber: '',
+              invoiceFileName: 'Internal_Transfer_Memo.pdf',
+              receiptFileName: '',
+              remarks: 'Working capital transfer to Axis Manjeri account',
+              rejectionReason: '',
+              preparedBy: 'Ramesh K.',
+              preparedAt: '19 Nov 2026, 10:50 AM',
+              approvedBy: '',
+              approvedAt: '',
+              paidBy: '',
+              paidAt: '',
+              auditLogs: [
+                { action: 'CREATED', detail: 'Submitted transfer entry for ₹2,50,000.00 via South Indian Bank', actor: 'Ramesh K.', time: '19 Nov 2026, 10:50 AM' },
+              ],
+            },
+            {
+              id: 'pay-104',
+              sheetDate: '2026-11-19',
+              vendorId: 'vnd-4',
+              vendorName: 'KSEB',
+              invoiceRef: 'Sep-Oct',
+              dueDate: '2026-11-19',
+              purpose: 'Electricity Charge',
+              amount: 16601.00,
+              tds: 0,
+              bankId: 'bank-sib',
+              status: 'PENDING_APPROVAL',
+              utrNumber: '',
+              invoiceFileName: 'KSEB_Bill_SepOct_2026.pdf',
+              receiptFileName: '',
+              remarks: 'Showroom & factory bi-monthly power bill',
+              rejectionReason: '',
+              preparedBy: 'Ramesh K.',
+              preparedAt: '19 Nov 2026, 11:05 AM',
+              approvedBy: '',
+              approvedAt: '',
+              paidBy: '',
+              paidAt: '',
+              auditLogs: [
+                { action: 'CREATED', detail: 'Submitted utility payment for ₹16,601.00 via South Indian Bank', actor: 'Ramesh K.', time: '19 Nov 2026, 11:05 AM' },
+              ],
+            },
+            {
+              id: 'pay-105',
+              sheetDate: '2026-11-23',
+              vendorId: 'vnd-5',
+              vendorName: 'Greenply Distributors',
+              invoiceRef: 'INV-8841',
+              dueDate: '2026-11-25',
+              purpose: 'Against Bill',
+              amount: 84500.00,
+              tds: 845.00,
+              bankId: 'bank-axis',
+              status: 'PENDING_APPROVAL',
+              utrNumber: '',
+              invoiceFileName: 'Greenply_INV_8841.pdf',
+              receiptFileName: '',
+              remarks: '18mm marine plywood consignment (1% TDS applied)',
+              rejectionReason: '',
+              preparedBy: 'Ramesh K.',
+              preparedAt: '23 Nov 2026, 09:42 AM',
+              approvedBy: '',
+              approvedAt: '',
+              paidBy: '',
+              paidAt: '',
+              auditLogs: [
+                { action: 'CREATED', detail: 'Submitted bill INV-8841 (Gross ₹84,500.00, TDS ₹845.00) via Axis Bank', actor: 'Ramesh K.', time: '23 Nov 2026, 09:42 AM' },
+              ],
+            },
+            {
+              id: 'pay-106',
+              sheetDate: '2026-11-23',
+              vendorId: 'vnd-6',
+              vendorName: 'Century Boards LLP',
+              invoiceRef: 'PI-409',
+              dueDate: '2026-11-26',
+              purpose: 'Against PI',
+              amount: 42000.00,
+              tds: 0,
+              bankId: 'bank-axis',
+              status: 'DRAFT',
+              utrNumber: '',
+              invoiceFileName: 'Century_PI_409.pdf',
+              receiptFileName: '',
+              remarks: 'Awaiting final quantity verification',
+              rejectionReason: '',
+              preparedBy: 'Ramesh K.',
+              preparedAt: '23 Nov 2026, 10:15 AM',
+              approvedBy: '',
+              approvedAt: '',
+              paidBy: '',
+              paidAt: '',
+              auditLogs: [
+                { action: 'CREATED', detail: 'Saved draft entry for ₹42,000.00', actor: 'Ramesh K.', time: '23 Nov 2026, 10:15 AM' },
+              ],
+            },
+          ],
+          currentUserId: null,
+        };
+      }
+
+      function loadStore() {
+        try {
+          const raw = localStorage.getItem(STORAGE_KEY);
+          if (!raw) return createSeedData();
+          const parsed = JSON.parse(raw);
+          if (!parsed || !Array.isArray(parsed.users) || !Array.isArray(parsed.payments)) {
+            return createSeedData();
+          }
+          return parsed;
+        } catch (err) {
+          return createSeedData();
+        }
+      }
+
+      let db = loadStore();
+
+      function saveStore() {
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(db));
+        } catch (err) {
+          // Ignore storage quota issues in restricted environments
+        }
+      }
+
+      // Ephemeral UI navigation & filter state
+      const ui = {
+        activeRoute: '',            // Owner: 'approvals'|'history'|'settings'; Accountant: 'payments'|'history'|'vendors'; Staff: 'upload'|'uploads'
+        loginError: '',
+        showLoginPassword: false,
+        ownerApprovalTab: 'PENDING_APPROVAL', // 'PENDING_APPROVAL' | 'ON_HOLD'
+        ownerSettingsTab: 'users',  // 'users' | 'banks'
+        accountantTab: 'INCOMING',  // 'INCOMING'|'DRAFT'|'PENDING_APPROVAL'|'APPROVED'|'PAID'|'REJECTED'
+        historySearch: '',
+        historyStatus: 'ALL',
+        historyBank: 'ALL',
+        vendorSearch: '',
+        staffSelectedFile: '',
+        entryFileName: '',
+        utrFileName: '',
+      };
+
+      // =========================================================================
+      // 2. FORMATTERS & HELPERS
+      // =========================================================================
+      const inrFormatter = new Intl.NumberFormat('en-IN', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      });
+
+      function formatINR(num) {
+        return '₹' + inrFormatter.format(Number(num) || 0);
+      }
+
+      function formatINRPlain(num) {
+        return inrFormatter.format(Number(num) || 0);
+      }
+
+      function netPayable(item) {
+        return Math.round(((Number(item.amount) || 0) - (Number(item.tds) || 0)) * 100) / 100;
+      }
+
+      function escapeHtml(str) {
+        return String(str == null ? '' : str)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#039;');
+      }
+
+      function formatHumanDate(isoDate) {
+        if (!isoDate) return '—';
+        const parts = isoDate.split('-');
+        if (parts.length !== 3) return isoDate;
+        const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        const m = months[parseInt(parts[1], 10) - 1] || parts[1];
+        return `${parts[2]} ${m} ${parts[0]}`;
+      }
+
+      function formatShortDate(isoDate) {
+        if (!isoDate) return '—';
+        const parts = isoDate.split('-');
+        if (parts.length !== 3) return isoDate;
+        const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        const m = months[parseInt(parts[1], 10) - 1] || parts[1];
+        return `${parts[2]} ${m}`;
+      }
+
+      function formatDDMMYYYY(isoDate) {
+        if (!isoDate) return '—';
+        const parts = isoDate.split('-');
+        if (parts.length !== 3) return isoDate;
+        return `${parts[2]}-${parts[1]}-${parts[0]}`;
+      }
+
+      function nowTimestamp() {
+        const now = new Date();
+        const time = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+        return `23 Nov 2026, ${time}`;
+      }
+
+      function getCurrentUser() {
+        if (!db.currentUserId) return null;
+        const u = db.users.find(user => user.id === db.currentUserId);
+        if (!u || !u.isActive) return null;
+        return u;
+      }
+
+      function getDefaultRoute(role) {
+        if (role === 'OWNER') return 'approvals';
+        if (role === 'ACCOUNTANT') return 'payments';
+        return 'upload';
+      }
+
+      function getBank(bankId) {
+        return db.banks.find(b => b.id === bankId) || { id: bankId, fullName: 'Unknown Bank', shortName: 'Bank', accountMask: '' };
+      }
+
+      function getVendor(vendorId) {
+        return db.vendors.find(v => v.id === vendorId) || null;
+      }
+
+      function statusBadge(status) {
+        const map = {
+          DRAFT: { label: 'Draft', cls: 'bg-slate-100 text-slate-700 border-slate-200' },
+          PENDING_APPROVAL: { label: 'Pending', cls: 'bg-amber-50 text-amber-700 border-amber-200/80' },
+          ON_HOLD: { label: 'On Hold', cls: 'bg-blue-50 text-blue-700 border-blue-200/80' },
+          APPROVED: { label: 'Ready to Pay', cls: 'bg-slate-900 text-white border-slate-900' },
+          PAID: { label: 'Paid', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200/80' },
+          REJECTED: { label: 'Rejected', cls: 'bg-rose-50 text-rose-700 border-rose-200/80' },
+          CANCELLED: { label: 'Cancelled', cls: 'bg-slate-100 text-slate-500 border-slate-200' },
+        };
+        const cfg = map[status] || { label: status, cls: 'bg-slate-100 text-slate-600 border-slate-200' };
+        return `<span class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium border whitespace-nowrap ${cfg.cls}">${cfg.label}</span>`;
+      }
+
+      function bankBadge(bankId) {
+        const b = getBank(bankId);
+        const isAxis = b.shortName.toLowerCase() === 'axis';
+        const isSib = b.shortName.toLowerCase() === 'sib';
+        const dot = isAxis ? 'bg-[#97144D]' : isSib ? 'bg-[#B91C1C]' : 'bg-slate-600';
+        return `<span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-50 text-slate-700 border border-slate-200 whitespace-nowrap"><span class="w-1.5 h-1.5 rounded-full ${dot}"></span>${escapeHtml(b.shortName)}</span>`;
+      }
+
+      function refreshIcons() {
+        if (window.lucide && typeof window.lucide.createIcons === 'function') {
+          try {
+            window.lucide.createIcons();
+          } catch (e) {}
+        }
+      }
+
+      function toast(message, type = 'success') {
+        const container = document.getElementById('toast-container');
+        const el = document.createElement('div');
+        const iconMap = {
+          success: { icon: 'check-circle-2', color: 'text-emerald-600' },
+          error: { icon: 'alert-circle', color: 'text-rose-600' },
+          info: { icon: 'info', color: 'text-slate-600' },
+        };
+        const cfg = iconMap[type] || iconMap.info;
+        el.className = 'pointer-events-auto anim-modal flex items-center gap-2.5 px-3.5 py-2.5 rounded-lg bg-white border border-slate-200 shadow-lg text-xs font-medium text-slate-800';
+        el.innerHTML = `<i data-lucide="${cfg.icon}" class="w-4 h-4 shrink-0 ${cfg.color}"></i><span class="leading-snug">${escapeHtml(message)}</span>`;
+        container.appendChild(el);
+        refreshIcons();
+        setTimeout(() => {
+          el.style.opacity = '0';
+          el.style.transition = 'opacity 0.2s ease';
+          setTimeout(() => el.remove(), 220);
+        }, 3000);
+      }
+
+      function copyText(text, label = 'Copied') {
+        try {
+          const ta = document.createElement('textarea');
+          ta.value = text;
+          ta.style.position = 'fixed';
+          ta.style.opacity = '0';
+          document.body.appendChild(ta);
+          ta.focus();
+          ta.select();
+          document.execCommand('copy');
+          document.body.removeChild(ta);
+          toast(`${label}: ${text}`, 'info');
+        } catch (err) {
+          toast(`${label}: ${text}`, 'info');
+        }
+      }
+
+      // =========================================================================
+      // 3. LOGIN SCREEN (STRICT AUTH GATE)
+      // =========================================================================
+      function renderLoginScreen() {
+        return `
+          <div class="min-h-screen bg-[#F8FAFC] flex flex-col items-center justify-center px-4 py-8">
+            <div class="w-full max-w-sm">
+              <!-- Centered White Login Card -->
+              <div class="bg-white rounded-xl border border-slate-200 p-6 sm:p-7 shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
+                <!-- Brand Mark -->
+                <div class="flex flex-col items-center text-center mb-6">
+                  <div class="w-10 h-10 rounded-lg bg-slate-900 text-white flex items-center justify-center mb-3">
+                    <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M4 7h16M4 12h16M4 17h10" />
+                    </svg>
+                  </div>
+                  <h1 class="text-lg font-bold tracking-tight text-slate-900">INDFURN</h1>
+                  <p class="text-xs text-slate-500 mt-0.5">Payment Approval Portal</p>
+                </div>
+
+                <!-- Inline Error Banner -->
+                ${ui.loginError ? `
+                  <div class="mb-4 px-3 py-2.5 rounded-lg bg-rose-50 border border-rose-200 text-xs font-medium text-rose-700 flex items-start gap-2">
+                    <i data-lucide="alert-circle" class="w-4 h-4 shrink-0 mt-0.5"></i>
+                    <span>${escapeHtml(ui.loginError)}</span>
+                  </div>
+                ` : ''}
+
+                <form onsubmit="app.handleLogin(event)" class="space-y-4">
+                  <div>
+                    <label for="login-username" class="block text-xs font-medium text-slate-700 mb-1.5">Username</label>
+                    <input
+                      id="login-username"
+                      type="text"
+                      required
+                      autocomplete="username"
+                      placeholder="Enter username"
+                      class="w-full min-h-[44px] px-3 rounded-lg border border-slate-200 bg-white text-sm text-slate-900 placeholder:text-slate-400 outline-none focus:border-slate-900 focus:ring-2 focus:ring-slate-900/10 transition-all"
+                    />
+                  </div>
+
+                  <div>
+                    <label for="login-password" class="block text-xs font-medium text-slate-700 mb-1.5">Password</label>
+                    <div class="relative">
+                      <input
+                        id="login-password"
+                        type="${ui.showLoginPassword ? 'text' : 'password'}"
+                        required
+                        autocomplete="current-password"
+                        placeholder="Enter password"
+                        class="w-full min-h-[44px] pl-3 pr-11 rounded-lg border border-slate-200 bg-white text-sm text-slate-900 placeholder:text-slate-400 outline-none focus:border-slate-900 focus:ring-2 focus:ring-slate-900/10 transition-all"
+                      />
+                      <button
+                        type="button"
+                        onclick="app.toggleLoginPassword()"
+                        aria-label="Toggle password visibility"
+                        class="absolute right-1 top-1/2 -translate-y-1/2 w-9 h-9 rounded-md flex items-center justify-center text-slate-400 hover:text-slate-700 transition-colors"
+                      >
+                        <i data-lucide="${ui.showLoginPassword ? 'eye-off' : 'eye'}" class="w-4 h-4"></i>
+                      </button>
+                    </div>
+                  </div>
+
+                  <button
+                    type="submit"
+                    class="w-full min-h-[44px] rounded-lg bg-slate-900 hover:bg-slate-800 active:scale-[0.99] text-white text-sm font-medium transition-all"
+                  >
+                    Sign In
+                  </button>
+                </form>
+              </div>
+
+              <!-- Subtle Demo Credentials Box (Tap to Fill) -->
+              <div class="mt-4 bg-white rounded-xl border border-slate-200 p-4">
+                <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-2.5">Demo Credentials (Tap to Fill)</div>
+                <div class="space-y-1.5">
+                  <button type="button" onclick="app.fillDemoLogin('admin', 'admin123')" class="w-full min-h-[44px] px-3 py-2 rounded-lg border border-slate-200 hover:border-slate-300 hover:bg-slate-50 flex items-center justify-between text-left transition-colors">
+                    <div>
+                      <div class="text-xs font-semibold text-slate-800">Owner / Admin</div>
+                      <div class="text-[11px] text-slate-500">Approvals, History & User Setup</div>
+                    </div>
+                    <span class="text-[11px] font-medium text-slate-600 bg-slate-100 px-2 py-0.5 rounded tabular-nums">admin / admin123</span>
+                  </button>
+
+                  <button type="button" onclick="app.fillDemoLogin('accountant', 'acc123')" class="w-full min-h-[44px] px-3 py-2 rounded-lg border border-slate-200 hover:border-slate-300 hover:bg-slate-50 flex items-center justify-between text-left transition-colors">
+                    <div>
+                      <div class="text-xs font-semibold text-slate-800">Accountant</div>
+                      <div class="text-[11px] text-slate-500">Payment Ledger, UTR & Vendors</div>
+                    </div>
+                    <span class="text-[11px] font-medium text-slate-600 bg-slate-100 px-2 py-0.5 rounded tabular-nums">accountant / acc123</span>
+                  </button>
+
+                  <button type="button" onclick="app.fillDemoLogin('staff', 'staff123')" class="w-full min-h-[44px] px-3 py-2 rounded-lg border border-slate-200 hover:border-slate-300 hover:bg-slate-50 flex items-center justify-between text-left transition-colors">
+                    <div>
+                      <div class="text-xs font-semibold text-slate-800">Stock Staff</div>
+                      <div class="text-[11px] text-slate-500">Upload Supplier Invoices Only</div>
+                    </div>
+                    <span class="text-[11px] font-medium text-slate-600 bg-slate-100 px-2 py-0.5 rounded tabular-nums">staff / staff123</span>
+                  </button>
+                </div>
+              </div>
+
+              <!-- Subtle Reset Demo Data Footer -->
+              <div class="mt-4 flex items-center justify-between px-1 text-[11px] text-slate-400">
+                <span>INDFURN Internal PWA</span>
+                <button type="button" onclick="app.resetDemoData()" class="text-slate-500 hover:text-slate-900 underline underline-offset-2 transition-colors">
+                  Reset Demo Data
+                </button>
+              </div>
+            </div>
+          </div>
+        `;
+      }
+
+      // =========================================================================
+      // 4. AUTHENTICATED APP SHELL (STRICTLY ROLE-SCOPED NAVIGATION)
+      // =========================================================================
+      function getNavItems(user) {
+        const pendingCount = db.payments.filter(p => p.status === 'PENDING_APPROVAL').length;
+        const incomingCount = db.incomingBills.filter(b => b.status === 'NEW').length;
+
+        if (user.role === 'OWNER') {
+          return [
+            { id: 'approvals', label: 'Approvals', icon: 'check-circle-2', badge: pendingCount },
+            { id: 'history', label: 'History', icon: 'clock', badge: 0 },
+            { id: 'settings', label: 'Settings', icon: 'settings', badge: 0 },
+          ];
+        }
+        if (user.role === 'ACCOUNTANT') {
+          return [
+            { id: 'payments', label: 'Payments', icon: 'receipt', badge: incomingCount },
+            { id: 'history', label: 'History', icon: 'clock', badge: 0 },
+            { id: 'vendors', label: 'Vendors', icon: 'building-2', badge: 0 },
+          ];
+        }
+        // STAFF
+        return [
+          { id: 'upload', label: 'Upload Bill', icon: 'upload', badge: 0 },
+          { id: 'uploads', label: 'My Uploads', icon: 'file-text', badge: 0 },
+        ];
+      }
+
+      function getPageTitle(route) {
+        const titles = {
+          approvals: 'Approvals',
+          history: 'History',
+          settings: 'Settings',
+          payments: 'Payments',
+          vendors: 'Vendors',
+          upload: 'Upload Bill',
+          uploads: 'My Uploads',
+        };
+        return titles[route] || 'INDFURN';
+      }
+
+      function renderAppShell(user, mainHtml) {
+        const navItems = getNavItems(user);
+        const roleLabel = user.role === 'OWNER' ? 'Owner / Admin' : user.role === 'ACCOUNTANT' ? 'Accountant' : 'Stock Staff';
+        const gridColsClass = navItems.length === 2 ? 'grid-cols-2' : 'grid-cols-3';
+
+        return `
+          <div class="min-h-screen flex bg-[#F8FAFC]">
+            <!-- DESKTOP SLIM LEFT SIDEBAR (w-56, lg+) -->
+            <aside class="hidden lg:flex lg:flex-col lg:w-56 lg:fixed lg:inset-y-0 bg-white border-r border-slate-200 z-30">
+              <!-- Brand Wordmark -->
+              <div class="h-14 px-5 flex items-center gap-2.5 border-b border-slate-200/80">
+                <div class="w-7 h-7 rounded-md bg-slate-900 text-white flex items-center justify-center shrink-0">
+                  <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M4 7h16M4 12h16M4 17h10" />
+                  </svg>
+                </div>
+                <span class="font-bold text-sm tracking-tight text-slate-900">INDFURN</span>
+              </div>
+
+              <!-- Role Navigation Links -->
+              <nav class="flex-1 px-3 py-4 space-y-1">
+                ${navItems.map(item => {
+                  const active = ui.activeRoute === item.id;
+                  return `
+                    <button
+                      type="button"
+                      onclick="app.navigate('${item.id}')"
+                      class="w-full h-10 px-3 rounded-lg text-sm font-medium flex items-center justify-between transition-colors ${active ? 'bg-slate-100 text-slate-900' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'}"
+                    >
+                      <span class="flex items-center gap-2.5">
+                        <i data-lucide="${item.icon}" class="w-4 h-4 ${active ? 'text-slate-900' : 'text-slate-400'}"></i>
+                        <span>${item.label}</span>
+                      </span>
+                      ${item.badge > 0 ? `<span class="tabular-nums text-[11px] font-semibold px-1.5 py-0.5 rounded-full ${active ? 'bg-slate-900 text-white' : 'bg-amber-100 text-amber-800'}">${item.badge}</span>` : ''}
+                    </button>
+                  `;
+                }).join('')}
+              </nav>
+
+              <!-- User Profile & Sign Out -->
+              <div class="p-3 border-t border-slate-200/80">
+                <div class="px-2.5 py-2 mb-1">
+                  <div class="text-xs font-semibold text-slate-900 truncate">${escapeHtml(user.fullName)}</div>
+                  <div class="text-[11px] text-slate-500">${roleLabel}</div>
+                </div>
+                <button
+                  type="button"
+                  onclick="app.logout()"
+                  class="w-full h-9 px-2.5 rounded-lg text-xs font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900 flex items-center gap-2 transition-colors"
+                >
+                  <i data-lucide="log-out" class="w-3.5 h-3.5 text-slate-400"></i>
+                  Sign Out
+                </button>
+              </div>
+            </aside>
+
+            <!-- MAIN COLUMN -->
+            <div class="flex-1 lg:pl-56 flex flex-col min-w-0 pb-20 lg:pb-8">
+              <!-- MOBILE MINIMAL TOP BAR (h-14, < lg) -->
+              <header class="lg:hidden sticky top-0 z-20 h-14 bg-white/95 backdrop-blur border-b border-slate-200 px-4 flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                  <div class="w-6 h-6 rounded-md bg-slate-900 text-white flex items-center justify-center">
+                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M4 7h16M4 12h16M4 17h10" />
+                    </svg>
+                  </div>
+                  <span class="text-sm font-semibold text-slate-900">${getPageTitle(ui.activeRoute)}</span>
+                </div>
+                <div class="flex items-center gap-2">
+                  <span class="text-xs text-slate-500 hidden sm:inline">${escapeHtml(user.fullName)}</span>
+                  <button
+                    type="button"
+                    onclick="app.logout()"
+                    title="Sign Out"
+                    class="min-h-[44px] px-2.5 rounded-lg text-xs font-medium text-slate-600 hover:text-slate-900 flex items-center gap-1.5"
+                  >
+                    <i data-lucide="log-out" class="w-4 h-4"></i>
+                    <span>Sign Out</span>
+                  </button>
+                </div>
+              </header>
+
+              <!-- MAIN WORKSPACE CONTENT -->
+              <main class="flex-1 w-full max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-5 sm:py-7">
+                ${mainHtml}
+              </main>
+            </div>
+
+            <!-- MOBILE FIXED BOTTOM TAB NAVIGATION (h-16, < lg) -->
+            <nav class="lg:hidden fixed bottom-0 inset-x-0 bg-white border-t border-slate-200 z-30 pb-safe">
+              <div class="grid ${gridColsClass} h-16">
+                ${navItems.map(item => {
+                  const active = ui.activeRoute === item.id;
+                  return `
+                    <button
+                      type="button"
+                      onclick="app.navigate('${item.id}')"
+                      class="flex flex-col items-center justify-center gap-1 text-[11px] font-medium transition-colors ${active ? 'text-slate-900' : 'text-slate-400 hover:text-slate-700'}"
+                    >
+                      <div class="relative">
+                        <i data-lucide="${item.icon}" class="w-5 h-5"></i>
+                        ${item.badge > 0 ? `<span class="absolute -top-1.5 -right-2.5 min-w-[16px] h-4 px-1 rounded-full bg-amber-600 text-white text-[10px] font-semibold tabular-nums flex items-center justify-center">${item.badge}</span>` : ''}
+                      </div>
+                      <span>${item.label}</span>
+                    </button>
+                  `;
+                }).join('')}
+              </div>
+            </nav>
+          </div>
+        `;
+      }
+
+      // =========================================================================
+      // 5. ROLE 1: OWNER / ADMIN VIEWS
+      // =========================================================================
+      function renderOwnerApprovals() {
+        const pendingItems = db.payments.filter(p => p.status === 'PENDING_APPROVAL');
+        const holdItems = db.payments.filter(p => p.status === 'ON_HOLD');
+
+        const totalPending = pendingItems.reduce((sum, p) => sum + netPayable(p), 0);
+        const activeBanks = db.banks.filter(b => b.isActive);
+
+        // Compute bank-wise split for pending items
+        const bankSplits = activeBanks.map(b => {
+          const sum = pendingItems.filter(p => p.bankId === b.id).reduce((acc, p) => acc + netPayable(p), 0);
+          return { bank: b, total: sum };
+        });
+
+        const visibleItems = ui.ownerApprovalTab === 'PENDING_APPROVAL' ? pendingItems : holdItems;
+
+        // Group by sheetDate (descending)
+        const grouped = {};
+        visibleItems.forEach(item => {
+          if (!grouped[item.sheetDate]) grouped[item.sheetDate] = [];
+          grouped[item.sheetDate].push(item);
+        });
+        const sortedDates = Object.keys(grouped).sort((a, b) => b.localeCompare(a));
+
+        return `
+          <!-- Desktop Title -->
+          <div class="hidden lg:flex items-center justify-between mb-5">
+            <div>
+              <h1 class="text-xl font-semibold tracking-tight text-slate-900">Approvals</h1>
+              <p class="text-xs text-slate-500 mt-0.5">Review incoming payment requests and authorize transfers.</p>
+            </div>
+          </div>
+
+          <!-- Single Compact Top Summary Bar -->
+          <div class="bg-white rounded-xl border border-slate-200 p-4 sm:p-5 mb-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <div class="text-xs font-medium text-slate-500">Pending Approval</div>
+              <div class="mt-0.5 flex items-baseline gap-2.5">
+                <span class="text-2xl font-bold tracking-tight text-slate-900 tabular-nums">${formatINR(totalPending)}</span>
+                <span class="text-xs font-medium text-slate-500 tabular-nums">${pendingItems.length} item${pendingItems.length === 1 ? '' : 's'}</span>
+              </div>
+            </div>
+            <div class="flex flex-wrap items-center gap-2">
+              ${bankSplits.map(s => `
+                <div class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-50 border border-slate-200 text-xs">
+                  <span class="font-medium text-slate-500">${escapeHtml(s.bank.shortName)}:</span>
+                  <span class="font-semibold text-slate-900 tabular-nums">${formatINR(s.total)}</span>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+
+          <!-- 2-Tab Pill Toggle -->
+          <div class="inline-flex items-center p-1 rounded-lg bg-slate-100 border border-slate-200/80 mb-5">
+            <button
+              type="button"
+              onclick="app.setOwnerApprovalTab('PENDING_APPROVAL')"
+              class="min-h-[38px] px-3.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 ${ui.ownerApprovalTab === 'PENDING_APPROVAL' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'}"
+            >
+              <span>Pending</span>
+              <span class="tabular-nums text-[11px] px-1.5 py-0.2 rounded-full ${ui.ownerApprovalTab === 'PENDING_APPROVAL' ? 'bg-slate-900 text-white' : 'bg-slate-200 text-slate-600'}">${pendingItems.length}</span>
+            </button>
+            <button
+              type="button"
+              onclick="app.setOwnerApprovalTab('ON_HOLD')"
+              class="min-h-[38px] px-3.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 ${ui.ownerApprovalTab === 'ON_HOLD' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'}"
+            >
+              <span>On Hold</span>
+              <span class="tabular-nums text-[11px] px-1.5 py-0.2 rounded-full ${ui.ownerApprovalTab === 'ON_HOLD' ? 'bg-slate-900 text-white' : 'bg-slate-200 text-slate-600'}">${holdItems.length}</span>
+            </button>
+          </div>
+
+          <!-- Date-Grouped 4-Row Approval Cards -->
+          ${sortedDates.length === 0 ? `
+            <div class="bg-white rounded-xl border border-slate-200 p-10 text-center">
+              <div class="w-10 h-10 rounded-full bg-emerald-50 text-emerald-700 flex items-center justify-center mx-auto mb-3">
+                <i data-lucide="check" class="w-5 h-5"></i>
+              </div>
+              <div class="text-sm font-semibold text-slate-900">
+                ${ui.ownerApprovalTab === 'PENDING_APPROVAL' ? 'All pending payments cleared' : 'No payments on hold'}
+              </div>
+              <p class="text-xs text-slate-500 mt-1">New requests from Accounts will appear here automatically.</p>
+            </div>
+          ` : sortedDates.map(date => `
+            <section class="mb-6">
+              <div class="flex items-center gap-2 mb-3">
+                <h2 class="text-xs font-semibold uppercase tracking-wider text-slate-500 tabular-nums">${formatHumanDate(date)}</h2>
+                <span class="text-xs text-slate-400">(${grouped[date].length} item${grouped[date].length === 1 ? '' : 's'})</span>
+              </div>
+
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                ${grouped[date].map(item => renderOwnerCard(item, activeBanks)).join('')}
+              </div>
+            </section>
+          `).join('')}
+        `;
+      }
+
+      function renderOwnerCard(item, activeBanks) {
+        const net = netPayable(item);
+        const isHold = item.status === 'ON_HOLD';
+
+        return `
+          <article class="bg-white rounded-xl border border-slate-200 p-4 sm:p-5 flex flex-col gap-3.5 hover:border-slate-300 transition-colors">
+            <!-- Row 1: Vendor Name | Net Payable Amount -->
+            <div class="flex items-start justify-between gap-3">
+              <div class="min-w-0">
+                <h3 class="text-base font-semibold text-slate-900 truncate">${escapeHtml(item.vendorName)}</h3>
+              </div>
+              <div class="text-right shrink-0">
+                <div class="text-lg font-bold text-slate-900 tabular-nums leading-tight">${formatINR(net)}</div>
+                ${item.tds > 0 ? `<div class="text-[11px] font-medium text-amber-700 tabular-nums mt-0.5">TDS: ${formatINR(item.tds)}</div>` : ''}
+              </div>
+            </div>
+
+            <!-- Row 2: Purpose · Ref · Due -->
+            <div class="text-xs text-slate-500 flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span class="font-medium text-slate-700">${escapeHtml(item.purpose)}</span>
+              <span class="text-slate-300">·</span>
+              <span class="tabular-nums">Ref: <span class="text-slate-700">${escapeHtml(item.invoiceRef)}</span></span>
+              <span class="text-slate-300">·</span>
+              <span class="tabular-nums">Due: ${formatShortDate(item.dueDate)}</span>
+            </div>
+
+            <!-- Row 3: Interactive Inline Bank Switcher + View Bill -->
+            <div class="flex items-center justify-between gap-2 pt-1 border-t border-slate-100">
+              <div class="flex items-center gap-1.5">
+                <span class="text-xs text-slate-500">Pay via:</span>
+                <select
+                  aria-label="Select source bank for ${escapeHtml(item.vendorName)}"
+                  onchange="app.ownerSwitchBank('${item.id}', this.value)"
+                  class="min-h-[36px] pl-2.5 pr-7 py-1 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-xs font-medium text-slate-800 outline-none focus:border-slate-400 cursor-pointer transition-colors"
+                >
+                  ${activeBanks.map(b => `<option value="${b.id}" ${b.id === item.bankId ? 'selected' : ''}>${escapeHtml(b.fullName)}</option>`).join('')}
+                </select>
+              </div>
+              <button
+                type="button"
+                onclick="app.openDetailDrawer('${item.id}')"
+                class="min-h-[36px] px-2.5 rounded-lg text-xs font-medium text-blue-600 hover:bg-blue-50 inline-flex items-center gap-1 transition-colors"
+              >
+                <i data-lucide="file-text" class="w-3.5 h-3.5"></i>
+                View Bill
+              </button>
+            </div>
+
+            <!-- Row 4: Clean Action Bar -->
+            <div class="flex items-center gap-2 pt-1">
+              <button
+                type="button"
+                onclick="app.openApproveModal('${item.id}')"
+                class="flex-[1.5] min-h-[44px] px-3 rounded-lg bg-emerald-700 hover:bg-emerald-800 active:scale-[0.99] text-white text-xs font-semibold inline-flex items-center justify-center gap-1.5 transition-all"
+              >
+                <i data-lucide="check" class="w-4 h-4"></i>
+                Approve
+              </button>
+              ${isHold ? `
+                <button
+                  type="button"
+                  onclick="app.ownerResumeItem('${item.id}')"
+                  class="flex-1 min-h-[44px] px-3 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-medium transition-colors"
+                >
+                  Resume
+                </button>
+              ` : `
+                <button
+                  type="button"
+                  onclick="app.ownerHoldItem('${item.id}')"
+                  class="flex-1 min-h-[44px] px-3 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-medium transition-colors"
+                >
+                  Hold
+                </button>
+              `}
+              <button
+                type="button"
+                onclick="app.openRejectModal('${item.id}')"
+                class="flex-1 min-h-[44px] px-3 rounded-lg border border-rose-200 bg-white hover:bg-rose-50 text-rose-700 text-xs font-medium transition-colors"
+              >
+                Reject
+              </button>
+            </div>
+          </article>
+        `;
+      }
+
+      // --- OWNER SETTINGS VIEW (Team Users & Company Banks) ---
+      function renderOwnerSettings() {
+        const currentUser = getCurrentUser();
+
+        return `
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
+            <div>
+              <h1 class="text-xl font-semibold tracking-tight text-slate-900">Settings</h1>
+              <p class="text-xs text-slate-500 mt-0.5">Manage team accounts and company disbursement banks.</p>
+            </div>
+            ${ui.ownerSettingsTab === 'users' ? `
+              <button
+                type="button"
+                onclick="app.openCreateUserModal()"
+                class="min-h-[44px] sm:min-h-[38px] px-4 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-medium inline-flex items-center justify-center gap-1.5 transition-colors"
+              >
+                <i data-lucide="user-plus" class="w-4 h-4"></i>
+                Create User
+              </button>
+            ` : `
+              <button
+                type="button"
+                onclick="app.openAddBankModal()"
+                class="min-h-[44px] sm:min-h-[38px] px-4 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-medium inline-flex items-center justify-center gap-1.5 transition-colors"
+              >
+                <i data-lucide="plus" class="w-4 h-4"></i>
+                Add Bank
+              </button>
+            `}
+          </div>
+
+          <!-- 2-Tab Toggle -->
+          <div class="inline-flex items-center p-1 rounded-lg bg-slate-100 border border-slate-200/80 mb-5">
+            <button
+              type="button"
+              onclick="app.setOwnerSettingsTab('users')"
+              class="min-h-[38px] px-4 rounded-md text-xs font-medium transition-all ${ui.ownerSettingsTab === 'users' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'}"
+            >
+              Team Users (${db.users.length})
+            </button>
+            <button
+              type="button"
+              onclick="app.setOwnerSettingsTab('banks')"
+              class="min-h-[38px] px-4 rounded-md text-xs font-medium transition-all ${ui.ownerSettingsTab === 'banks' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'}"
+            >
+              Company Banks (${db.banks.length})
+            </button>
+          </div>
+
+          ${ui.ownerSettingsTab === 'users' ? `
+            <!-- Desktop Users Table -->
+            <div class="hidden md:block bg-white rounded-xl border border-slate-200 overflow-hidden">
+              <table class="w-full text-left border-collapse">
+                <thead>
+                  <tr class="bg-slate-50 border-b border-slate-200 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                    <th class="py-3 pl-5 pr-3">Full Name</th>
+                    <th class="py-3 px-3">Username</th>
+                    <th class="py-3 px-3">Role</th>
+                    <th class="py-3 px-3">Status</th>
+                    <th class="py-3 pl-3 pr-5 text-right">Access</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100 text-sm">
+                  ${db.users.map(u => {
+                    const isSelf = u.id === currentUser.id;
+                    const roleBadge = u.role === 'OWNER'
+                      ? 'bg-slate-900 text-white'
+                      : u.role === 'ACCOUNTANT'
+                        ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                        : 'bg-slate-100 text-slate-700 border border-slate-200';
+                    return `
+                      <tr class="hover:bg-slate-50/70">
+                        <td class="py-3.5 pl-5 pr-3 font-medium text-slate-900">${escapeHtml(u.fullName)}</td>
+                        <td class="py-3.5 px-3 text-xs text-slate-600 tabular-nums">${escapeHtml(u.username)}</td>
+                        <td class="py-3.5 px-3"><span class="inline-flex px-2 py-0.5 rounded-md text-[11px] font-medium ${roleBadge}">${u.role}</span></td>
+                        <td class="py-3.5 px-3">
+                          <span class="inline-flex items-center gap-1.5 text-xs font-medium ${u.isActive ? 'text-emerald-700' : 'text-slate-400'}">
+                            <span class="w-1.5 h-1.5 rounded-full ${u.isActive ? 'bg-emerald-600' : 'bg-slate-300'}"></span>
+                            ${u.isActive ? 'Active' : 'Disabled'}
+                          </span>
+                        </td>
+                        <td class="py-3.5 pl-3 pr-5 text-right">
+                          ${isSelf ? `<span class="text-xs text-slate-400">Current Admin</span>` : `
+                            <button
+                              type="button"
+                              onclick="app.toggleUserActive('${u.id}')"
+                              class="px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${u.isActive ? 'border-slate-200 text-slate-600 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200' : 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'}"
+                            >
+                              ${u.isActive ? 'Disable' : 'Enable'}
+                            </button>
+                          `}
+                        </td>
+                      </tr>
+                    `;
+                  }).join('')}
+                </tbody>
+              </table>
+            </div>
+
+            <!-- Mobile Users Cards -->
+            <div class="md:hidden space-y-3">
+              ${db.users.map(u => {
+                const isSelf = u.id === currentUser.id;
+                return `
+                  <div class="bg-white rounded-xl border border-slate-200 p-4 flex items-center justify-between gap-3">
+                    <div class="min-w-0">
+                      <div class="text-sm font-semibold text-slate-900 truncate">${escapeHtml(u.fullName)}</div>
+                      <div class="text-xs text-slate-500 mt-0.5">@${escapeHtml(u.username)} · <span class="font-medium text-slate-700">${u.role}</span></div>
+                      <div class="text-[11px] mt-1 font-medium ${u.isActive ? 'text-emerald-700' : 'text-slate-400'}">${u.isActive ? 'Active' : 'Disabled'}</div>
+                    </div>
+                    ${isSelf ? `<span class="text-[11px] text-slate-400 shrink-0">You</span>` : `
+                      <button
+                        type="button"
+                        onclick="app.toggleUserActive('${u.id}')"
+                        class="min-h-[44px] px-3.5 rounded-lg border text-xs font-medium shrink-0 ${u.isActive ? 'border-slate-200 text-slate-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}"
+                      >
+                        ${u.isActive ? 'Disable' : 'Enable'}
+                      </button>
+                    `}
+                  </div>
+                `;
+              }).join('')}
+            </div>
+          ` : `
+            <!-- Company Banks List -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+              ${db.banks.map(b => `
+                <div class="bg-white rounded-xl border border-slate-200 p-4 sm:p-5 flex items-center justify-between gap-3">
+                  <div>
+                    <div class="flex items-center gap-2">
+                      <span class="text-sm font-semibold text-slate-900">${escapeHtml(b.fullName)}</span>
+                      <span class="px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 text-[11px] font-medium">${escapeHtml(b.shortName)}</span>
+                    </div>
+                    <div class="text-xs text-slate-500 mt-1 tabular-nums">A/C: ${escapeHtml(b.accountMask || 'Not set')}</div>
+                  </div>
+                  <button
+                    type="button"
+                    onclick="app.toggleBankActive('${b.id}')"
+                    class="min-h-[38px] px-3 rounded-lg border text-xs font-medium transition-colors ${b.isActive ? 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100' : 'border-slate-200 bg-slate-50 text-slate-500 hover:bg-slate-100'}"
+                  >
+                    ${b.isActive ? 'Active' : 'Inactive'}
+                  </button>
+                </div>
+              `).join('')}
+            </div>
+          `}
+        `;
+      }
+
+      // =========================================================================
+      // 6. ROLE 2: ACCOUNTANT VIEWS
+      // =========================================================================
+      function renderAccountantPayments() {
+        const incoming = db.incomingBills.filter(b => b.status === 'NEW');
+        const counts = {
+          INCOMING: incoming.length,
+          DRAFT: db.payments.filter(p => p.status === 'DRAFT').length,
+          PENDING_APPROVAL: db.payments.filter(p => p.status === 'PENDING_APPROVAL' || p.status === 'ON_HOLD').length,
+          APPROVED: db.payments.filter(p => p.status === 'APPROVED').length,
+          PAID: db.payments.filter(p => p.status === 'PAID').length,
+          REJECTED: db.payments.filter(p => p.status === 'REJECTED').length,
+        };
+
+        const tabs = [
+          { id: 'INCOMING', label: 'Incoming Bills', count: counts.INCOMING },
+          { id: 'DRAFT', label: 'Draft', count: counts.DRAFT },
+          { id: 'PENDING_APPROVAL', label: 'Pending', count: counts.PENDING_APPROVAL },
+          { id: 'APPROVED', label: 'Ready to Pay', count: counts.APPROVED },
+          { id: 'PAID', label: 'Paid', count: counts.PAID },
+          { id: 'REJECTED', label: 'Rejected', count: counts.REJECTED },
+        ];
+
+        let tableRows = [];
+        if (ui.accountantTab === 'PENDING_APPROVAL') {
+          tableRows = db.payments.filter(p => p.status === 'PENDING_APPROVAL' || p.status === 'ON_HOLD');
+        } else if (ui.accountantTab !== 'INCOMING') {
+          tableRows = db.payments.filter(p => p.status === ui.accountantTab);
+        }
+
+        const totalVisible = tableRows.reduce((sum, p) => sum + netPayable(p), 0);
+
+        return `
+          <!-- Top Action Bar -->
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
+            <div>
+              <h1 class="text-xl font-semibold tracking-tight text-slate-900">Payments</h1>
+              <p class="text-xs text-slate-500 mt-0.5">Prepare payment requests, track approvals, and close UTRs.</p>
+            </div>
+            <div class="flex items-center gap-2">
+              <button
+                type="button"
+                onclick="app.openPrintModal()"
+                class="min-h-[44px] sm:min-h-[38px] px-3.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs font-medium text-slate-700 inline-flex items-center gap-1.5 transition-colors"
+              >
+                <i data-lucide="printer" class="w-3.5 h-3.5 text-slate-500"></i>
+                Print Form
+              </button>
+              <button
+                type="button"
+                onclick="app.openEntryDrawer()"
+                class="flex-1 sm:flex-initial min-h-[44px] sm:min-h-[38px] px-4 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-medium inline-flex items-center justify-center gap-1.5 transition-colors"
+              >
+                <i data-lucide="plus" class="w-4 h-4"></i>
+                New Entry
+              </button>
+            </div>
+          </div>
+
+          <!-- Single-Row Status Tabs -->
+          <div class="flex items-center gap-1.5 overflow-x-auto pb-2 mb-4 border-b border-slate-200">
+            ${tabs.map(t => {
+              const active = ui.accountantTab === t.id;
+              return `
+                <button
+                  type="button"
+                  onclick="app.setAccountantTab('${t.id}')"
+                  class="min-h-[38px] px-3 rounded-lg text-xs font-medium whitespace-nowrap inline-flex items-center gap-1.5 transition-colors ${active ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'}"
+                >
+                  <span>${t.label}</span>
+                  <span class="tabular-nums text-[11px] px-1.5 py-0.2 rounded-full ${active ? 'bg-white/20 text-white' : 'bg-slate-200/80 text-slate-600'}">${t.count}</span>
+                </button>
+              `;
+            }).join('')}
+          </div>
+
+          ${ui.accountantTab === 'INCOMING' ? renderIncomingBillsSection(incoming) : renderPaymentsTableOrCards(tableRows, totalVisible, 'accountant')}
+        `;
+      }
+
+      function renderIncomingBillsSection(incoming) {
+        if (incoming.length === 0) {
+          return `
+            <div class="bg-white rounded-xl border border-slate-200 p-10 text-center">
+              <div class="text-sm font-semibold text-slate-900">No incoming bills from Stock Staff</div>
+              <p class="text-xs text-slate-500 mt-1">Uploaded supplier invoices will appear here for conversion into payment entries.</p>
+            </div>
+          `;
+        }
+
+        return `
+          <div class="space-y-3">
+            ${incoming.map(bill => `
+              <div class="bg-white rounded-xl border border-slate-200 p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div class="space-y-1 min-w-0">
+                  <div class="flex items-center gap-2 flex-wrap">
+                    <span class="text-sm font-semibold text-slate-900">${escapeHtml(bill.vendorName)}</span>
+                    <span class="text-xs text-slate-500 tabular-nums bg-slate-100 px-2 py-0.5 rounded">Ref: ${escapeHtml(bill.invoiceRef)}</span>
+                    ${bill.estimatedAmount ? `<span class="text-xs font-semibold text-slate-900 tabular-nums">${formatINR(bill.estimatedAmount)}</span>` : ''}
+                  </div>
+                  <div class="text-xs text-slate-500 flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <span>Uploaded by ${escapeHtml(bill.uploadedByName)}</span>
+                    <span>·</span>
+                    <span class="tabular-nums">${formatHumanDate(bill.createdAt)}</span>
+                    <span>·</span>
+                    <span class="inline-flex items-center gap-1 text-slate-700"><i data-lucide="paperclip" class="w-3 h-3"></i>${escapeHtml(bill.fileName)}</span>
+                  </div>
+                  ${bill.note ? `<p class="text-xs text-slate-600 pt-0.5">${escapeHtml(bill.note)}</p>` : ''}
+                </div>
+                <div class="flex items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onclick="app.dismissIncomingBill('${bill.id}')"
+                    class="min-h-[44px] sm:min-h-[36px] px-3 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs font-medium text-slate-600 transition-colors"
+                  >
+                    Dismiss
+                  </button>
+                  <button
+                    type="button"
+                    onclick="app.openEntryDrawer(null, '${bill.id}')"
+                    class="flex-1 sm:flex-initial min-h-[44px] sm:min-h-[36px] px-3.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-medium inline-flex items-center justify-center gap-1.5 transition-colors"
+                  >
+                    Create Payment
+                  </button>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        `;
+      }
+
+      // Shared Clean 7-Column Desktop Table + Mobile Stacked Cards (Used in Accountant Payments & Shared History)
+      function renderPaymentsTableOrCards(rows, totalAmount, mode) {
+        if (rows.length === 0) {
+          return `
+            <div class="bg-white rounded-xl border border-slate-200 p-10 text-center">
+              <div class="text-sm font-semibold text-slate-900">No payment entries found</div>
+              <p class="text-xs text-slate-500 mt-1">Entries matching this view will appear here.</p>
+            </div>
+          `;
+        }
+
+        function renderContextualAction(item, fullWidth = false) {
+          const wCls = fullWidth ? 'w-full min-h-[44px]' : 'h-8 px-3';
+          if (mode === 'accountant' && item.status === 'DRAFT') {
+            return `<button type="button" onclick="event.stopPropagation(); app.openEntryDrawer('${item.id}')" class="${wCls} rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-xs font-medium text-slate-800 transition-colors">Edit / Submit</button>`;
+          }
+          if (mode === 'accountant' && item.status === 'APPROVED') {
+            return `<button type="button" onclick="event.stopPropagation(); app.openUtrModal('${item.id}')" class="${wCls} rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium transition-colors">Enter UTR</button>`;
+          }
+          return `<button type="button" onclick="event.stopPropagation(); app.openDetailDrawer('${item.id}')" class="${wCls} rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs font-medium text-slate-700 transition-colors">View</button>`;
+        }
+
+        return `
+          <!-- Desktop 7-Column Table (md+) -->
+          <div class="hidden md:block bg-white rounded-xl border border-slate-200 overflow-hidden">
+            <div class="overflow-x-auto">
+              <table class="w-full text-left border-collapse">
+                <thead>
+                  <tr class="bg-slate-50 border-b border-slate-200 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                    <th class="py-3 pl-4 pr-3">Date</th>
+                    <th class="py-3 px-3">Vendor & Ref</th>
+                    <th class="py-3 px-3">Purpose & Due</th>
+                    <th class="py-3 px-3 text-right">Amount (₹)</th>
+                    <th class="py-3 px-3">Bank</th>
+                    <th class="py-3 px-3">Status / UTR</th>
+                    <th class="py-3 pl-3 pr-4 text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100 text-sm">
+                  ${rows.map(item => {
+                    const net = netPayable(item);
+                    return `
+                      <tr onclick="app.openDetailDrawer('${item.id}')" class="hover:bg-slate-50/80 cursor-pointer transition-colors">
+                        <td class="py-3 pl-4 pr-3 text-xs text-slate-600 tabular-nums whitespace-nowrap">${formatShortDate(item.sheetDate)}</td>
+                        <td class="py-3 px-3">
+                          <div class="font-medium text-slate-900 leading-snug">${escapeHtml(item.vendorName)}</div>
+                          <div class="text-xs text-slate-500 tabular-nums mt-0.5">${escapeHtml(item.invoiceRef)}</div>
+                        </td>
+                        <td class="py-3 px-3">
+                          <div class="text-xs font-medium text-slate-700">${escapeHtml(item.purpose)}</div>
+                          <div class="text-[11px] text-slate-500 tabular-nums mt-0.5">Due ${formatShortDate(item.dueDate)}</div>
+                        </td>
+                        <td class="py-3 px-3 text-right whitespace-nowrap">
+                          <div class="font-semibold text-slate-900 tabular-nums">${formatINR(net)}</div>
+                          ${item.tds > 0 ? `<div class="text-[11px] text-amber-700 tabular-nums mt-0.5">TDS ${formatINR(item.tds)}</div>` : ''}
+                        </td>
+                        <td class="py-3 px-3">${bankBadge(item.bankId)}</td>
+                        <td class="py-3 px-3">
+                          <div>${statusBadge(item.status)}</div>
+                          ${item.utrNumber ? `<div class="text-[11px] text-slate-500 tabular-nums mt-1 font-medium">${escapeHtml(item.utrNumber)}</div>` : ''}
+                        </td>
+                        <td class="py-3 pl-3 pr-4 text-right whitespace-nowrap">
+                          ${renderContextualAction(item, false)}
+                        </td>
+                      </tr>
+                    `;
+                  }).join('')}
+                </tbody>
+                <tfoot>
+                  <tr class="bg-slate-50/90 border-t border-slate-200">
+                    <td colspan="3" class="py-3 pl-4 pr-3 text-xs font-medium text-slate-500">${rows.length} item${rows.length === 1 ? '' : 's'}</td>
+                    <td class="py-3 px-3 text-right text-sm font-bold text-slate-900 tabular-nums whitespace-nowrap">Total: ${formatINR(totalAmount)}</td>
+                    <td colspan="3" class="py-3 px-3"></td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </div>
+
+          <!-- Mobile Stacked Cards (< md) -->
+          <div class="md:hidden space-y-3">
+            ${rows.map(item => {
+              const net = netPayable(item);
+              return `
+                <div onclick="app.openDetailDrawer('${item.id}')" class="bg-white rounded-xl border border-slate-200 p-4 space-y-3">
+                  <div class="flex items-start justify-between gap-2">
+                    <div class="min-w-0">
+                      <div class="text-sm font-semibold text-slate-900 truncate">${escapeHtml(item.vendorName)}</div>
+                      <div class="text-xs text-slate-500 tabular-nums mt-0.5">${escapeHtml(item.invoiceRef)} · ${escapeHtml(item.purpose)}</div>
+                    </div>
+                    <div class="text-right shrink-0">
+                      <div class="text-sm font-bold text-slate-900 tabular-nums">${formatINR(net)}</div>
+                      ${item.tds > 0 ? `<div class="text-[11px] text-amber-700 tabular-nums">TDS ${formatINR(item.tds)}</div>` : ''}
+                    </div>
+                  </div>
+                  <div class="flex items-center justify-between gap-2 pt-2 border-t border-slate-100">
+                    <div class="flex items-center gap-1.5 flex-wrap">
+                      ${bankBadge(item.bankId)}
+                      ${statusBadge(item.status)}
+                    </div>
+                    <span class="text-[11px] text-slate-500 tabular-nums">Due ${formatShortDate(item.dueDate)}</span>
+                  </div>
+                  ${item.utrNumber ? `<div class="text-[11px] text-slate-600 tabular-nums bg-slate-50 px-2.5 py-1.5 rounded-md border border-slate-200/70">UTR: <span class="font-semibold text-slate-900">${escapeHtml(item.utrNumber)}</span></div>` : ''}
+                  <div class="pt-1">
+                    ${renderContextualAction(item, true)}
+                  </div>
+                </div>
+              `;
+            }).join('')}
+            <div class="bg-white rounded-xl border border-slate-200 px-4 py-3 flex items-center justify-between text-xs">
+              <span class="text-slate-500 font-medium">${rows.length} item${rows.length === 1 ? '' : 's'}</span>
+              <span class="font-bold text-slate-900 tabular-nums text-sm">Total: ${formatINR(totalAmount)}</span>
+            </div>
+          </div>
+        `;
+      }
+
+      // --- ACCOUNTANT VENDORS VIEW ---
+      function renderAccountantVendors() {
+        const q = ui.vendorSearch.trim().toLowerCase();
+        const filtered = db.vendors.filter(v =>
+          !q ||
+          v.name.toLowerCase().includes(q) ||
+          (v.gstin && v.gstin.toLowerCase().includes(q)) ||
+          (v.bankAccountNo && v.bankAccountNo.toLowerCase().includes(q))
+        );
+
+        return `
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
+            <div>
+              <h1 class="text-xl font-semibold tracking-tight text-slate-900">Vendors</h1>
+              <p class="text-xs text-slate-500 mt-0.5">Supplier directory and beneficiary bank details.</p>
+            </div>
+            <button
+              type="button"
+              onclick="app.openAddVendorModal()"
+              class="min-h-[44px] sm:min-h-[38px] px-4 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-medium inline-flex items-center justify-center gap-1.5 transition-colors"
+            >
+              <i data-lucide="plus" class="w-4 h-4"></i>
+              Add Vendor
+            </button>
+          </div>
+
+          <!-- Search Input -->
+          <div class="mb-4 max-w-sm relative">
+            <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"></i>
+            <input
+              type="text"
+              value="${escapeHtml(ui.vendorSearch)}"
+              oninput="app.setVendorSearch(this.value)"
+              placeholder="Search vendor name or GSTIN..."
+              class="w-full min-h-[44px] sm:min-h-[38px] pl-9 pr-3 rounded-lg border border-slate-200 bg-white text-sm text-slate-900 placeholder:text-slate-400 outline-none focus:border-slate-500"
+            />
+          </div>
+
+          <!-- Desktop Vendors Table -->
+          <div class="hidden md:block bg-white rounded-xl border border-slate-200 overflow-hidden">
+            <table class="w-full text-left border-collapse">
+              <thead>
+                <tr class="bg-slate-50 border-b border-slate-200 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                  <th class="py-3 pl-5 pr-3">Vendor Name</th>
+                  <th class="py-3 px-3">GSTIN</th>
+                  <th class="py-3 px-3">Bank Account No</th>
+                  <th class="py-3 pl-3 pr-5">IFSC Code</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-100 text-sm">
+                ${filtered.length === 0 ? `
+                  <tr><td colspan="4" class="py-8 text-center text-xs text-slate-500">No vendors found.</td></tr>
+                ` : filtered.map(v => `
+                  <tr class="hover:bg-slate-50/70">
+                    <td class="py-3.5 pl-5 pr-3 font-medium text-slate-900">${escapeHtml(v.name)}</td>
+                    <td class="py-3.5 px-3 text-xs text-slate-600 tabular-nums">${escapeHtml(v.gstin || '—')}</td>
+                    <td class="py-3.5 px-3 text-xs text-slate-600 tabular-nums">${escapeHtml(v.bankAccountNo || '—')}</td>
+                    <td class="py-3.5 pl-3 pr-5 text-xs text-slate-600 tabular-nums">${escapeHtml(v.ifscCode || '—')}</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Mobile Vendors Cards -->
+          <div class="md:hidden space-y-3">
+            ${filtered.map(v => `
+              <div class="bg-white rounded-xl border border-slate-200 p-4 space-y-1.5">
+                <div class="text-sm font-semibold text-slate-900">${escapeHtml(v.name)}</div>
+                <div class="text-xs text-slate-500 tabular-nums">GSTIN: ${escapeHtml(v.gstin || '—')}</div>
+                <div class="text-xs text-slate-500 tabular-nums">A/C: ${escapeHtml(v.bankAccountNo || '—')} · IFSC: ${escapeHtml(v.ifscCode || '—')}</div>
+              </div>
+            `).join('')}
+          </div>
+        `;
+      }
+
+      // =========================================================================
+      // 7. SHARED HISTORY VIEW (OWNER & ACCOUNTANT ONLY)
+      // =========================================================================
+      function renderHistoryView() {
+        const q = ui.historySearch.trim().toLowerCase();
+        const filtered = db.payments.filter(p => {
+          if (ui.historyStatus !== 'ALL' && p.status !== ui.historyStatus) return false;
+          if (ui.historyBank !== 'ALL' && p.bankId !== ui.historyBank) return false;
+          if (!q) return true;
+          return (
+            p.vendorName.toLowerCase().includes(q) ||
+            p.invoiceRef.toLowerCase().includes(q) ||
+            p.purpose.toLowerCase().includes(q) ||
+            (p.utrNumber && p.utrNumber.toLowerCase().includes(q))
+          );
+        });
+        const total = filtered.reduce((sum, p) => sum + netPayable(p), 0);
+
+        return `
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
+            <div>
+              <h1 class="text-xl font-semibold tracking-tight text-slate-900">History</h1>
+              <p class="text-xs text-slate-500 mt-0.5">Search past approvals, UTR references, and export audit sheets.</p>
+            </div>
+            <div class="flex items-center gap-2">
+              <button
+                type="button"
+                onclick="app.exportCsv()"
+                class="min-h-[44px] sm:min-h-[38px] px-3.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs font-medium text-slate-700 inline-flex items-center gap-1.5 transition-colors"
+              >
+                <i data-lucide="download" class="w-3.5 h-3.5 text-slate-500"></i>
+                Export CSV
+              </button>
+              <button
+                type="button"
+                onclick="app.openPrintModal()"
+                class="min-h-[44px] sm:min-h-[38px] px-3.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-medium inline-flex items-center gap-1.5 transition-colors"
+              >
+                <i data-lucide="printer" class="w-3.5 h-3.5"></i>
+                Print Form
+              </button>
+            </div>
+          </div>
+
+          <!-- Single Clean Filter Bar -->
+          <div class="bg-white rounded-xl border border-slate-200 p-3 mb-4 grid grid-cols-1 sm:grid-cols-12 gap-2.5">
+            <div class="sm:col-span-6 relative">
+              <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"></i>
+              <input
+                type="text"
+                value="${escapeHtml(ui.historySearch)}"
+                oninput="app.setHistoryFilter('historySearch', this.value)"
+                placeholder="Search vendor, invoice #, or UTR..."
+                class="w-full min-h-[44px] sm:min-h-[38px] pl-9 pr-3 rounded-lg border border-slate-200 bg-slate-50/70 focus:bg-white text-xs sm:text-sm text-slate-900 placeholder:text-slate-400 outline-none focus:border-slate-400"
+              />
+            </div>
+            <div class="sm:col-span-3">
+              <select
+                onchange="app.setHistoryFilter('historyStatus', this.value)"
+                class="w-full min-h-[44px] sm:min-h-[38px] px-3 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-700 outline-none focus:border-slate-400"
+              >
+                <option value="ALL" ${ui.historyStatus === 'ALL' ? 'selected' : ''}>All Statuses</option>
+                <option value="DRAFT" ${ui.historyStatus === 'DRAFT' ? 'selected' : ''}>Draft</option>
+                <option value="PENDING_APPROVAL" ${ui.historyStatus === 'PENDING_APPROVAL' ? 'selected' : ''}>Pending</option>
+                <option value="ON_HOLD" ${ui.historyStatus === 'ON_HOLD' ? 'selected' : ''}>On Hold</option>
+                <option value="APPROVED" ${ui.historyStatus === 'APPROVED' ? 'selected' : ''}>Ready to Pay</option>
+                <option value="PAID" ${ui.historyStatus === 'PAID' ? 'selected' : ''}>Paid</option>
+                <option value="REJECTED" ${ui.historyStatus === 'REJECTED' ? 'selected' : ''}>Rejected</option>
+              </select>
+            </div>
+            <div class="sm:col-span-3">
+              <select
+                onchange="app.setHistoryFilter('historyBank', this.value)"
+                class="w-full min-h-[44px] sm:min-h-[38px] px-3 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-700 outline-none focus:border-slate-400"
+              >
+                <option value="ALL" ${ui.historyBank === 'ALL' ? 'selected' : ''}>All Banks</option>
+                ${db.banks.map(b => `<option value="${b.id}" ${ui.historyBank === b.id ? 'selected' : ''}>${escapeHtml(b.fullName)}</option>`).join('')}
+              </select>
+            </div>
+          </div>
+
+          ${renderPaymentsTableOrCards(filtered, total, 'history')}
+        `;
+      }
+
+      // =========================================================================
+      // 8. ROLE 3: STOCK STAFF VIEWS (STRICTLY ISOLATED)
+      // =========================================================================
+      function renderStaffUploadView() {
+        return `
+          <div class="max-w-lg mx-auto">
+            <div class="hidden lg:block mb-5">
+              <h1 class="text-xl font-semibold tracking-tight text-slate-900">Upload Supplier Invoice</h1>
+              <p class="text-xs text-slate-500 mt-0.5">Send vendor bills directly to the Accounts team.</p>
+            </div>
+
+            <div class="bg-white rounded-xl border border-slate-200 p-5 sm:p-6">
+              <h2 class="text-base font-semibold text-slate-900 mb-4 lg:hidden">Upload Supplier Invoice</h2>
+
+              <form id="staff-upload-form" onsubmit="app.handleStaffUpload(event)" class="space-y-4">
+                <!-- Large Tap-to-Upload Dropzone -->
+                <div>
+                  <label class="block text-xs font-medium text-slate-700 mb-1.5">Invoice Photo or PDF <span class="text-rose-600">*</span></label>
+                  <input id="staff-file-input" type="file" accept="image/*,application/pdf" class="hidden" onchange="app.handleStaffFilePick(this)" />
+                  <div
+                    onclick="document.getElementById('staff-file-input').click()"
+                    class="cursor-pointer rounded-xl border-2 border-dashed ${ui.staffSelectedFile ? 'border-emerald-300 bg-emerald-50/40' : 'border-slate-200 hover:border-slate-300 bg-slate-50/70'} p-5 text-center transition-colors"
+                  >
+                    ${ui.staffSelectedFile ? `
+                      <div class="flex items-center justify-center gap-2 text-emerald-700">
+                        <i data-lucide="file-check-2" class="w-5 h-5 shrink-0"></i>
+                        <span class="text-xs font-semibold truncate max-w-[240px]">${escapeHtml(ui.staffSelectedFile)}</span>
+                      </div>
+                      <p class="text-[11px] text-slate-500 mt-1">Tap to replace file</p>
+                    ` : `
+                      <div class="w-10 h-10 rounded-full bg-white border border-slate-200 flex items-center justify-center mx-auto mb-2 text-slate-500">
+                        <i data-lucide="camera" class="w-5 h-5"></i>
+                      </div>
+                      <div class="text-xs font-medium text-slate-700">Tap to take photo or select Invoice PDF/Image</div>
+                      <div class="text-[11px] text-slate-400 mt-0.5">PDF, JPG, PNG up to 5MB</div>
+                    `}
+                  </div>
+                  ${!ui.staffSelectedFile ? `
+                    <div class="mt-1.5 text-right">
+                      <button type="button" onclick="app.attachSampleStaffFile()" class="text-[11px] font-medium text-blue-600 hover:underline">Attach sample invoice PDF</button>
+                    </div>
+                  ` : ''}
+                </div>
+
+                <!-- Vendor Select + New Vendor Option -->
+                <div>
+                  <label for="staff-vendor-select" class="block text-xs font-medium text-slate-700 mb-1.5">Vendor / Supplier <span class="text-rose-600">*</span></label>
+                  <select
+                    id="staff-vendor-select"
+                    onchange="app.toggleStaffCustomVendor(this.value)"
+                    class="w-full min-h-[44px] px-3 rounded-lg border border-slate-200 bg-white text-sm text-slate-900 outline-none focus:border-slate-900"
+                  >
+                    ${db.vendors.map(v => `<option value="${v.id}">${escapeHtml(v.name)}</option>`).join('')}
+                    <option value="__new__">+ Type a new vendor name...</option>
+                  </select>
+                  <input
+                    id="staff-vendor-custom"
+                    type="text"
+                    placeholder="Enter new vendor name"
+                    class="hidden mt-2 w-full min-h-[44px] px-3 rounded-lg border border-slate-200 bg-white text-sm text-slate-900 outline-none focus:border-slate-900"
+                  />
+                </div>
+
+                <!-- Invoice / PI Number -->
+                <div>
+                  <label for="staff-invoice-ref" class="block text-xs font-medium text-slate-700 mb-1.5">Invoice / PI Number <span class="text-rose-600">*</span></label>
+                  <input
+                    id="staff-invoice-ref"
+                    type="text"
+                    required
+                    placeholder="e.g., INV-9145 or PI-204"
+                    class="w-full min-h-[44px] px-3 rounded-lg border border-slate-200 bg-white text-sm text-slate-900 tabular-nums outline-none focus:border-slate-900"
+                  />
+                </div>
+
+                <!-- Bill Amount (Optional) -->
+                <div>
+                  <label for="staff-amount" class="block text-xs font-medium text-slate-700 mb-1.5">Bill Amount ₹ <span class="text-slate-400 font-normal">(Optional)</span></label>
+                  <input
+                    id="staff-amount"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    placeholder="0.00"
+                    class="w-full min-h-[44px] px-3 rounded-lg border border-slate-200 bg-white text-sm text-slate-900 tabular-nums outline-none focus:border-slate-900"
+                  />
+                </div>
+
+                <!-- Note for Accountant -->
+                <div>
+                  <label for="staff-note" class="block text-xs font-medium text-slate-700 mb-1.5">Note for Accountant <span class="text-slate-400 font-normal">(Optional)</span></label>
+                  <textarea
+                    id="staff-note"
+                    rows="2"
+                    placeholder="e.g., Urgent plywood restock order"
+                    class="w-full p-3 rounded-lg border border-slate-200 bg-white text-sm text-slate-900 outline-none focus:border-slate-900 resize-none"
+                  ></textarea>
+                </div>
+
+                <button
+                  type="submit"
+                  class="w-full min-h-[44px] rounded-lg bg-slate-900 hover:bg-slate-800 active:scale-[0.99] text-white text-sm font-medium transition-all"
+                >
+                  Send to Accountant
+                </button>
+              </form>
+            </div>
+          </div>
+        `;
+      }
+
+      function renderStaffUploadsList() {
+        const user = getCurrentUser();
+        const myBills = db.incomingBills.filter(b => b.uploadedBy === user.id);
+
+        return `
+          <div class="max-w-2xl mx-auto">
+            <div class="flex items-center justify-between mb-5">
+              <div>
+                <h1 class="text-xl font-semibold tracking-tight text-slate-900">My Uploads</h1>
+                <p class="text-xs text-slate-500 mt-0.5">Bills you have submitted to the Accounts team.</p>
+              </div>
+              <button
+                type="button"
+                onclick="app.navigate('upload')"
+                class="min-h-[40px] px-3.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-medium inline-flex items-center gap-1.5"
+              >
+                <i data-lucide="upload" class="w-3.5 h-3.5"></i>
+                Upload New
+              </button>
+            </div>
+
+            ${myBills.length === 0 ? `
+              <div class="bg-white rounded-xl border border-slate-200 p-10 text-center">
+                <div class="text-sm font-semibold text-slate-900">No bills uploaded yet</div>
+                <p class="text-xs text-slate-500 mt-1">Uploaded supplier invoices will appear here so you can track handoff.</p>
+              </div>
+            ` : `
+              <div class="space-y-3">
+                ${myBills.map(b => {
+                  const statusPill = b.status === 'CONVERTED'
+                    ? `<span class="inline-flex items-center px-2.5 py-0.5 rounded-md text-[11px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">Added to Payment Queue</span>`
+                    : b.status === 'DISMISSED'
+                      ? `<span class="inline-flex items-center px-2.5 py-0.5 rounded-md text-[11px] font-medium bg-slate-100 text-slate-600 border border-slate-200">Dismissed</span>`
+                      : `<span class="inline-flex items-center px-2.5 py-0.5 rounded-md text-[11px] font-medium bg-amber-50 text-amber-700 border border-amber-200">Waiting for Accountant</span>`;
+                  return `
+                    <div class="bg-white rounded-xl border border-slate-200 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div class="min-w-0">
+                        <div class="flex items-center gap-2 flex-wrap">
+                          <span class="text-sm font-semibold text-slate-900">${escapeHtml(b.vendorName)}</span>
+                          <span class="text-xs text-slate-500 tabular-nums">Ref: ${escapeHtml(b.invoiceRef)}</span>
+                        </div>
+                        <div class="text-xs text-slate-500 mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
+                          <span class="tabular-nums">${formatHumanDate(b.createdAt)}</span>
+                          ${b.estimatedAmount ? `<span>·</span><span class="tabular-nums font-medium text-slate-700">${formatINR(b.estimatedAmount)}</span>` : ''}
+                          <span>·</span>
+                          <span class="inline-flex items-center gap-1 text-slate-600"><i data-lucide="paperclip" class="w-3 h-3"></i>${escapeHtml(b.fileName)}</span>
+                        </div>
+                      </div>
+                      <div class="shrink-0">${statusPill}</div>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            `}
+          </div>
+        `;
+      }
+
+      // =========================================================================
+      // 9. PAYMENT DETAIL SLIDE-OVER DRAWER (WITH SECURE PREVIEW & AUDIT LOG)
+      // =========================================================================
+      function renderDetailDrawerHtml(item) {
+        const net = netPayable(item);
+        const bank = getBank(item.bankId);
+        const vendor = getVendor(item.vendorId);
+        const isLocked = item.status === 'APPROVED' || item.status === 'PAID';
+
+        return `
+          <!-- Header -->
+          <div class="px-5 py-4 border-b border-slate-200 flex items-start justify-between gap-3">
+            <div class="min-w-0">
+              <div class="flex items-center gap-2 flex-wrap">
+                ${statusBadge(item.status)}
+                ${isLocked ? `<span class="inline-flex items-center gap-1 text-[11px] font-medium text-slate-500"><i data-lucide="lock" class="w-3 h-3"></i>Locked</span>` : ''}
+              </div>
+              <h2 class="text-base font-semibold text-slate-900 truncate mt-1.5">${escapeHtml(item.vendorName)}</h2>
+              <div class="text-xl font-bold text-slate-900 tabular-nums mt-0.5">${formatINR(net)}</div>
+            </div>
+            <button type="button" onclick="app.closeDetailDrawer()" class="p-2 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700">
+              <i data-lucide="x" class="w-4 h-4"></i>
+            </button>
+          </div>
+
+          <!-- Body -->
+          <div class="flex-1 overflow-y-auto p-5 space-y-5">
+            ${item.status === 'REJECTED' && item.rejectionReason ? `
+              <div class="p-3 rounded-lg bg-rose-50 border border-rose-200 text-xs text-rose-700">
+                <div class="font-semibold mb-0.5">Rejection Reason</div>
+                <div>${escapeHtml(item.rejectionReason)}</div>
+              </div>
+            ` : ''}
+
+            <!-- Key-Value Details Grid -->
+            <div class="rounded-xl border border-slate-200 divide-y divide-slate-100 text-xs">
+              <div class="px-3.5 py-2.5 flex justify-between gap-3"><span class="text-slate-500">Sheet Date</span><span class="font-medium text-slate-900 tabular-nums">${formatHumanDate(item.sheetDate)}</span></div>
+              <div class="px-3.5 py-2.5 flex justify-between gap-3"><span class="text-slate-500">Invoice / Ref No</span><span class="font-medium text-slate-900 tabular-nums">${escapeHtml(item.invoiceRef)}</span></div>
+              <div class="px-3.5 py-2.5 flex justify-between gap-3"><span class="text-slate-500">Due Date</span><span class="font-medium text-slate-900 tabular-nums">${formatHumanDate(item.dueDate)}</span></div>
+              <div class="px-3.5 py-2.5 flex justify-between gap-3"><span class="text-slate-500">Purpose</span><span class="font-medium text-slate-900">${escapeHtml(item.purpose)}</span></div>
+              <div class="px-3.5 py-2.5 flex justify-between gap-3"><span class="text-slate-500">Gross Amount</span><span class="font-medium text-slate-900 tabular-nums">${formatINR(item.amount)}</span></div>
+              <div class="px-3.5 py-2.5 flex justify-between gap-3"><span class="text-slate-500">TDS Deduction</span><span class="font-medium text-slate-900 tabular-nums">${item.tds > 0 ? formatINR(item.tds) : 'NA'}</span></div>
+              <div class="px-3.5 py-2.5 flex justify-between gap-3 items-center"><span class="text-slate-500">Source Bank</span><span class="font-medium text-slate-900">${escapeHtml(bank.fullName)}</span></div>
+              ${item.utrNumber ? `
+                <div class="px-3.5 py-2.5 flex justify-between gap-3 items-center">
+                  <span class="text-slate-500">UTR / Ref No</span>
+                  <span class="inline-flex items-center gap-1.5 font-semibold text-emerald-700 tabular-nums">
+                    ${escapeHtml(item.utrNumber)}
+                    <button type="button" onclick="app.copyUtr('${escapeHtml(item.utrNumber)}')" class="p-1 rounded hover:bg-slate-100 text-slate-400 hover:text-slate-700" title="Copy UTR">
+                      <i data-lucide="copy" class="w-3.5 h-3.5"></i>
+                    </button>
+                  </span>
+                </div>
+              ` : ''}
+              ${item.remarks ? `<div class="px-3.5 py-2.5 flex justify-between gap-4"><span class="text-slate-500 shrink-0">Remarks</span><span class="text-slate-800 text-right">${escapeHtml(item.remarks)}</span></div>` : ''}
+            </div>
+
+            <!-- Documents Section (Simulated Signed-URL Previews) -->
+            <div class="space-y-3">
+              <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Documents (Private Signed URLs)</div>
+
+              <!-- Supplier Invoice Card -->
+              <div class="rounded-xl border border-slate-200 overflow-hidden">
+                <div class="px-3.5 py-2.5 bg-slate-50 border-b border-slate-200 flex items-center justify-between gap-2">
+                  <div class="flex items-center gap-2 min-w-0">
+                    <i data-lucide="file-text" class="w-4 h-4 text-slate-500 shrink-0"></i>
+                    <span class="text-xs font-medium text-slate-800 truncate">${escapeHtml(item.invoiceFileName || 'No invoice attached')}</span>
+                  </div>
+                  <span class="text-[10px] font-medium text-slate-500 shrink-0">Supplier Invoice</span>
+                </div>
+                ${item.invoiceFileName ? `
+                  <div class="p-3.5 bg-white text-xs space-y-2">
+                    <div class="flex justify-between text-[11px] text-slate-500">
+                      <span><strong class="text-slate-800">${escapeHtml(item.vendorName)}</strong>${vendor && vendor.gstin ? ` · GSTIN ${escapeHtml(vendor.gstin)}` : ''}</span>
+                      <span class="tabular-nums">Ref: ${escapeHtml(item.invoiceRef)}</span>
+                    </div>
+                    <div class="flex justify-between items-center pt-2 border-t border-dashed border-slate-200">
+                      <span class="text-[11px] text-slate-400 inline-flex items-center gap-1"><i data-lucide="shield-check" class="w-3 h-3 text-emerald-600"></i>Signed preview · expires in 5m</span>
+                      <span class="font-semibold text-slate-900 tabular-nums">${formatINR(item.amount)}</span>
+                    </div>
+                  </div>
+                ` : ''}
+              </div>
+
+              <!-- Bank Receipt Card (When Paid) -->
+              ${item.receiptFileName ? `
+                <div class="rounded-xl border border-emerald-200 overflow-hidden">
+                  <div class="px-3.5 py-2.5 bg-emerald-50/70 border-b border-emerald-200 flex items-center justify-between gap-2">
+                    <div class="flex items-center gap-2 min-w-0">
+                      <i data-lucide="receipt" class="w-4 h-4 text-emerald-700 shrink-0"></i>
+                      <span class="text-xs font-medium text-emerald-900 truncate">${escapeHtml(item.receiptFileName)}</span>
+                    </div>
+                    <span class="text-[10px] font-semibold text-emerald-700 shrink-0">Bank Receipt</span>
+                  </div>
+                  <div class="p-3.5 bg-white text-xs space-y-1.5">
+                    <div class="flex justify-between"><span class="text-slate-500">Disbursed From</span><span class="font-medium text-slate-800">${escapeHtml(bank.fullName)} (${escapeHtml(bank.accountMask || '')})</span></div>
+                    <div class="flex justify-between"><span class="text-slate-500">UTR Reference</span><span class="font-semibold text-slate-900 tabular-nums">${escapeHtml(item.utrNumber)}</span></div>
+                    <div class="flex justify-between"><span class="text-slate-500">Settled Amount</span><span class="font-semibold text-emerald-700 tabular-nums">${formatINR(net)}</span></div>
+                  </div>
+                </div>
+              ` : ''}
+            </div>
+
+            <!-- Collapsible Activity / Audit Log Timeline -->
+            <details open class="rounded-xl border border-slate-200 bg-white">
+              <summary class="px-3.5 py-2.5 cursor-pointer text-xs font-semibold text-slate-700 flex items-center justify-between select-none">
+                <span>Activity & Audit Log (${item.auditLogs.length})</span>
+                <i data-lucide="chevron-down" class="w-4 h-4 text-slate-400"></i>
+              </summary>
+              <div class="px-4 pb-4 pt-2 border-t border-slate-100">
+                <ol class="relative border-l border-slate-200 ml-1.5 space-y-3.5">
+                  ${item.auditLogs.map(log => `
+                    <li class="ml-4">
+                      <span class="absolute -left-[4.5px] mt-1.5 w-2 h-2 rounded-full bg-slate-400"></span>
+                      <div class="text-xs font-medium text-slate-800">${escapeHtml(log.detail)}</div>
+                      <div class="text-[11px] text-slate-500 mt-0.5 tabular-nums">${escapeHtml(log.actor)} · ${escapeHtml(log.time)}</div>
+                    </li>
+                  `).join('')}
+                </ol>
+              </div>
+            </details>
+          </div>
+
+          <!-- Footer -->
+          <div class="px-5 py-3.5 border-t border-slate-200 bg-slate-50 flex justify-end">
+            <button type="button" onclick="app.closeDetailDrawer()" class="min-h-[40px] px-4 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 text-xs font-medium text-slate-700">
+              Close
+            </button>
+          </div>
+        `;
+      }
+
+      // =========================================================================
+      // 10. ACCOUNTANT NEW / EDIT PAYMENT SLIDE-OVER DRAWER
+      // =========================================================================
+      function renderEntryDrawerHtml(editItem = null, incomingBill = null) {
+        const activeBanks = db.banks.filter(b => b.isActive);
+        const defaultDate = editItem ? editItem.sheetDate : '2026-11-23';
+        const defaultDue = editItem ? editItem.dueDate : '2026-11-26';
+        const defaultVendorId = editItem ? editItem.vendorId : (incomingBill && incomingBill.vendorId ? incomingBill.vendorId : (db.vendors[0] ? db.vendors[0].id : ''));
+        const defaultRef = editItem ? editItem.invoiceRef : (incomingBill ? incomingBill.invoiceRef : '');
+        const defaultPurpose = editItem ? editItem.purpose : 'Against Bill';
+        const defaultAmount = editItem ? editItem.amount : (incomingBill && incomingBill.estimatedAmount ? incomingBill.estimatedAmount : '');
+        const defaultTds = editItem ? editItem.tds : 0;
+        const defaultBankId = editItem ? editItem.bankId : (activeBanks[0] ? activeBanks[0].id : '');
+        const defaultRemarks = editItem ? editItem.remarks : (incomingBill ? incomingBill.note : '');
+
+        ui.entryFileName = editItem ? (editItem.invoiceFileName || '') : (incomingBill ? incomingBill.fileName : '');
+
+        const presets = ['Against Bill', 'Against PI', 'Transfer', 'Electricity Charge', 'Advance'];
+
+        return `
+          <div class="px-5 py-4 border-b border-slate-200 flex items-center justify-between">
+            <div>
+              <h2 class="text-base font-semibold text-slate-900">${editItem ? 'Edit Draft Entry' : incomingBill ? 'Convert Incoming Bill' : 'New Payment Entry'}</h2>
+              <p class="text-xs text-slate-500 mt-0.5">Save as draft or submit directly for Owner approval.</p>
+            </div>
+            <button type="button" onclick="app.closeEntryDrawer()" class="p-2 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700">
+              <i data-lucide="x" class="w-4 h-4"></i>
+            </button>
+          </div>
+
+          <form id="entry-form" onsubmit="app.savePaymentEntry(event, 'PENDING_APPROVAL')" class="flex-1 overflow-y-auto p-5 space-y-4">
+            <input type="hidden" id="entry-edit-id" value="${editItem ? editItem.id : ''}" />
+            <input type="hidden" id="entry-bill-id" value="${incomingBill ? incomingBill.id : ''}" />
+
+            <!-- Sheet Date & Due Date -->
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="block text-xs font-medium text-slate-700 mb-1">Sheet Date <span class="text-rose-600">*</span></label>
+                <input id="entry-date" type="date" required value="${defaultDate}" class="w-full min-h-[44px] sm:min-h-[38px] px-3 rounded-lg border border-slate-200 bg-white text-xs sm:text-sm tabular-nums outline-none focus:border-slate-900" />
+              </div>
+              <div>
+                <label class="block text-xs font-medium text-slate-700 mb-1">Due Date <span class="text-rose-600">*</span></label>
+                <input id="entry-due" type="date" required value="${defaultDue}" class="w-full min-h-[44px] sm:min-h-[38px] px-3 rounded-lg border border-slate-200 bg-white text-xs sm:text-sm tabular-nums outline-none focus:border-slate-900" />
+              </div>
+            </div>
+
+            <!-- Vendor Select + Inline Quick Add Vendor -->
+            <div>
+              <div class="flex items-center justify-between mb-1">
+                <label for="entry-vendor" class="text-xs font-medium text-slate-700">Vendor / Supplier <span class="text-rose-600">*</span></label>
+                <button type="button" onclick="app.toggleInlineVendorAdd()" class="text-[11px] font-medium text-blue-600 hover:underline">+ Quick Add Vendor</button>
+              </div>
+              <select id="entry-vendor" onchange="app.checkDuplicateInvoice()" class="w-full min-h-[44px] sm:min-h-[38px] px-3 rounded-lg border border-slate-200 bg-white text-sm text-slate-900 outline-none focus:border-slate-900">
+                ${db.vendors.map(v => `<option value="${v.id}" ${v.id === defaultVendorId ? 'selected' : ''}>${escapeHtml(v.name)}</option>`).join('')}
+              </select>
+
+              <!-- Inline Quick Add Box -->
+              <div id="inline-vendor-box" class="hidden mt-2 p-3 rounded-lg bg-slate-50 border border-slate-200 flex items-center gap-2">
+                <input id="inline-vendor-name" type="text" placeholder="New vendor name" class="flex-1 h-9 px-2.5 rounded-md border border-slate-200 bg-white text-xs outline-none focus:border-slate-900" />
+                <button type="button" onclick="app.quickAddVendor()" class="h-9 px-3 rounded-md bg-slate-900 text-white text-xs font-medium shrink-0">Add</button>
+              </div>
+            </div>
+
+            <!-- Invoice / Ref No + Duplicate Warning -->
+            <div>
+              <label for="entry-ref" class="block text-xs font-medium text-slate-700 mb-1">Invoice / Ref No <span class="text-rose-600">*</span></label>
+              <input
+                id="entry-ref"
+                type="text"
+                required
+                value="${escapeHtml(defaultRef)}"
+                oninput="app.checkDuplicateInvoice()"
+                placeholder="e.g., 0282, INV-8841, On Account, NA"
+                class="w-full min-h-[44px] sm:min-h-[38px] px-3 rounded-lg border border-slate-200 bg-white text-sm tabular-nums outline-none focus:border-slate-900"
+              />
+              <div id="dup-invoice-banner" class="hidden mt-2 p-2.5 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-800 flex items-start gap-2">
+                <i data-lucide="alert-triangle" class="w-4 h-4 text-amber-600 shrink-0 mt-0.5"></i>
+                <span>Duplicate invoice warning: This vendor already has an active entry with the same Invoice / Ref No.</span>
+              </div>
+            </div>
+
+            <!-- Purpose Preset Chips + Input -->
+            <div>
+              <label for="entry-purpose" class="block text-xs font-medium text-slate-700 mb-1.5">Purpose <span class="text-rose-600">*</span></label>
+              <div class="flex flex-wrap gap-1.5 mb-2">
+                ${presets.map(p => `
+                  <button type="button" onclick="app.setEntryPurpose('${p}')" class="px-2.5 py-1 rounded-md border border-slate-200 bg-slate-50 hover:bg-slate-100 text-[11px] font-medium text-slate-700 transition-colors">${p}</button>
+                `).join('')}
+              </div>
+              <input id="entry-purpose" type="text" required value="${escapeHtml(defaultPurpose)}" class="w-full min-h-[44px] sm:min-h-[38px] px-3 rounded-lg border border-slate-200 bg-white text-sm outline-none focus:border-slate-900" />
+            </div>
+
+            <!-- Amount & TDS + Live Net Payable -->
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label for="entry-amount" class="block text-xs font-medium text-slate-700 mb-1">Amount (₹) <span class="text-rose-600">*</span></label>
+                <input id="entry-amount" type="number" step="0.01" min="0.01" required value="${defaultAmount}" oninput="app.updateEntryNet()" placeholder="0.00" class="w-full min-h-[44px] sm:min-h-[38px] px-3 rounded-lg border border-slate-200 bg-white text-sm font-medium tabular-nums outline-none focus:border-slate-900" />
+              </div>
+              <div>
+                <label for="entry-tds" class="block text-xs font-medium text-slate-700 mb-1">TDS (₹)</label>
+                <input id="entry-tds" type="number" step="0.01" min="0" value="${defaultTds}" oninput="app.updateEntryNet()" placeholder="0.00" class="w-full min-h-[44px] sm:min-h-[38px] px-3 rounded-lg border border-slate-200 bg-white text-sm tabular-nums outline-none focus:border-slate-900" />
+              </div>
+            </div>
+
+            <div class="px-3.5 py-2.5 rounded-lg bg-slate-50 border border-slate-200 flex items-center justify-between text-xs">
+              <span class="text-slate-500 font-medium">Net Payable</span>
+              <span id="entry-net-display" class="text-sm font-bold text-slate-900 tabular-nums">${formatINR((Number(defaultAmount) || 0) - (Number(defaultTds) || 0))}</span>
+            </div>
+
+            <!-- Source Bank -->
+            <div>
+              <label for="entry-bank" class="block text-xs font-medium text-slate-700 mb-1">Source Bank <span class="text-rose-600">*</span></label>
+              <select id="entry-bank" class="w-full min-h-[44px] sm:min-h-[38px] px-3 rounded-lg border border-slate-200 bg-white text-sm text-slate-900 outline-none focus:border-slate-900">
+                ${activeBanks.map(b => `<option value="${b.id}" ${b.id === defaultBankId ? 'selected' : ''}>${escapeHtml(b.fullName)} (${escapeHtml(b.shortName)})</option>`).join('')}
+              </select>
+            </div>
+
+            <!-- Invoice Attachment -->
+            <div>
+              <label class="block text-xs font-medium text-slate-700 mb-1">Invoice File (PDF / Image)</label>
+              <input id="entry-file-input" type="file" accept="image/*,application/pdf" class="hidden" onchange="app.handleEntryFilePick(this)" />
+              <div class="px-3 py-2.5 rounded-lg border border-dashed border-slate-300 bg-slate-50 flex items-center justify-between gap-2">
+                <span id="entry-file-label" class="text-xs text-slate-600 truncate">${escapeHtml(ui.entryFileName || 'No file selected')}</span>
+                <button type="button" onclick="document.getElementById('entry-file-input').click()" class="px-2.5 py-1 rounded-md border border-slate-200 bg-white hover:bg-slate-100 text-xs font-medium text-slate-700 shrink-0">Choose File</button>
+              </div>
+            </div>
+
+            <!-- Remarks -->
+            <div>
+              <label for="entry-remarks" class="block text-xs font-medium text-slate-700 mb-1">Remarks</label>
+              <input id="entry-remarks" type="text" value="${escapeHtml(defaultRemarks)}" placeholder="Optional notes" class="w-full min-h-[44px] sm:min-h-[38px] px-3 rounded-lg border border-slate-200 bg-white text-sm outline-none focus:border-slate-900" />
+            </div>
+          </form>
+
+          <!-- Footer Buttons -->
+          <div class="px-5 py-3.5 border-t border-slate-200 bg-slate-50 flex items-center gap-2.5">
+            <button type="button" onclick="app.savePaymentEntry(null, 'DRAFT')" class="flex-1 min-h-[44px] sm:min-h-[40px] px-3 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 text-xs font-medium text-slate-700 transition-colors">
+              Save as Draft
+            </button>
+            <button type="submit" form="entry-form" class="flex-1 min-h-[44px] sm:min-h-[40px] px-3 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-medium transition-colors">
+              Submit for Approval
+            </button>
+          </div>
+        `;
+      }
+
+      // =========================================================================
+      // 11. PRINTABLE A4 INDFURN PAYMENT APPROVAL FORM
+      // =========================================================================
+      function renderPrintSheetHtml(selectedDate) {
+        let rows = db.payments.filter(p => p.status !== 'DRAFT' && p.status !== 'REJECTED' && p.status !== 'CANCELLED');
+        if (selectedDate !== 'ALL') {
+          rows = rows.filter(p => p.sheetDate === selectedDate);
+        }
+
+        const totalGross = rows.reduce((sum, r) => sum + Number(r.amount || 0), 0);
+        const totalTds = rows.reduce((sum, r) => sum + Number(r.tds || 0), 0);
+
+        const firstPrepared = rows.find(r => r.preparedBy);
+        const firstApproved = rows.find(r => r.approvedBy);
+
+        return `
+          <!-- Header -->
+          <div class="mb-5">
+            <h1 class="text-center text-lg font-bold tracking-tight text-slate-900">Payment Approval Form</h1>
+            <div class="mt-3 flex items-center justify-between text-xs font-semibold text-slate-900 border-b border-slate-800 pb-2">
+              <span>INDFURN</span>
+              <span class="tabular-nums">Date: ${selectedDate === 'ALL' ? 'All Dates' : formatDDMMYYYY(selectedDate)}</span>
+            </div>
+          </div>
+
+          <!-- Exact Replicated Table -->
+          <table class="w-full border-collapse border border-slate-800 text-xs">
+            <thead>
+              <tr class="bg-slate-100 text-slate-900 font-semibold">
+                <th class="border border-slate-800 py-2 px-1.5 text-center w-10">SL No.</th>
+                <th class="border border-slate-800 py-2 px-2 text-left">Vendor/Supplier</th>
+                <th class="border border-slate-800 py-2 px-2 text-center">Invoice / Ref No</th>
+                <th class="border border-slate-800 py-2 px-2 text-center">Due Date</th>
+                <th class="border border-slate-800 py-2 px-2 text-center">Purpose</th>
+                <th class="border border-slate-800 py-2 px-2 text-right">Amount (₹)</th>
+                <th class="border border-slate-800 py-2 px-2 text-center">TDS (₹)</th>
+                <th class="border border-slate-800 py-2 px-2 text-center">Payment Ref NO</th>
+                <th class="border border-slate-800 py-2 px-2 text-center">Remarks</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows.map((r, i) => {
+                const bank = getBank(r.bankId);
+                return `
+                  <tr>
+                    <td class="border border-slate-800 py-2 px-1.5 text-center tabular-nums">${i + 1}</td>
+                    <td class="border border-slate-800 py-2 px-2 font-medium">${escapeHtml(r.vendorName)}</td>
+                    <td class="border border-slate-800 py-2 px-2 text-center tabular-nums">${escapeHtml(r.invoiceRef)}</td>
+                    <td class="border border-slate-800 py-2 px-2 text-center tabular-nums whitespace-nowrap">${formatShortDate(r.dueDate)}</td>
+                    <td class="border border-slate-800 py-2 px-2 text-center">${escapeHtml(r.purpose)}</td>
+                    <td class="border border-slate-800 py-2 px-2 text-right font-medium tabular-nums">${formatINRPlain(r.amount)}</td>
+                    <td class="border border-slate-800 py-2 px-2 text-center tabular-nums">${r.tds > 0 ? formatINRPlain(r.tds) : 'NA'}</td>
+                    <td class="border border-slate-800 py-2 px-2 text-center tabular-nums text-[11px]">${escapeHtml(r.utrNumber || '')}</td>
+                    <td class="border border-slate-800 py-2 px-2 text-center">${escapeHtml(bank.shortName)}</td>
+                  </tr>
+                `;
+              }).join('')}
+              ${rows.length < 6 ? Array.from({ length: 6 - rows.length }).map(() => `
+                <tr class="h-7">
+                  <td class="border border-slate-800"></td>
+                  <td class="border border-slate-800"></td>
+                  <td class="border border-slate-800"></td>
+                  <td class="border border-slate-800"></td>
+                  <td class="border border-slate-800"></td>
+                  <td class="border border-slate-800"></td>
+                  <td class="border border-slate-800"></td>
+                  <td class="border border-slate-800"></td>
+                  <td class="border border-slate-800"></td>
+                </tr>
+              `).join('') : ''}
+              <tr class="font-bold bg-slate-50">
+                <td colspan="5" class="border border-slate-800 py-2 px-3 text-right">Total</td>
+                <td class="border border-slate-800 py-2 px-2 text-right tabular-nums">${formatINRPlain(totalGross)}</td>
+                <td class="border border-slate-800 py-2 px-2 text-center tabular-nums">${totalTds > 0 ? formatINRPlain(totalTds) : 'NA'}</td>
+                <td colspan="2" class="border border-slate-800 py-2 px-2 text-center text-[11px] font-medium text-slate-600">Net: ${formatINR(totalGross - totalTds)}</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <!-- Footer Sign-Off Row -->
+          <div class="mt-12 grid grid-cols-3 gap-6 text-xs">
+            <div class="text-center">
+              <div class="h-10 flex flex-col justify-end pb-1 text-[11px] text-slate-700">
+                ${firstPrepared ? `<span class="font-medium">${escapeHtml(firstPrepared.preparedBy)}</span><span class="text-[10px] text-slate-500 tabular-nums">${escapeHtml(firstPrepared.preparedAt || '')}</span>` : ''}
+              </div>
+              <div class="border-t border-slate-500 pt-1.5 font-semibold text-slate-800">Prepared By</div>
+            </div>
+            <div class="text-center">
+              <div class="h-10"></div>
+              <div class="border-t border-slate-500 pt-1.5 font-semibold text-slate-800">Checked By</div>
+            </div>
+            <div class="text-center">
+              <div class="h-10 flex flex-col justify-end pb-1 text-[11px] text-slate-700">
+                ${firstApproved ? `<span class="font-semibold text-emerald-700">${escapeHtml(firstApproved.approvedBy)}</span><span class="text-[10px] text-slate-500 tabular-nums">${escapeHtml(firstApproved.approvedAt || '')}</span>` : '<span class="text-[10px] text-slate-400">Awaiting Approval</span>'}
+              </div>
+              <div class="border-t border-slate-500 pt-1.5 font-semibold text-slate-800">Approved By</div>
+            </div>
+          </div>
+        `;
+      }
+
+      // =========================================================================
+      // 12. MAIN RENDER ORCHESTRATOR
+      // =========================================================================
+      function render() {
+        const root = document.getElementById('app-root');
+        const user = getCurrentUser();
+
+        if (!user) {
+          root.innerHTML = renderLoginScreen();
+          refreshIcons();
+          return;
+        }
+
+        // Enforce strict role route guards
+        const allowedRoutes = {
+          OWNER: ['approvals', 'history', 'settings'],
+          ACCOUNTANT: ['payments', 'history', 'vendors'],
+          STAFF: ['upload', 'uploads'],
+        }[user.role];
+
+        if (!allowedRoutes.includes(ui.activeRoute)) {
+          ui.activeRoute = getDefaultRoute(user.role);
+        }
+
+        let mainHtml = '';
+        if (user.role === 'OWNER') {
+          if (ui.activeRoute === 'approvals') mainHtml = renderOwnerApprovals();
+          else if (ui.activeRoute === 'history') mainHtml = renderHistoryView();
+          else mainHtml = renderOwnerSettings();
+        } else if (user.role === 'ACCOUNTANT') {
+          if (ui.activeRoute === 'payments') mainHtml = renderAccountantPayments();
+          else if (ui.activeRoute === 'history') mainHtml = renderHistoryView();
+          else mainHtml = renderAccountantVendors();
+        } else {
+          if (ui.activeRoute === 'upload') mainHtml = renderStaffUploadView();
+          else mainHtml = renderStaffUploadsList();
+        }
+
+        root.innerHTML = renderAppShell(user, mainHtml);
+        refreshIcons();
+      }
+
+      // =========================================================================
+      // 13. PUBLIC APPLICATION CONTROLLERS
+      // =========================================================================
+      window.app = {
+        // --- Auth ---
+        fillDemoLogin(username, password) {
+          const uInput = document.getElementById('login-username');
+          const pInput = document.getElementById('login-password');
+          if (uInput) uInput.value = username;
+          if (pInput) pInput.value = password;
+          ui.loginError = '';
+        },
+
+        toggleLoginPassword() {
+          const uVal = (document.getElementById('login-username') || {}).value || '';
+          const pVal = (document.getElementById('login-password') || {}).value || '';
+          ui.showLoginPassword = !ui.showLoginPassword;
+          render();
+          const uEl = document.getElementById('login-username');
+          const pEl = document.getElementById('login-password');
+          if (uEl) uEl.value = uVal;
+          if (pEl) pEl.value = pVal;
+        },
+
+        handleLogin(e) {
+          e.preventDefault();
+          const username = document.getElementById('login-username').value.trim().toLowerCase();
+          const password = document.getElementById('login-password').value;
+
+          const found = db.users.find(u => u.username.toLowerCase() === username && u.password === password);
+          if (!found) {
+            ui.loginError = 'Invalid username or password. Please try again.';
+            render();
+            return;
+          }
+          if (!found.isActive) {
+            ui.loginError = 'This account has been disabled by the Administrator.';
+            render();
+            return;
+          }
+
+          ui.loginError = '';
+          db.currentUserId = found.id;
+          ui.activeRoute = getDefaultRoute(found.role);
+          saveStore();
+          render();
+          toast(`Signed in as ${found.fullName}`, 'success');
+        },
+
+        logout() {
+          db.currentUserId = null;
+          ui.activeRoute = '';
+          ui.loginError = '';
+          saveStore();
+          this.closeDetailDrawer();
+          this.closeEntryDrawer();
+          this.closeModal();
+          this.closePrintModal();
+          render();
+        },
+
+        resetDemoData() {
+          db = createSeedData();
+          saveStore();
+          ui.loginError = '';
+          render();
+          toast('Demo data restored to defaults', 'info');
+        },
+
+        // --- Navigation & Filters ---
+        navigate(route) {
+          ui.activeRoute = route;
+          render();
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        },
+
+        setOwnerApprovalTab(tab) {
+          ui.ownerApprovalTab = tab;
+          render();
+        },
+
+        setOwnerSettingsTab(tab) {
+          ui.ownerSettingsTab = tab;
+          render();
+        },
+
+        setAccountantTab(tab) {
+          ui.accountantTab = tab;
+          render();
+        },
+
+        setHistoryFilter(key, value) {
+          ui[key] = value;
+          render();
+        },
+
+        setVendorSearch(val) {
+          ui.vendorSearch = val;
+          render();
+        },
+
+        // --- Owner Actions ---
+        ownerSwitchBank(paymentId, newBankId) {
+          const item = db.payments.find(p => p.id === paymentId);
+          const user = getCurrentUser();
+          if (!item || !user || user.role !== 'OWNER' || item.bankId === newBankId) return;
+          const oldBank = getBank(item.bankId);
+          const newBank = getBank(newBankId);
+          item.bankId = newBankId;
+          item.auditLogs.push({
+            action: 'BANK_CHANGED',
+            detail: `Switched source bank from ${oldBank.shortName} to ${newBank.shortName}`,
+            actor: user.fullName,
+            time: nowTimestamp(),
+          });
+          saveStore();
+          render();
+          toast(`Bank switched to ${newBank.fullName}`, 'info');
+        },
+
+        openApproveModal(paymentId) {
+          const item = db.payments.find(p => p.id === paymentId);
+          if (!item) return;
+          const bank = getBank(item.bankId);
+          const net = netPayable(item);
+          const panel = document.getElementById('modal-panel');
+          panel.innerHTML = `
+            <div class="p-5 sm:p-6">
+              <h3 class="text-base font-semibold text-slate-900">Confirm Payment Approval</h3>
+              <p class="text-xs text-slate-500 mt-1">Once approved, vendor, invoice reference, and amount are permanently locked.</p>
+              <div class="mt-4 p-3.5 rounded-lg bg-slate-50 border border-slate-200 space-y-2 text-xs">
+                <div class="flex justify-between"><span class="text-slate-500">Vendor</span><span class="font-semibold text-slate-900">${escapeHtml(item.vendorName)}</span></div>
+                <div class="flex justify-between"><span class="text-slate-500">Selected Bank</span><span class="font-medium text-slate-800">${escapeHtml(bank.fullName)}</span></div>
+                <div class="flex justify-between pt-2 border-t border-slate-200"><span class="font-medium text-slate-700">Net Payable</span><span class="font-bold text-slate-900 tabular-nums text-sm">${formatINR(net)}</span></div>
+              </div>
+              <div class="mt-5 flex items-center gap-2.5">
+                <button type="button" onclick="app.closeModal()" class="flex-1 min-h-[44px] rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs font-medium text-slate-700">Cancel</button>
+                <button type="button" onclick="app.confirmApprove('${item.id}')" class="flex-1 min-h-[44px] rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-semibold">Confirm Approve</button>
+              </div>
+            </div>
+          `;
+          document.getElementById('modal-root').classList.remove('hidden');
+          refreshIcons();
+        },
+
+        confirmApprove(paymentId) {
+          const item = db.payments.find(p => p.id === paymentId);
+          const user = getCurrentUser();
+          if (!item || !user || user.role !== 'OWNER') return;
+          const bank = getBank(item.bankId);
+          const ts = nowTimestamp();
+          item.status = 'APPROVED';
+          item.approvedBy = user.fullName;
+          item.approvedAt = ts;
+          item.auditLogs.push({
+            action: 'APPROVED',
+            detail: `Approved ${formatINR(netPayable(item))} via ${bank.fullName} · Financial fields locked`,
+            actor: user.fullName,
+            time: ts,
+          });
+          saveStore();
+          this.closeModal();
+          render();
+          toast(`Approved ${item.vendorName} (${formatINR(netPayable(item))})`, 'success');
+        },
+
+        ownerHoldItem(paymentId) {
+          const item = db.payments.find(p => p.id === paymentId);
+          const user = getCurrentUser();
+          if (!item || !user || user.role !== 'OWNER') return;
+          item.status = 'ON_HOLD';
+          item.auditLogs.push({
+            action: 'ON_HOLD',
+            detail: 'Moved payment request to On Hold',
+            actor: user.fullName,
+            time: nowTimestamp(),
+          });
+          saveStore();
+          render();
+          toast(`${item.vendorName} placed On Hold`, 'info');
+        },
+
+        ownerResumeItem(paymentId) {
+          const item = db.payments.find(p => p.id === paymentId);
+          const user = getCurrentUser();
+          if (!item || !user || user.role !== 'OWNER') return;
+          item.status = 'PENDING_APPROVAL';
+          item.auditLogs.push({
+            action: 'RESUMED',
+            detail: 'Returned payment request to Pending Approval',
+            actor: user.fullName,
+            time: nowTimestamp(),
+          });
+          saveStore();
+          render();
+          toast(`${item.vendorName} returned to Pending`, 'info');
+        },
+
+        openRejectModal(paymentId) {
+          const item = db.payments.find(p => p.id === paymentId);
+          if (!item) return;
+          const panel = document.getElementById('modal-panel');
+          panel.innerHTML = `
+            <div class="p-5 sm:p-6">
+              <h3 class="text-base font-semibold text-slate-900">Reject Payment Request</h3>
+              <p class="text-xs text-slate-500 mt-1">${escapeHtml(item.vendorName)} · <span class="tabular-nums font-medium text-slate-700">${formatINR(netPayable(item))}</span></p>
+              <form onsubmit="app.confirmReject(event, '${item.id}')" class="mt-4 space-y-4">
+                <div>
+                  <label for="reject-reason-input" class="block text-xs font-medium text-slate-700 mb-1.5">Rejection Reason <span class="text-rose-600">*</span></label>
+                  <textarea id="reject-reason-input" rows="3" required placeholder="Specify why this request is rejected..." class="w-full p-3 rounded-lg border border-slate-200 text-sm outline-none focus:border-rose-500 resize-none"></textarea>
+                </div>
+                <div class="flex items-center gap-2.5">
+                  <button type="button" onclick="app.closeModal()" class="flex-1 min-h-[44px] rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs font-medium text-slate-700">Cancel</button>
+                  <button type="submit" class="flex-1 min-h-[44px] rounded-lg bg-rose-700 hover:bg-rose-800 text-white text-xs font-semibold">Confirm Reject</button>
+                </div>
+              </form>
+            </div>
+          `;
+          document.getElementById('modal-root').classList.remove('hidden');
+          refreshIcons();
+          setTimeout(() => {
+            const el = document.getElementById('reject-reason-input');
+            if (el) el.focus();
+          }, 80);
+        },
+
+        confirmReject(e, paymentId) {
+          e.preventDefault();
+          const reason = document.getElementById('reject-reason-input').value.trim();
+          const item = db.payments.find(p => p.id === paymentId);
+          const user = getCurrentUser();
+          if (!reason || !item || !user || user.role !== 'OWNER') return;
+          item.status = 'REJECTED';
+          item.rejectionReason = reason;
+          item.auditLogs.push({
+            action: 'REJECTED',
+            detail: `Rejected request: "${reason}"`,
+            actor: user.fullName,
+            time: nowTimestamp(),
+          });
+          saveStore();
+          this.closeModal();
+          render();
+          toast(`Rejected ${item.vendorName}`, 'info');
+        },
+
+        // --- Owner Admin Settings (Users & Banks) ---
+        openCreateUserModal() {
+          const panel = document.getElementById('modal-panel');
+          panel.innerHTML = `
+            <div class="p-5 sm:p-6">
+              <h3 class="text-base font-semibold text-slate-900">Create Team User</h3>
+              <p class="text-xs text-slate-500 mt-1">New users can immediately sign in from the login screen.</p>
+              <form onsubmit="app.handleCreateUser(event)" class="mt-4 space-y-3.5">
+                <div id="create-user-err" class="hidden p-2.5 rounded-lg bg-rose-50 border border-rose-200 text-xs text-rose-700"></div>
+                <div>
+                  <label class="block text-xs font-medium text-slate-700 mb-1">Full Name <span class="text-rose-600">*</span></label>
+                  <input id="cu-fullname" type="text" required placeholder="e.g., Arjun Menon" class="w-full min-h-[44px] px-3 rounded-lg border border-slate-200 text-sm outline-none focus:border-slate-900" />
+                </div>
+                <div>
+                  <label class="block text-xs font-medium text-slate-700 mb-1">Username <span class="text-rose-600">*</span></label>
+                  <input id="cu-username" type="text" required placeholder="e.g., arjun" class="w-full min-h-[44px] px-3 rounded-lg border border-slate-200 text-sm outline-none focus:border-slate-900" />
+                </div>
+                <div>
+                  <label class="block text-xs font-medium text-slate-700 mb-1">Password <span class="text-rose-600">*</span></label>
+                  <input id="cu-password" type="text" required minlength="4" placeholder="Min 4 characters" class="w-full min-h-[44px] px-3 rounded-lg border border-slate-200 text-sm outline-none focus:border-slate-900" />
+                </div>
+                <div>
+                  <label class="block text-xs font-medium text-slate-700 mb-1">Role <span class="text-rose-600">*</span></label>
+                  <select id="cu-role" class="w-full min-h-[44px] px-3 rounded-lg border border-slate-200 bg-white text-sm outline-none focus:border-slate-900">
+                    <option value="ACCOUNTANT">Accountant (Payments, UTR & Vendors)</option>
+                    <option value="STAFF">Stock Staff (Upload Supplier Bills Only)</option>
+                  </select>
+                </div>
+                <div class="pt-2 flex items-center gap-2.5">
+                  <button type="button" onclick="app.closeModal()" class="flex-1 min-h-[44px] rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs font-medium text-slate-700">Cancel</button>
+                  <button type="submit" class="flex-1 min-h-[44px] rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold">Create Account</button>
+                </div>
+              </form>
+            </div>
+          `;
+          document.getElementById('modal-root').classList.remove('hidden');
+        },
+
+        handleCreateUser(e) {
+          e.preventDefault();
+          const fullName = document.getElementById('cu-fullname').value.trim();
+          const username = document.getElementById('cu-username').value.trim().toLowerCase().replace(/\s+/g, '');
+          const password = document.getElementById('cu-password').value;
+          const role = document.getElementById('cu-role').value;
+          const errEl = document.getElementById('create-user-err');
+
+          if (db.users.some(u => u.username.toLowerCase() === username)) {
+            errEl.textContent = `Username "${username}" already exists. Choose a different username.`;
+            errEl.classList.remove('hidden');
+            return;
+          }
+
+          db.users.push({
+            id: 'usr-' + Date.now(),
+            fullName,
+            username,
+            password,
+            role,
+            isActive: true,
+          });
+          saveStore();
+          this.closeModal();
+          render();
+          toast(`Created ${role.toLowerCase()} account: @${username}`, 'success');
+        },
+
+        toggleUserActive(userId) {
+          const currentUser = getCurrentUser();
+          if (!currentUser || currentUser.id === userId) return;
+          const u = db.users.find(x => x.id === userId);
+          if (!u) return;
+          u.isActive = !u.isActive;
+          saveStore();
+          render();
+          toast(`${u.fullName} is now ${u.isActive ? 'Active' : 'Disabled'}`, 'info');
+        },
+
+        openAddBankModal() {
+          const panel = document.getElementById('modal-panel');
+          panel.innerHTML = `
+            <div class="p-5 sm:p-6">
+              <h3 class="text-base font-semibold text-slate-900">Add Company Bank</h3>
+              <form onsubmit="app.handleAddBank(event)" class="mt-4 space-y-3.5">
+                <div>
+                  <label class="block text-xs font-medium text-slate-700 mb-1">Bank Full Name <span class="text-rose-600">*</span></label>
+                  <input id="ab-fullname" type="text" required placeholder="e.g., HDFC Bank Corporate" class="w-full min-h-[44px] px-3 rounded-lg border border-slate-200 text-sm outline-none focus:border-slate-900" />
+                </div>
+                <div>
+                  <label class="block text-xs font-medium text-slate-700 mb-1">Short Label <span class="text-rose-600">*</span></label>
+                  <input id="ab-short" type="text" required placeholder="e.g., HDFC" class="w-full min-h-[44px] px-3 rounded-lg border border-slate-200 text-sm outline-none focus:border-slate-900" />
+                </div>
+                <div>
+                  <label class="block text-xs font-medium text-slate-700 mb-1">Masked Account No</label>
+                  <input id="ab-mask" type="text" placeholder="e.g., XXXX4410" class="w-full min-h-[44px] px-3 rounded-lg border border-slate-200 text-sm tabular-nums outline-none focus:border-slate-900" />
+                </div>
+                <div class="pt-2 flex items-center gap-2.5">
+                  <button type="button" onclick="app.closeModal()" class="flex-1 min-h-[44px] rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-700">Cancel</button>
+                  <button type="submit" class="flex-1 min-h-[44px] rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold">Add Bank</button>
+                </div>
+              </form>
+            </div>
+          `;
+          document.getElementById('modal-root').classList.remove('hidden');
+        },
+
+        handleAddBank(e) {
+          e.preventDefault();
+          const fullName = document.getElementById('ab-fullname').value.trim();
+          const shortName = document.getElementById('ab-short').value.trim();
+          const accountMask = document.getElementById('ab-mask').value.trim();
+          db.banks.push({
+            id: 'bank-' + Date.now(),
+            fullName,
+            shortName,
+            accountMask,
+            isActive: true,
+          });
+          saveStore();
+          this.closeModal();
+          render();
+          toast(`Added ${fullName}`, 'success');
+        },
+
+        toggleBankActive(bankId) {
+          const b = db.banks.find(x => x.id === bankId);
+          if (!b) return;
+          if (b.isActive && db.banks.filter(x => x.isActive).length <= 1) {
+            toast('At least one company bank must remain active', 'error');
+            return;
+          }
+          b.isActive = !b.isActive;
+          saveStore();
+          render();
+        },
+
+        // --- Accountant Actions ---
+        dismissIncomingBill(billId) {
+          const bill = db.incomingBills.find(b => b.id === billId);
+          if (!bill) return;
+          bill.status = 'DISMISSED';
+          saveStore();
+          render();
+          toast('Incoming bill dismissed', 'info');
+        },
+
+        openEntryDrawer(editId = null, incomingBillId = null) {
+          const editItem = editId ? db.payments.find(p => p.id === editId) : null;
+          const bill = incomingBillId ? db.incomingBills.find(b => b.id === incomingBillId) : null;
+          document.getElementById('entry-drawer-panel').innerHTML = renderEntryDrawerHtml(editItem, bill);
+          document.getElementById('entry-drawer').classList.remove('hidden');
+          refreshIcons();
+          this.checkDuplicateInvoice();
+        },
+
+        closeEntryDrawer() {
+          document.getElementById('entry-drawer').classList.add('hidden');
+        },
+
+        toggleInlineVendorAdd() {
+          const box = document.getElementById('inline-vendor-box');
+          if (!box) return;
+          box.classList.toggle('hidden');
+          if (!box.classList.contains('hidden')) {
+            document.getElementById('inline-vendor-name').focus();
+          }
+        },
+
+        quickAddVendor() {
+          const input = document.getElementById('inline-vendor-name');
+          const name = input.value.trim();
+          if (!name) return;
+          let existing = db.vendors.find(v => v.name.toLowerCase() === name.toLowerCase());
+          if (!existing) {
+            existing = { id: 'vnd-' + Date.now(), name, gstin: '', bankAccountNo: '', ifscCode: '' };
+            db.vendors.push(existing);
+            saveStore();
+          }
+          const sel = document.getElementById('entry-vendor');
+          if (sel) {
+            sel.innerHTML = db.vendors.map(v => `<option value="${v.id}" ${v.id === existing.id ? 'selected' : ''}>${escapeHtml(v.name)}</option>`).join('');
+          }
+          input.value = '';
+          document.getElementById('inline-vendor-box').classList.add('hidden');
+          toast(`Vendor "${existing.name}" selected`, 'success');
+          this.checkDuplicateInvoice();
+        },
+
+        setEntryPurpose(val) {
+          const el = document.getElementById('entry-purpose');
+          if (el) el.value = val;
+        },
+
+        updateEntryNet() {
+          const amt = parseFloat(document.getElementById('entry-amount').value) || 0;
+          const tds = parseFloat(document.getElementById('entry-tds').value) || 0;
+          const disp = document.getElementById('entry-net-display');
+          if (disp) disp.textContent = formatINR(Math.max(0, amt - tds));
+        },
+
+        checkDuplicateInvoice() {
+          const vendorSel = document.getElementById('entry-vendor');
+          const refEl = document.getElementById('entry-ref');
+          const editEl = document.getElementById('entry-edit-id');
+          const banner = document.getElementById('dup-invoice-banner');
+          if (!vendorSel || !refEl || !banner) return;
+
+          const vendorId = vendorSel.value;
+          const ref = refEl.value.trim().toLowerCase();
+          const editId = editEl ? editEl.value : '';
+
+          if (!ref || ref === 'na' || ref === 'on account') {
+            banner.classList.add('hidden');
+            return;
+          }
+
+          const dup = db.payments.some(p =>
+            p.id !== editId &&
+            p.vendorId === vendorId &&
+            p.status !== 'REJECTED' &&
+            p.status !== 'CANCELLED' &&
+            p.invoiceRef.trim().toLowerCase() === ref
+          );
+          banner.classList.toggle('hidden', !dup);
+          if (dup) refreshIcons();
+        },
+
+        handleEntryFilePick(input) {
+          if (input.files && input.files[0]) {
+            ui.entryFileName = input.files[0].name;
+            const lbl = document.getElementById('entry-file-label');
+            if (lbl) lbl.textContent = ui.entryFileName;
+          }
+        },
+
+        savePaymentEntry(e, targetStatus) {
+          if (e) e.preventDefault();
+          const user = getCurrentUser();
+          if (!user) return;
+
+          const editId = document.getElementById('entry-edit-id').value;
+          const billId = document.getElementById('entry-bill-id').value;
+          const sheetDate = document.getElementById('entry-date').value;
+          const dueDate = document.getElementById('entry-due').value;
+          const vendorId = document.getElementById('entry-vendor').value;
+          const vendor = getVendor(vendorId);
+          const invoiceRef = document.getElementById('entry-ref').value.trim();
+          const purpose = document.getElementById('entry-purpose').value.trim();
+          const amount = parseFloat(document.getElementById('entry-amount').value);
+          const tds = parseFloat(document.getElementById('entry-tds').value) || 0;
+          const bankId = document.getElementById('entry-bank').value;
+          const remarks = document.getElementById('entry-remarks').value.trim();
+
+          if (!vendor || !invoiceRef || !purpose || !(amount > 0)) {
+            toast('Please fill all required fields with a valid amount', 'error');
+            return;
+          }
+          if (tds < 0 || tds > amount) {
+            toast('TDS must be between ₹0 and Gross Amount', 'error');
+            return;
+          }
+
+          const ts = nowTimestamp();
+          const bank = getBank(bankId);
+
+          if (editId) {
+            const existing = db.payments.find(p => p.id === editId && p.status === 'DRAFT');
+            if (existing) {
+              existing.sheetDate = sheetDate;
+              existing.dueDate = dueDate;
+              existing.vendorId = vendor.id;
+              existing.vendorName = vendor.name;
+              existing.invoiceRef = invoiceRef;
+              existing.purpose = purpose;
+              existing.amount = amount;
+              existing.tds = tds;
+              existing.bankId = bankId;
+              existing.remarks = remarks;
+              existing.invoiceFileName = ui.entryFileName || existing.invoiceFileName;
+              existing.status = targetStatus;
+              existing.auditLogs.push({
+                action: targetStatus === 'DRAFT' ? 'UPDATED' : 'SUBMITTED',
+                detail: targetStatus === 'DRAFT'
+                  ? `Updated draft entry (${formatINR(amount - tds)})`
+                  : `Submitted for Owner approval (${formatINR(amount - tds)} via ${bank.shortName})`,
+                actor: user.fullName,
+                time: ts,
+              });
+            }
+          } else {
+            db.payments.unshift({
+              id: 'pay-' + Date.now(),
+              sheetDate,
+              vendorId: vendor.id,
+              vendorName: vendor.name,
+              invoiceRef,
+              dueDate,
+              purpose,
+              amount,
+              tds,
+              bankId,
+              status: targetStatus,
+              utrNumber: '',
+              invoiceFileName: ui.entryFileName || '',
+              receiptFileName: '',
+              remarks,
+              rejectionReason: '',
+              preparedBy: user.fullName,
+              preparedAt: ts,
+              approvedBy: '',
+              approvedAt: '',
+              paidBy: '',
+              paidAt: '',
+              auditLogs: [
+                {
+                  action: targetStatus === 'DRAFT' ? 'CREATED' : 'SUBMITTED',
+                  detail: targetStatus === 'DRAFT'
+                    ? `Saved draft entry for ${formatINR(amount - tds)}`
+                    : `Submitted for Owner approval (${formatINR(amount - tds)} via ${bank.shortName})`,
+                  actor: user.fullName,
+                  time: ts,
+                },
+              ],
+            });
+          }
+
+          if (billId) {
+            const bill = db.incomingBills.find(b => b.id === billId);
+            if (bill) bill.status = 'CONVERTED';
+          }
+
+          saveStore();
+          this.closeEntryDrawer();
+          ui.accountantTab = targetStatus === 'DRAFT' ? 'DRAFT' : 'PENDING_APPROVAL';
+          render();
+          toast(targetStatus === 'DRAFT' ? 'Saved as draft' : 'Submitted for Owner approval', 'success');
+        },
+
+        // --- Accountant Enter UTR & Receipt Modal ---
+        openUtrModal(paymentId) {
+          const item = db.payments.find(p => p.id === paymentId);
+          if (!item || item.status !== 'APPROVED') return;
+          ui.utrFileName = '';
+          const bank = getBank(item.bankId);
+          const net = netPayable(item);
+
+          const panel = document.getElementById('modal-panel');
+          panel.innerHTML = `
+            <div class="p-5 sm:p-6">
+              <div class="flex items-start justify-between gap-2">
+                <div>
+                  <h3 class="text-base font-semibold text-slate-900">Enter UTR & Bank Receipt</h3>
+                  <p class="text-xs text-slate-500 mt-0.5">Reconcile payment and mark record as Paid.</p>
+                </div>
+                <button type="button" onclick="app.closeModal()" class="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100">
+                  <i data-lucide="x" class="w-4 h-4"></i>
+                </button>
+              </div>
+
+              <!-- Read-Only Locked Summary Box -->
+              <div class="mt-4 p-3.5 rounded-lg bg-slate-50 border border-slate-200 space-y-1.5 text-xs">
+                <div class="flex items-center gap-1.5 text-[11px] font-medium text-slate-500 mb-1">
+                  <i data-lucide="lock" class="w-3.5 h-3.5 text-slate-600"></i>
+                  Locked after Owner approval
+                </div>
+                <div class="flex justify-between"><span class="text-slate-500">Vendor</span><span class="font-semibold text-slate-900">${escapeHtml(item.vendorName)}</span></div>
+                <div class="flex justify-between"><span class="text-slate-500">Approved Bank</span><span class="font-medium text-slate-800">${escapeHtml(bank.fullName)}</span></div>
+                <div class="flex justify-between pt-1.5 border-t border-slate-200"><span class="font-medium text-slate-700">Net Payable</span><span class="font-bold text-slate-900 tabular-nums">${formatINR(net)}</span></div>
+              </div>
+
+              <form onsubmit="app.confirmMarkPaid(event, '${item.id}')" class="mt-4 space-y-3.5">
+                <div>
+                  <label for="utr-number-input" class="block text-xs font-medium text-slate-700 mb-1">UTR / Payment Ref No <span class="text-rose-600">*</span></label>
+                  <input
+                    id="utr-number-input"
+                    type="text"
+                    required
+                    oninput="app.validateUtrInput(this.value, '${item.id}')"
+                    placeholder="e.g., AXCOH32315623899"
+                    class="w-full min-h-[44px] px-3 rounded-lg border border-slate-200 text-sm uppercase tabular-nums outline-none focus:border-slate-900"
+                  />
+                  <div id="utr-dup-error" class="hidden mt-1.5 text-xs font-medium text-rose-700"></div>
+                </div>
+
+                <div>
+                  <label class="block text-xs font-medium text-slate-700 mb-1">Bank Transaction Receipt <span class="text-rose-600">*</span></label>
+                  <input id="utr-receipt-input" type="file" accept="application/pdf,image/*" class="hidden" onchange="app.handleUtrFilePick(this)" />
+                  <div class="px-3 py-2.5 rounded-lg border border-dashed border-slate-300 bg-slate-50 flex items-center justify-between gap-2">
+                    <span id="utr-file-label" class="text-xs text-slate-500 truncate">No receipt selected</span>
+                    <button type="button" onclick="document.getElementById('utr-receipt-input').click()" class="px-2.5 py-1 rounded-md border border-slate-200 bg-white hover:bg-slate-100 text-xs font-medium text-slate-700 shrink-0">Upload File</button>
+                  </div>
+                  <div class="mt-1 flex items-center justify-between">
+                    <span id="utr-file-error" class="text-[11px] font-medium text-rose-700 hidden">Bank receipt file is required.</span>
+                    <button type="button" onclick="app.attachSampleReceipt('${escapeHtml(bank.shortName)}')" class="ml-auto text-[11px] font-medium text-blue-600 hover:underline">Attach sample bank slip</button>
+                  </div>
+                </div>
+
+                <div>
+                  <label for="utr-remarks-input" class="block text-xs font-medium text-slate-700 mb-1">Remarks <span class="text-slate-400 font-normal">(Optional)</span></label>
+                  <input id="utr-remarks-input" type="text" value="${escapeHtml(item.remarks || '')}" placeholder="Optional transfer note" class="w-full min-h-[44px] px-3 rounded-lg border border-slate-200 text-sm outline-none focus:border-slate-900" />
+                </div>
+
+                <div class="pt-2 flex items-center gap-2.5">
+                  <button type="button" onclick="app.closeModal()" class="flex-1 min-h-[44px] rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs font-medium text-slate-700">Cancel</button>
+                  <button id="utr-submit-btn" type="submit" class="flex-1 min-h-[44px] rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-semibold">Confirm Paid & Close</button>
+                </div>
+              </form>
+            </div>
+          `;
+          document.getElementById('modal-root').classList.remove('hidden');
+          refreshIcons();
+          setTimeout(() => {
+            const el = document.getElementById('utr-number-input');
+            if (el) el.focus();
+          }, 80);
+        },
+
+        validateUtrInput(rawVal, currentPaymentId) {
+          const normalized = rawVal.trim().toUpperCase();
+          const errEl = document.getElementById('utr-dup-error');
+          const submitBtn = document.getElementById('utr-submit-btn');
+          if (!errEl || !submitBtn) return true;
+
+          if (!normalized) {
+            errEl.classList.add('hidden');
+            submitBtn.disabled = false;
+            submitBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+            return false;
+          }
+
+          const duplicate = db.payments.find(p => p.id !== currentPaymentId && p.utrNumber && p.utrNumber.trim().toUpperCase() === normalized);
+          if (duplicate) {
+            errEl.textContent = `Duplicate UTR: "${normalized}" is already recorded on ${duplicate.vendorName} (${duplicate.invoiceRef}).`;
+            errEl.classList.remove('hidden');
+            submitBtn.disabled = true;
+            submitBtn.classList.add('opacity-50', 'cursor-not-allowed');
+            return false;
+          }
+
+          errEl.classList.add('hidden');
+          submitBtn.disabled = false;
+          submitBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+          return true;
+        },
+
+        handleUtrFilePick(input) {
+          if (input.files && input.files[0]) {
+            ui.utrFileName = input.files[0].name;
+            document.getElementById('utr-file-label').textContent = ui.utrFileName;
+            document.getElementById('utr-file-error').classList.add('hidden');
+          }
+        },
+
+        attachSampleReceipt(bankShort) {
+          ui.utrFileName = `${bankShort}_Transaction_Receipt_23Nov.pdf`;
+          document.getElementById('utr-file-label').textContent = ui.utrFileName;
+          document.getElementById('utr-file-error').classList.add('hidden');
+        },
+
+        confirmMarkPaid(e, paymentId) {
+          e.preventDefault();
+          const utr = document.getElementById('utr-number-input').value.trim().toUpperCase();
+          const remarks = document.getElementById('utr-remarks-input').value.trim();
+
+          if (!this.validateUtrInput(utr, paymentId)) return;
+          if (!ui.utrFileName) {
+            document.getElementById('utr-file-error').classList.remove('hidden');
+            return;
+          }
+
+          const item = db.payments.find(p => p.id === paymentId);
+          const user = getCurrentUser();
+          if (!item || !user || item.status !== 'APPROVED') return;
+
+          const ts = nowTimestamp();
+          item.status = 'PAID';
+          item.utrNumber = utr;
+          item.receiptFileName = ui.utrFileName;
+          item.remarks = remarks;
+          item.paidBy = user.fullName;
+          item.paidAt = ts;
+          item.auditLogs.push({
+            action: 'PAID',
+            detail: `Recorded UTR ${utr} and attached ${ui.utrFileName}`,
+            actor: user.fullName,
+            time: ts,
+          });
+
+          saveStore();
+          this.closeModal();
+          ui.accountantTab = 'PAID';
+          render();
+          toast(`Marked Paid · UTR ${utr}`, 'success');
+        },
+
+        // --- Accountant Vendors Modal ---
+        openAddVendorModal() {
+          const panel = document.getElementById('modal-panel');
+          panel.innerHTML = `
+            <div class="p-5 sm:p-6">
+              <h3 class="text-base font-semibold text-slate-900">Add Vendor</h3>
+              <form onsubmit="app.handleAddVendor(event)" class="mt-4 space-y-3.5">
+                <div id="av-err" class="hidden p-2.5 rounded-lg bg-rose-50 border border-rose-200 text-xs text-rose-700"></div>
+                <div>
+                  <label class="block text-xs font-medium text-slate-700 mb-1">Vendor Name <span class="text-rose-600">*</span></label>
+                  <input id="av-name" type="text" required placeholder="e.g., Malabar Timber Depot" class="w-full min-h-[44px] px-3 rounded-lg border border-slate-200 text-sm outline-none focus:border-slate-900" />
+                </div>
+                <div>
+                  <label class="block text-xs font-medium text-slate-700 mb-1">GSTIN</label>
+                  <input id="av-gstin" type="text" placeholder="32XXXXX0000X1Z5" class="w-full min-h-[44px] px-3 rounded-lg border border-slate-200 text-sm uppercase tabular-nums outline-none focus:border-slate-900" />
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                  <div>
+                    <label class="block text-xs font-medium text-slate-700 mb-1">Bank Account No</label>
+                    <input id="av-acc" type="text" placeholder="Account number" class="w-full min-h-[44px] px-3 rounded-lg border border-slate-200 text-sm tabular-nums outline-none focus:border-slate-900" />
+                  </div>
+                  <div>
+                    <label class="block text-xs font-medium text-slate-700 mb-1">IFSC Code</label>
+                    <input id="av-ifsc" type="text" placeholder="UTIB0001462" class="w-full min-h-[44px] px-3 rounded-lg border border-slate-200 text-sm uppercase tabular-nums outline-none focus:border-slate-900" />
+                  </div>
+                </div>
+                <div class="pt-2 flex items-center gap-2.5">
+                  <button type="button" onclick="app.closeModal()" class="flex-1 min-h-[44px] rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-700">Cancel</button>
+                  <button type="submit" class="flex-1 min-h-[44px] rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold">Save Vendor</button>
+                </div>
+              </form>
+            </div>
+          `;
+          document.getElementById('modal-root').classList.remove('hidden');
+        },
+
+        handleAddVendor(e) {
+          e.preventDefault();
+          const name = document.getElementById('av-name').value.trim();
+          const gstin = document.getElementById('av-gstin').value.trim().toUpperCase();
+          const bankAccountNo = document.getElementById('av-acc').value.trim();
+          const ifscCode = document.getElementById('av-ifsc').value.trim().toUpperCase();
+          const errEl = document.getElementById('av-err');
+
+          if (db.vendors.some(v => v.name.toLowerCase() === name.toLowerCase())) {
+            errEl.textContent = 'A vendor with this name already exists.';
+            errEl.classList.remove('hidden');
+            return;
+          }
+
+          db.vendors.push({ id: 'vnd-' + Date.now(), name, gstin, bankAccountNo, ifscCode });
+          saveStore();
+          this.closeModal();
+          render();
+          toast(`Added vendor "${name}"`, 'success');
+        },
+
+        // --- Stock Staff Actions ---
+        handleStaffFilePick(input) {
+          if (input.files && input.files[0]) {
+            ui.staffSelectedFile = input.files[0].name;
+            render();
+          }
+        },
+
+        attachSampleStaffFile() {
+          ui.staffSelectedFile = `Supplier_Invoice_${Math.floor(1000 + Math.random() * 9000)}.pdf`;
+          render();
+        },
+
+        toggleStaffCustomVendor(val) {
+          const custom = document.getElementById('staff-vendor-custom');
+          if (!custom) return;
+          custom.classList.toggle('hidden', val !== '__new__');
+          if (val === '__new__') custom.focus();
+        },
+
+        handleStaffUpload(e) {
+          e.preventDefault();
+          const user = getCurrentUser();
+          if (!user) return;
+
+          if (!ui.staffSelectedFile) {
+            toast('Please select an invoice photo or PDF first', 'error');
+            return;
+          }
+
+          const selVal = document.getElementById('staff-vendor-select').value;
+          let vendorId = null;
+          let vendorName = '';
+
+          if (selVal === '__new__') {
+            vendorName = document.getElementById('staff-vendor-custom').value.trim();
+            if (!vendorName) {
+              toast('Please enter the vendor name', 'error');
+              return;
+            }
+            const existing = db.vendors.find(v => v.name.toLowerCase() === vendorName.toLowerCase());
+            if (existing) {
+              vendorId = existing.id;
+              vendorName = existing.name;
+            } else {
+              const created = { id: 'vnd-' + Date.now(), name: vendorName, gstin: '', bankAccountNo: '', ifscCode: '' };
+              db.vendors.push(created);
+              vendorId = created.id;
+            }
+          } else {
+            const v = getVendor(selVal);
+            vendorId = v ? v.id : null;
+            vendorName = v ? v.name : 'Unknown Vendor';
+          }
+
+          const invoiceRef = document.getElementById('staff-invoice-ref').value.trim();
+          const amtRaw = document.getElementById('staff-amount').value;
+          const estimatedAmount = amtRaw ? parseFloat(amtRaw) : null;
+          const note = document.getElementById('staff-note').value.trim();
+
+          db.incomingBills.unshift({
+            id: 'bill-' + Date.now(),
+            vendorId,
+            vendorName,
+            invoiceRef,
+            estimatedAmount,
+            note,
+            fileName: ui.staffSelectedFile,
+            status: 'NEW',
+            uploadedBy: user.id,
+            uploadedByName: user.fullName,
+            createdAt: '2026-11-23',
+          });
+
+          ui.staffSelectedFile = '';
+          ui.activeRoute = 'uploads';
+          saveStore();
+          render();
+          toast('Invoice sent to Accountant', 'success');
+        },
+
+        // --- Shared Drawer, Print, CSV & Utilities ---
+        openDetailDrawer(paymentId) {
+          const item = db.payments.find(p => p.id === paymentId);
+          if (!item) return;
+          document.getElementById('detail-drawer-panel').innerHTML = renderDetailDrawerHtml(item);
+          document.getElementById('detail-drawer').classList.remove('hidden');
+          refreshIcons();
+        },
+
+        closeDetailDrawer() {
+          document.getElementById('detail-drawer').classList.add('hidden');
+        },
+
+        closeModal() {
+          document.getElementById('modal-root').classList.add('hidden');
+        },
+
+        openPrintModal() {
+          const dates = Array.from(new Set(db.payments.filter(p => p.status !== 'DRAFT').map(p => p.sheetDate))).sort((a, b) => b.localeCompare(a));
+          const sel = document.getElementById('print-date-select');
+          sel.innerHTML = [
+            ...dates.map(d => `<option value="${d}">${formatDDMMYYYY(d)}</option>`),
+            `<option value="ALL">All Dates</option>`,
+          ].join('');
+          // Default to 19-11-2026 if present so user sees the classic 4-entry sheet immediately
+          if (dates.includes('2026-11-19')) sel.value = '2026-11-19';
+          this.renderPrintSheet();
+          document.getElementById('print-modal').classList.remove('hidden');
+          refreshIcons();
+        },
+
+        renderPrintSheet() {
+          const selectedDate = document.getElementById('print-date-select').value;
+          document.getElementById('printable-sheet').innerHTML = renderPrintSheetHtml(selectedDate);
+        },
+
+        closePrintModal() {
+          document.getElementById('print-modal').classList.add('hidden');
+        },
+
+        exportCsv() {
+          const safeCell = (val) => {
+            let s = String(val == null ? '' : val);
+            if (/^[=+\-@]/.test(s)) s = "'" + s;
+            return `"${s.replace(/"/g, '""')}"`;
+          };
+          const headers = ['Date', 'Vendor', 'Invoice / Ref No', 'Due Date', 'Purpose', 'Amount (INR)', 'TDS (INR)', 'Net Payable (INR)', 'Bank', 'Status', 'UTR / Ref No', 'Remarks'];
+          const lines = [
+            headers.join(','),
+            ...db.payments.map(p => [
+              safeCell(p.sheetDate),
+              safeCell(p.vendorName),
+              safeCell(p.invoiceRef),
+              safeCell(p.dueDate),
+              safeCell(p.purpose),
+              Number(p.amount).toFixed(2),
+              Number(p.tds || 0).toFixed(2),
+              netPayable(p).toFixed(2),
+              safeCell(getBank(p.bankId).shortName),
+              safeCell(p.status),
+              safeCell(p.utrNumber || ''),
+              safeCell(p.remarks || ''),
+            ].join(',')),
+          ];
+          const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = 'INDFURN_Payments_Export.csv';
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+          toast('Exported CSV file', 'success');
+        },
+
+        copyUtr(utr) {
+          copyText(utr, 'UTR Copied');
+        },
+      };
+
+      // Global Escape key handler
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+          app.closeDetailDrawer();
+          app.closeEntryDrawer();
+          app.closeModal();
+          app.closePrintModal();
+        }
+      });
+
+      // Boot application
+      render();
+    })();
+  </script>
+</body>
+</html>
