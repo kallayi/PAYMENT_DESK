@@ -141,7 +141,6 @@ CREATE OR REPLACE FUNCTION public.get_my_role()
 RETURNS public.user_role AS $$
   SELECT role FROM public.profiles WHERE id = auth.uid() LIMIT 1;
 $$ LANGUAGE sql STABLE SECURITY DEFINER;
-
 -- ==========================================
 -- 7. DATABASE TRIGGERS
 -- ==========================================

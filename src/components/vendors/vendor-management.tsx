@@ -2,9 +2,12 @@
 
 import * as React from 'react';
 import { Plus, Search, Edit2, Loader2, Building2 } from 'lucide-react';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
 import { toast } from 'sonner';
-import { createVendor, updateVendor } from '@/actions/vendors';
-import type { Vendor } from '@/types/database';
+import { createVendor, updateVendor, toggleVendorActive } from '@/actions/vendors';
+import { leanVendorSchema, type LeanVendorInput } from '@/lib/validators';
+import type { Company, Vendor } from '@/types/database';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -20,97 +23,156 @@ import {
 
 interface VendorManagementProps {
   initialVendors: Vendor[];
+  activeCompany?: Company | null;
+  canManage?: boolean;
 }
 
-export function VendorManagement({ initialVendors }: VendorManagementProps) {
+function getBankChip(ifsc: string | null | undefined) {
+  if (!ifsc || ifsc.length < 4) return null;
+  const prefix = ifsc.slice(0, 4).toUpperCase();
+  if (prefix === 'UTIB') {
+    return { label: 'AXIS', color: 'bg-rose-50 text-rose-800 border-rose-200' };
+  }
+  if (prefix === 'SIBL') {
+    return { label: 'SIB', color: 'bg-blue-50 text-blue-800 border-blue-200' };
+  }
+  if (prefix === 'HDFC') {
+    return { label: 'HDFC', color: 'bg-sky-50 text-sky-800 border-sky-200' };
+  }
+  if (prefix === 'KKBK') {
+    return { label: 'KOTAK', color: 'bg-red-50 text-red-800 border-red-200' };
+  }
+  return { label: prefix, color: 'bg-slate-100 text-slate-700 border-slate-200' };
+}
+
+export function VendorManagement({
+  initialVendors,
+  activeCompany = null,
+  canManage = true,
+}: VendorManagementProps) {
   const [vendors, setVendors] = React.useState<Vendor[]>(initialVendors);
   const [search, setSearch] = React.useState('');
-  const [isModalOpen, setIsModalOpen] = React.useState(false);
+  const [isAddModalOpen, setIsAddModalOpen] = React.useState(false);
   const [editingVendor, setEditingVendor] = React.useState<Vendor | null>(null);
-
-  // Form states
-  const [name, setName] = React.useState('');
-  const [gstin, setGstin] = React.useState('');
-  const [bankAccountNo, setBankAccountNo] = React.useState('');
-  const [ifscCode, setIfscCode] = React.useState('');
-  const [notes, setNotes] = React.useState('');
-  const [formError, setFormError] = React.useState<string | null>(null);
   const [isPending, startTransition] = React.useTransition();
 
-  // Keep state synced when initialVendors changes
   React.useEffect(() => {
     setVendors(initialVendors);
   }, [initialVendors]);
+
+  // React Hook Form for Add Vendor
+  const addForm = useForm<LeanVendorInput>({
+    resolver: zodResolver(leanVendorSchema),
+    defaultValues: {
+      party_name: '',
+      beneficiary_name: '',
+      account_number: '',
+      ifsc_code: '',
+      remarks: '',
+    },
+  });
+
+  // React Hook Form for Edit Vendor
+  const editForm = useForm<LeanVendorInput>({
+    resolver: zodResolver(leanVendorSchema),
+    defaultValues: {
+      party_name: '',
+      beneficiary_name: '',
+      account_number: '',
+      ifsc_code: '',
+      remarks: '',
+    },
+  });
 
   const filteredVendors = React.useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return vendors;
     return vendors.filter(
       (v) =>
-        v.name.toLowerCase().includes(q) ||
-        (v.gstin && v.gstin.toLowerCase().includes(q)) ||
-        (v.bank_account_no && v.bank_account_no.toLowerCase().includes(q)) ||
-        (v.ifsc_code && v.ifsc_code.toLowerCase().includes(q))
+        (v.party_name || v.name || '').toLowerCase().includes(q) ||
+        (v.beneficiary_name || '').toLowerCase().includes(q) ||
+        (v.account_number || v.bank_account_no || '').toLowerCase().includes(q) ||
+        (v.ifsc_code || '').toLowerCase().includes(q)
     );
   }, [vendors, search]);
 
   function openCreateModal() {
-    setEditingVendor(null);
-    setName('');
-    setGstin('');
-    setBankAccountNo('');
-    setIfscCode('');
-    setNotes('');
-    setFormError(null);
-    setIsModalOpen(true);
+    addForm.reset({
+      party_name: '',
+      beneficiary_name: '',
+      account_number: '',
+      ifsc_code: '',
+      remarks: '',
+    });
+    setIsAddModalOpen(true);
   }
 
   function openEditModal(vendor: Vendor) {
     setEditingVendor(vendor);
-    setName(vendor.name);
-    setGstin(vendor.gstin || '');
-    setBankAccountNo(vendor.bank_account_no || '');
-    setIfscCode(vendor.ifsc_code || '');
-    setNotes(vendor.notes || '');
-    setFormError(null);
-    setIsModalOpen(true);
+    editForm.reset({
+      party_name: vendor.party_name || vendor.name,
+      beneficiary_name: vendor.beneficiary_name || vendor.name,
+      account_number: vendor.account_number || vendor.bank_account_no || '',
+      ifsc_code: vendor.ifsc_code || '',
+      remarks: vendor.remarks || vendor.notes || '',
+    });
   }
 
-  function handleFormSubmit(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    setFormError(null);
+  function onAddSubmit(data: LeanVendorInput) {
+    startTransition(async () => {
+      const res = await createVendor({
+        ...data,
+        company_id: activeCompany?.id,
+      });
 
-    const payload = {
-      name: name.trim(),
-      gstin: gstin.trim().toUpperCase() || undefined,
-      bank_account_no: bankAccountNo.trim() || undefined,
-      ifsc_code: ifscCode.trim().toUpperCase() || undefined,
-      notes: notes.trim() || undefined,
-    };
+      if (!res.success) {
+        toast.error(res.error);
+      } else {
+        toast.success(`Registered vendor "${res.data.party_name || res.data.name}"`);
+        setVendors((prev) =>
+          [...prev, res.data].sort((a, b) =>
+            (a.party_name || a.name || '').localeCompare(b.party_name || b.name || '')
+          )
+        );
+        setIsAddModalOpen(false);
+      }
+    });
+  }
+
+  function onEditSubmit(data: LeanVendorInput) {
+    if (!editingVendor) return;
+    startTransition(async () => {
+      const res = await updateVendor(editingVendor.id, data);
+      if (!res.success) {
+        toast.error(res.error);
+      } else {
+        toast.success(`Updated vendor "${res.data.party_name || res.data.name}"`);
+        setVendors((prev) =>
+          prev.map((v) => (v.id === editingVendor.id ? res.data : v))
+        );
+        setEditingVendor(null);
+      }
+    });
+  }
+
+  function handleToggleActive(vendorId: string) {
+    const prevVendors = vendors;
+    setVendors((prev) =>
+      prev.map((v) => (v.id === vendorId ? { ...v, is_active: !v.is_active } : v))
+    );
 
     startTransition(async () => {
-      if (editingVendor) {
-        const res = await updateVendor(editingVendor.id, payload);
-        if (!res.success) {
-          setFormError(res.error);
-          toast.error(res.error);
-        } else {
-          toast.success(`Updated vendor "${res.data.name}"`);
-          setVendors((prev) =>
-            prev.map((v) => (v.id === editingVendor.id ? res.data : v))
-          );
-          setIsModalOpen(false);
-        }
+      const res = await toggleVendorActive(vendorId);
+      if (!res.success) {
+        setVendors(prevVendors);
+        toast.error(res.error);
       } else {
-        const res = await createVendor(payload);
-        if (!res.success) {
-          setFormError(res.error);
-          toast.error(res.error);
-        } else {
-          toast.success(`Added vendor "${res.data.name}"`);
-          setVendors((prev) => [...prev, res.data].sort((a, b) => a.name.localeCompare(b.name)));
-          setIsModalOpen(false);
-        }
+        toast.info(
+          `Vendor "${res.data.party_name || res.data.name}" is now ${res.data.is_active ? 'Active' : 'Inactive'}`
+        );
+        setVendors((prev) =>
+          prev.map((v) => (v.id === vendorId ? res.data : v))
+        );
       }
     });
   }
@@ -120,244 +182,497 @@ export function VendorManagement({ initialVendors }: VendorManagementProps) {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight text-slate-900">Vendors</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl font-bold tracking-tight text-slate-900">Vendor Master</h1>
+            {activeCompany && (
+              <span className="text-[11px] font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-800 border border-slate-200">
+                {activeCompany.name}
+              </span>
+            )}
+          </div>
           <p className="text-xs text-slate-500 mt-0.5">
-            Supplier directory and beneficiary bank details.
+            Beneficiary master for payment vouchers and bank bulk upload exports.
           </p>
         </div>
-        <Button
-          type="button"
-          onClick={openCreateModal}
-          className="min-h-[44px] sm:min-h-[38px] px-4 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-medium inline-flex items-center justify-center gap-1.5 shadow-sm transition-colors"
-        >
-          <Plus className="w-4 h-4" />
-          <span>Add Vendor</span>
-        </Button>
+
+        {canManage && (
+          <Button
+            type="button"
+            onClick={openCreateModal}
+            className="min-h-[40px] px-4 rounded-lg bg-[#7F1D1D] hover:bg-[#991B1B] text-white text-xs font-semibold inline-flex items-center justify-center gap-1.5 shadow-xs transition-colors cursor-pointer"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Add Vendor</span>
+          </Button>
+        )}
       </div>
 
-      {/* Search Input */}
+      {/* Search Bar */}
       <div className="mb-4 max-w-sm relative">
         <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
         <Input
           type="text"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search vendor name or GSTIN..."
-          className="w-full min-h-[44px] sm:min-h-[38px] pl-9 pr-3 rounded-lg border border-slate-200 bg-white text-sm text-slate-900 placeholder:text-slate-400 outline-none focus:border-slate-500"
+          placeholder="Search by trade name, beneficiary, or IFSC..."
+          className="w-full min-h-[40px] pl-9 pr-3 rounded-lg border border-slate-200 bg-white text-xs text-slate-900 placeholder:text-slate-400 outline-hidden focus:border-[#7F1D1D]"
         />
       </div>
 
-      {/* Desktop Vendors Table (md+) */}
+      {/* Desktop Table (md+) */}
       <div className="hidden md:block bg-white rounded-xl border border-slate-200 overflow-hidden shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
         <table className="w-full text-left border-collapse">
           <thead>
             <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
-              <th className="py-3 pl-5 pr-3">Vendor Name</th>
-              <th className="py-3 px-3">GSTIN</th>
-              <th className="py-3 px-3">Bank Account No</th>
+              <th className="py-3 pl-5 pr-3">Party Name (Trade Name)</th>
+              <th className="py-3 px-3">Beneficiary Name (Bank A/C)</th>
+              <th className="py-3 px-3">Account Number</th>
               <th className="py-3 px-3">IFSC Code</th>
-              <th className="py-3 pl-3 pr-5 text-right">Action</th>
+              <th className="py-3 px-3">Status</th>
+              {canManage && <th className="py-3 pl-3 pr-5 text-right">Actions</th>}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 text-sm">
             {filteredVendors.length === 0 ? (
               <tr>
-                <td colSpan={5} className="py-12 text-center text-xs text-slate-500">
+                <td colSpan={canManage ? 6 : 5} className="py-12 text-center text-xs text-slate-500">
                   <div className="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center mx-auto mb-2 text-slate-400">
                     <Building2 className="w-4 h-4" />
                   </div>
-                  No vendors found.
+                  No vendors found for {activeCompany?.name || 'this workspace'}.
                 </td>
               </tr>
             ) : (
-              filteredVendors.map((v) => (
-                <tr key={v.id} className="hover:bg-slate-50/70 transition-colors">
-                  <td className="py-3.5 pl-5 pr-3 font-medium text-slate-900">{v.name}</td>
-                  <td className="py-3.5 px-3 text-xs text-slate-600 tabular-nums">
-                    {v.gstin || '—'}
-                  </td>
-                  <td className="py-3.5 px-3 text-xs text-slate-600 tabular-nums">
-                    {v.bank_account_no || '—'}
-                  </td>
-                  <td className="py-3.5 px-3 text-xs text-slate-600 tabular-nums font-mono">
-                    {v.ifsc_code || '—'}
-                  </td>
-                  <td className="py-3.5 pl-3 pr-5 text-right">
-                    <button
-                      type="button"
-                      onClick={() => openEditModal(v)}
-                      className="px-2.5 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-100 text-slate-600 hover:text-slate-900 text-xs font-medium inline-flex items-center gap-1 transition-colors"
-                    >
-                      <Edit2 className="w-3.5 h-3.5" />
-                      <span>Edit</span>
-                    </button>
-                  </td>
-                </tr>
-              ))
+              filteredVendors.map((v) => {
+                const partyName = v.party_name || v.name;
+                const benName = v.beneficiary_name || v.name;
+                const accNo = v.account_number || v.bank_account_no;
+                const bankChip = getBankChip(v.ifsc_code);
+
+                return (
+                  <tr key={v.id} className="hover:bg-slate-50/70 transition-colors">
+                    <td className="py-3.5 pl-5 pr-3">
+                      <div className="font-bold text-slate-900">{partyName}</div>
+                      {v.remarks && (
+                        <div className="text-xs text-slate-400 line-clamp-1">{v.remarks}</div>
+                      )}
+                    </td>
+                    <td className="py-3.5 px-3 text-xs font-semibold text-slate-700">
+                      {benName}
+                    </td>
+                    <td className="py-3.5 px-3 text-xs text-slate-700 font-mono tabular-nums">
+                      {accNo || '—'}
+                    </td>
+                    <td className="py-3.5 px-3">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs font-mono font-bold text-slate-800">
+                          {v.ifsc_code || '—'}
+                        </span>
+                        {bankChip && (
+                          <span
+                            className={`text-[10px] font-bold px-1.5 py-0.2 rounded border ${bankChip.color}`}
+                          >
+                            {bankChip.label}
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="py-3.5 px-3">
+                      <span
+                        className={`inline-flex items-center gap-1.5 text-xs font-semibold ${
+                          v.is_active ? 'text-emerald-700' : 'text-slate-400'
+                        }`}
+                      >
+                        <span
+                          className={`w-1.5 h-1.5 rounded-full ${
+                            v.is_active ? 'bg-emerald-600' : 'bg-slate-300'
+                          }`}
+                        />
+                        {v.is_active ? 'Active' : 'Inactive'}
+                      </span>
+                    </td>
+                    {canManage && (
+                      <td className="py-3.5 pl-3 pr-5 text-right">
+                        <div className="flex items-center justify-end gap-2">
+                          <button
+                            type="button"
+                            onClick={() => openEditModal(v)}
+                            className="px-2.5 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-100 text-slate-700 text-xs font-medium inline-flex items-center gap-1 transition-colors cursor-pointer"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                            <span>Edit</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleToggleActive(v.id)}
+                            disabled={isPending}
+                            className={`px-2.5 py-1.5 rounded-lg border text-xs font-medium transition-colors cursor-pointer ${
+                              v.is_active
+                                ? 'border-slate-200 text-slate-600 hover:bg-slate-100'
+                                : 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                            }`}
+                          >
+                            {v.is_active ? 'Disable' : 'Enable'}
+                          </button>
+                        </div>
+                      </td>
+                    )}
+                  </tr>
+                );
+              })
             )}
           </tbody>
         </table>
       </div>
 
-      {/* Mobile Vendors Cards (< md) */}
+      {/* Mobile Vendor Cards (< md) */}
       <div className="md:hidden space-y-3">
         {filteredVendors.length === 0 ? (
           <div className="bg-white rounded-xl border border-slate-200 p-8 text-center text-xs text-slate-500">
-            No vendors found.
+            No vendors registered in {activeCompany?.name || 'this workspace'}.
           </div>
         ) : (
-          filteredVendors.map((v) => (
-            <div
-              key={v.id}
-              className="bg-white rounded-xl border border-slate-200 p-4 space-y-2 shadow-sm"
-            >
-              <div className="flex items-start justify-between gap-2">
-                <div className="text-sm font-semibold text-slate-900">{v.name}</div>
-                <button
-                  type="button"
-                  onClick={() => openEditModal(v)}
-                  className="min-h-[36px] px-2.5 rounded-md border border-slate-200 hover:bg-slate-100 text-slate-600 text-xs font-medium inline-flex items-center gap-1 shrink-0"
-                >
-                  <Edit2 className="w-3.5 h-3.5" />
-                  <span>Edit</span>
-                </button>
+          filteredVendors.map((v) => {
+            const partyName = v.party_name || v.name;
+            const benName = v.beneficiary_name || v.name;
+            const accNo = v.account_number || v.bank_account_no;
+            const bankChip = getBankChip(v.ifsc_code);
+
+            return (
+              <div
+                key={v.id}
+                className="bg-white rounded-xl border border-slate-200 p-4 space-y-2.5 shadow-xs"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <div className="text-sm font-bold text-slate-900">{partyName}</div>
+                    <div className="text-xs text-slate-600 mt-0.5">
+                      Beneficiary: <span className="font-semibold text-slate-800">{benName}</span>
+                    </div>
+                  </div>
+                  <span
+                    className={`inline-flex items-center gap-1 text-[11px] font-semibold shrink-0 ${
+                      v.is_active ? 'text-emerald-700' : 'text-slate-400'
+                    }`}
+                  >
+                    <span
+                      className={`w-1.5 h-1.5 rounded-full ${
+                        v.is_active ? 'bg-emerald-600' : 'bg-slate-300'
+                      }`}
+                    />
+                    {v.is_active ? 'Active' : 'Inactive'}
+                  </span>
+                </div>
+
+                <div className="text-xs text-slate-600 font-mono">
+                  A/C: <span className="font-bold text-slate-800">{accNo || '—'}</span>
+                </div>
+
+                <div className="flex items-center gap-1.5 text-xs">
+                  <span className="text-slate-500">IFSC:</span>
+                  <span className="font-mono font-bold text-slate-800">{v.ifsc_code || '—'}</span>
+                  {bankChip && (
+                    <span
+                      className={`text-[10px] font-bold px-1.5 py-0.2 rounded border ${bankChip.color}`}
+                    >
+                      {bankChip.label}
+                    </span>
+                  )}
+                </div>
+
+                {v.remarks && (
+                  <div className="text-xs text-slate-500 italic bg-slate-50 p-2 rounded-md">
+                    {v.remarks}
+                  </div>
+                )}
+
+                {canManage && (
+                  <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                    <button
+                      type="button"
+                      onClick={() => openEditModal(v)}
+                      className="min-h-[34px] px-3 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-semibold inline-flex items-center gap-1"
+                    >
+                      <Edit2 className="w-3.5 h-3.5" />
+                      <span>Edit</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleToggleActive(v.id)}
+                      disabled={isPending}
+                      className={`min-h-[34px] px-3 rounded-lg border text-xs font-semibold ${
+                        v.is_active
+                          ? 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                          : 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                      }`}
+                    >
+                      {v.is_active ? 'Disable' : 'Enable'}
+                    </button>
+                  </div>
+                )}
               </div>
-              <div className="text-xs text-slate-500 tabular-nums">
-                GSTIN: <span className="text-slate-700 font-medium">{v.gstin || '—'}</span>
-              </div>
-              <div className="text-xs text-slate-500 tabular-nums">
-                A/C: <span className="text-slate-700 font-medium">{v.bank_account_no || '—'}</span> · IFSC:{' '}
-                <span className="text-slate-700 font-medium">{v.ifsc_code || '—'}</span>
-              </div>
-            </div>
-          ))
+            );
+          })
         )}
       </div>
 
-      {/* Add / Edit Vendor Dialog */}
-      <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
+      {/* DIALOG: ADD VENDOR */}
+      <Dialog open={isAddModalOpen} onOpenChange={setIsAddModalOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>{editingVendor ? 'Edit Vendor' : 'Add Vendor'}</DialogTitle>
+            <DialogTitle>Add Vendor</DialogTitle>
             <DialogDescription>
-              {editingVendor
-                ? 'Update supplier information and bank transfer details.'
-                : 'Register a new supplier for payment authorization.'}
+              Register supplier beneficiary details for {activeCompany?.name || 'the active workspace'}.
             </DialogDescription>
           </DialogHeader>
 
-          {formError && (
-            <div className="p-2.5 rounded-lg bg-rose-50 border border-rose-200 text-xs text-rose-700 font-medium">
-              {formError}
-            </div>
-          )}
-
-          <form id="vendor-form" onSubmit={handleFormSubmit} className="space-y-3.5">
+          <form onSubmit={addForm.handleSubmit(onAddSubmit)} className="space-y-4">
             <div>
-              <Label htmlFor="v-name" className="block text-xs font-medium text-slate-700 mb-1">
-                Vendor Name <span className="text-rose-600">*</span>
+              <Label htmlFor="av-party" className="block text-xs font-semibold text-slate-700 mb-1">
+                Party Name (Trade Name) <span className="text-rose-600">*</span>
               </Label>
               <Input
-                id="v-name"
-                type="text"
-                required
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="e.g., Malabar Timber Depot"
+                id="av-party"
+                {...addForm.register('party_name')}
+                placeholder="e.g. Naas Hardware"
                 disabled={isPending}
-                className="w-full min-h-[44px]"
+                className="w-full min-h-[42px]"
               />
+              {addForm.formState.errors.party_name && (
+                <p className="text-[11px] text-rose-600 mt-1">
+                  {addForm.formState.errors.party_name.message}
+                </p>
+              )}
             </div>
 
             <div>
-              <Label htmlFor="v-gstin" className="block text-xs font-medium text-slate-700 mb-1">
-                GSTIN
+              <Label htmlFor="av-ben" className="block text-xs font-semibold text-slate-700 mb-1">
+                Beneficiary Name (Bank Account Holder) <span className="text-rose-600">*</span>
               </Label>
               <Input
-                id="v-gstin"
-                type="text"
-                value={gstin}
-                onChange={(e) => setGstin(e.target.value.toUpperCase())}
-                placeholder="32XXXXX0000X1Z5"
+                id="av-ben"
+                {...addForm.register('beneficiary_name')}
+                placeholder="e.g. Manoj (Exact name on bank statement)"
                 disabled={isPending}
-                className="w-full min-h-[44px] uppercase tabular-nums"
+                className="w-full min-h-[42px]"
               />
+              {addForm.formState.errors.beneficiary_name && (
+                <p className="text-[11px] text-rose-600 mt-1">
+                  {addForm.formState.errors.beneficiary_name.message}
+                </p>
+              )}
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <Label htmlFor="v-acc" className="block text-xs font-medium text-slate-700 mb-1">
-                  Bank Account No
+                <Label htmlFor="av-acc" className="block text-xs font-semibold text-slate-700 mb-1">
+                  Account Number <span className="text-rose-600">*</span>
                 </Label>
                 <Input
-                  id="v-acc"
+                  id="av-acc"
                   type="text"
-                  value={bankAccountNo}
-                  onChange={(e) => setBankAccountNo(e.target.value)}
-                  placeholder="Account number"
+                  {...addForm.register('account_number')}
+                  placeholder="e.g. 918020012345678"
                   disabled={isPending}
-                  className="w-full min-h-[44px] tabular-nums"
+                  className="w-full min-h-[42px] font-mono tabular-nums"
                 />
+                {addForm.formState.errors.account_number && (
+                  <p className="text-[11px] text-rose-600 mt-1">
+                    {addForm.formState.errors.account_number.message}
+                  </p>
+                )}
               </div>
               <div>
-                <Label htmlFor="v-ifsc" className="block text-xs font-medium text-slate-700 mb-1">
-                  IFSC Code
+                <Label htmlFor="av-ifsc" className="block text-xs font-semibold text-slate-700 mb-1">
+                  IFSC Code (11-chars) <span className="text-rose-600">*</span>
                 </Label>
                 <Input
-                  id="v-ifsc"
+                  id="av-ifsc"
                   type="text"
-                  value={ifscCode}
-                  onChange={(e) => setIfscCode(e.target.value.toUpperCase())}
-                  placeholder="UTIB0001462"
+                  maxLength={11}
+                  {...addForm.register('ifsc_code')}
+                  onChange={(e) => addForm.setValue('ifsc_code', e.target.value.toUpperCase())}
+                  placeholder="e.g. UTIB0001462"
                   disabled={isPending}
-                  className="w-full min-h-[44px] uppercase tabular-nums"
+                  className="w-full min-h-[42px] uppercase font-mono font-bold"
                 />
+                {addForm.formState.errors.ifsc_code && (
+                  <p className="text-[11px] text-rose-600 mt-1">
+                    {addForm.formState.errors.ifsc_code.message}
+                  </p>
+                )}
               </div>
             </div>
 
             <div>
-              <Label htmlFor="v-notes" className="block text-xs font-medium text-slate-700 mb-1">
-                Notes
+              <Label htmlFor="av-remarks" className="block text-xs font-semibold text-slate-700 mb-1">
+                Remarks (Optional)
               </Label>
               <Textarea
-                id="v-notes"
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
+                id="av-remarks"
+                {...addForm.register('remarks')}
                 rows={2}
                 placeholder="Optional supplier notes"
                 disabled={isPending}
               />
             </div>
-          </form>
 
-          <DialogFooter className="pt-2">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setIsModalOpen(false)}
-              disabled={isPending}
-              className="min-h-[44px]"
-            >
-              Cancel
-            </Button>
-            <Button
-              type="submit"
-              form="vendor-form"
-              disabled={isPending}
-              className="min-h-[44px] bg-slate-900 hover:bg-slate-800 text-white"
-            >
-              {isPending ? (
-                <span className="inline-flex items-center gap-1.5">
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>Saving...</span>
-                </span>
-              ) : editingVendor ? (
-                'Save Changes'
-              ) : (
-                'Save Vendor'
+            <DialogFooter className="pt-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setIsAddModalOpen(false)}
+                disabled={isPending}
+                className="min-h-[40px] cursor-pointer"
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                disabled={isPending}
+                className="min-h-[40px] bg-[#7F1D1D] hover:bg-[#991B1B] text-white cursor-pointer font-semibold"
+              >
+                {isPending ? (
+                  <span className="inline-flex items-center gap-1.5">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Saving...</span>
+                  </span>
+                ) : (
+                  'Save Vendor'
+                )}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* DIALOG: EDIT VENDOR */}
+      <Dialog
+        open={Boolean(editingVendor)}
+        onOpenChange={(open) => {
+          if (!open) setEditingVendor(null);
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Edit Vendor</DialogTitle>
+            <DialogDescription>
+              Update supplier trade name or banking beneficiary credentials.
+            </DialogDescription>
+          </DialogHeader>
+
+          <form onSubmit={editForm.handleSubmit(onEditSubmit)} className="space-y-4">
+            <div>
+              <Label htmlFor="ev-party" className="block text-xs font-semibold text-slate-700 mb-1">
+                Party Name (Trade Name) <span className="text-rose-600">*</span>
+              </Label>
+              <Input
+                id="ev-party"
+                {...editForm.register('party_name')}
+                disabled={isPending}
+                className="w-full min-h-[42px]"
+              />
+              {editForm.formState.errors.party_name && (
+                <p className="text-[11px] text-rose-600 mt-1">
+                  {editForm.formState.errors.party_name.message}
+                </p>
               )}
-            </Button>
-          </DialogFooter>
+            </div>
+
+            <div>
+              <Label htmlFor="ev-ben" className="block text-xs font-semibold text-slate-700 mb-1">
+                Beneficiary Name (Bank Account Holder) <span className="text-rose-600">*</span>
+              </Label>
+              <Input
+                id="ev-ben"
+                {...editForm.register('beneficiary_name')}
+                disabled={isPending}
+                className="w-full min-h-[42px]"
+              />
+              {editForm.formState.errors.beneficiary_name && (
+                <p className="text-[11px] text-rose-600 mt-1">
+                  {editForm.formState.errors.beneficiary_name.message}
+                </p>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <Label htmlFor="ev-acc" className="block text-xs font-semibold text-slate-700 mb-1">
+                  Account Number <span className="text-rose-600">*</span>
+                </Label>
+                <Input
+                  id="ev-acc"
+                  type="text"
+                  {...editForm.register('account_number')}
+                  disabled={isPending}
+                  className="w-full min-h-[42px] font-mono tabular-nums"
+                />
+                {editForm.formState.errors.account_number && (
+                  <p className="text-[11px] text-rose-600 mt-1">
+                    {editForm.formState.errors.account_number.message}
+                  </p>
+                )}
+              </div>
+              <div>
+                <Label htmlFor="ev-ifsc" className="block text-xs font-semibold text-slate-700 mb-1">
+                  IFSC Code (11-chars) <span className="text-rose-600">*</span>
+                </Label>
+                <Input
+                  id="ev-ifsc"
+                  type="text"
+                  maxLength={11}
+                  {...editForm.register('ifsc_code')}
+                  onChange={(e) => editForm.setValue('ifsc_code', e.target.value.toUpperCase())}
+                  disabled={isPending}
+                  className="w-full min-h-[42px] uppercase font-mono font-bold"
+                />
+                {editForm.formState.errors.ifsc_code && (
+                  <p className="text-[11px] text-rose-600 mt-1">
+                    {editForm.formState.errors.ifsc_code.message}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <div>
+              <Label htmlFor="ev-remarks" className="block text-xs font-semibold text-slate-700 mb-1">
+                Remarks (Optional)
+              </Label>
+              <Textarea
+                id="ev-remarks"
+                {...editForm.register('remarks')}
+                rows={2}
+                disabled={isPending}
+              />
+            </div>
+
+            <DialogFooter className="pt-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setEditingVendor(null)}
+                disabled={isPending}
+                className="min-h-[40px] cursor-pointer"
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                disabled={isPending}
+                className="min-h-[40px] bg-[#7F1D1D] hover:bg-[#991B1B] text-white cursor-pointer font-semibold"
+              >
+                {isPending ? (
+                  <span className="inline-flex items-center gap-1.5">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Saving...</span>
+                  </span>
+                ) : (
+                  'Save Changes'
+                )}
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
     </div>

@@ -4,23 +4,23 @@ import { PwaRegister } from '@/components/layout/pwa-register';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'INDFURN — Payment Approval & UTR Tracking System',
-  description: 'Digital payment authorization, bank reconciliation, and UTR tracking for INDFURN.',
+  title: 'Payment Desk — Internal Payment Approval & Execution Desk',
+  description: 'Digital payment authorization, bank reconciliation, and UTR tracking for INDFURN and VINMORE.',
   manifest: '/manifest.webmanifest',
   icons: {
-    icon: '/logo.png',
-    shortcut: '/logo.png',
-    apple: '/logo.png',
+    icon: '/icon-192.png',
+    shortcut: '/icon-192.png',
+    apple: '/icon-192.png',
   },
   appleWebApp: {
     capable: true,
     statusBarStyle: 'default',
-    title: 'INDFURN Pay',
+    title: 'Payment Desk',
   },
 };
 
 export const viewport: Viewport = {
-  themeColor: '#1E293B',
+  themeColor: '#7F1D1D',
   width: 'device-width',
   initialScale: 1,
   maximumScale: 1,
@@ -33,7 +33,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className="h-full bg-[#F8FAFC] antialiased">
-      <body className="h-full bg-[#F8FAFC] text-[#0F172A] font-sans selection:bg-slate-200 selection:text-slate-900">
+      <body className="h-full bg-[#F8FAFC] text-[#0F172A] font-sans selection:bg-rose-100 selection:text-rose-950">
         <PwaRegister />
         {children}
         <Toaster

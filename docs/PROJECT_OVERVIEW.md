@@ -1,94 +1,102 @@
-# 01 — Project Overview: INDFURN Payment Approval & UTR Tracking System
+# Payment Desk — Project Overview (v2)
 
 ## 1. Executive Summary
-This project digitizes the manual **Payment Approval Form** and post-payment bank reconciliation process for **INDFURN** (a B2B furniture business).
+**Payment Desk** is an internal, mobile-first Progressive Web App (PWA) built to digitize and streamline the daily vendor payment approval, bank bulk execution, UTR tracking, and post-payment audit workflow for **INDFURN** and **VINMORE**.
 
-Currently, the workflow relies on printed paper approval sheets, handwritten UTR numbers, and stapled bank transaction printouts from **Axis Bank (Neo for Corporates)** and **South Indian Bank (SIB)**. The goal is to replace this paper process with a **clean, fast, minimal Progressive Web App (PWA)** that works seamlessly on both desktop (for accountant) and mobile (for the owner).
-
-**Core Design Philosophy:** Simplicity first. Zero clutter, minimal clicks, strict financial accuracy, and complete auditability.
+It replaces manual paper payment approval forms and repetitive single-entry typing on corporate bank portals with a structured, tamper-proof digital pipeline — from bill preparation and verification to live cash-balance-aware Owner approval, bank bulk Excel export, UTR/receipt archival, and independent audit sign-off.
 
 ---
 
-## 2. User Roles & Responsibilities
+## 2. Scope: Multi-Company & Banking Structure
+The system supports strictly **two companies** with complete data isolation (`company_id` enforced across all operational tables and RLS policies):
 
-The system is streamlined to strictly **2 roles**: `OWNER` (Admin) and `ACCOUNTANT`.
+| Company | Configured Banks | Notes |
+| :--- | :--- | :--- |
+| **INDFURN** | Axis Bank *(Primary Vendor Execution)*, South Indian Bank (SIB), HDFC Bank, Kotak Mahindra Bank | Internal inter-account transfers (e.g., SIB → Axis main account) do not require approval workflow tracking. |
+| **VINMORE** | Axis Bank, HDFC Bank, Kotak Mahindra Bank | Does not use SIB; follows the exact same payment workflow as INDFURN. |
 
-| Role | Title in Form | Primary Device | Core Responsibilities |
-| :--- | :--- | :--- | :--- |
-| **`ACCOUNTANT`** | Prepared By | Desktop (Primary) & Mobile | Prepares payment entries with invoice attachments and TDS calculations, submits items to Owner for approval, executes approved payments on Axis/SIB bank portals, enters the unique UTR number, and uploads the bank transaction receipt to mark as `PAID`. |
-| **`OWNER`** | Approved / Admin | Mobile (Primary) & Desktop | Reviews pending payment requests, views attached supplier invoices, optionally switches the source bank account (`Axis` ↔ `SIB`), and performs **Approve**, **Hold**, or **Reject** (with reason). Manages company bank accounts and user provisioning. |
-
----
-
-## 3. End-to-End Business Workflow
-
-### Step 1: Payment Request Preparation (`ACCOUNTANT`)
-1. Accountant opens the Payments Workspace and clicks "New Entry".
-2. Fills in all required payment parameters:
-   - Vendor / Supplier (from searchable master list or quick inline add)
-   - Invoice / Ref No (with live duplicate invoice detection)
-   - Due Date
-   - Purpose (presets: Against Bill, Against PI, Transfer, Electricity Charge, Advance, Other)
-   - Amount (₹) & TDS (₹) (live computed Net Payable)
-   - Proposed Source Bank (`Axis Bank` or `South Indian Bank`)
-   - Invoice / PI attachment (PDF or Image to private storage)
-   - Remarks (optional)
-3. Accountant saves as `DRAFT` or submits directly -> Status changes to `PENDING_APPROVAL`.
-
-### Step 2: Owner Review & Approval (`OWNER`)
-1. Owner opens `/approvals` on mobile or desktop.
-2. Views top summary strip showing **Total Pending Amount** and **Bank split** (Axis vs. SIB).
-3. Taps any payment card to inspect the full breakdown and 5-minute signed invoice preview.
-4. **Bank Override:** Before approving, Owner can 1-tap switch the source bank (e.g., `Axis` ↔ `SIB`), which is logged in the audit trail.
-5. Owner makes individual decisions:
-   - **Approve** -> Status becomes `APPROVED` (financial parameters are locked).
-   - **Hold** -> Status becomes `ON_HOLD` (paused for inquiry).
-   - **Reject** -> Mandatory reason dialog -> Status becomes `REJECTED`.
-
-### Step 3: Payment Execution & UTR Reconciliation (`ACCOUNTANT`)
-1. Approved items immediately appear in the Accountant's **"Ready to Pay"** list.
-2. Accountant executes the transfer on Axis Bank or South Indian Bank portal.
-3. Accountant clicks **Mark Paid**, enters the **UTR / Payment Ref No**, and uploads the **Bank Transaction Receipt** (PDF/Image).
-4. Status changes to `PAID`. The record is permanently locked, verified, and searchable forever in `/history`.
+- **Company Switcher:** Users with access to both companies switch cleanly via a top workspace switcher (`INDFURN` ↔ `VINMORE`). Single-company users are locked to their assigned company.
+- **Standalone Branding:** Branded as **`Payment Desk`** with a dedicated app icon and clean Maroon/Black light theme (not tied to a single company's logo).
+- **Access Control:** Private internal portal with no public sign-up. All accounts are provisioned by an Admin.
 
 ---
 
-## 4. Payment Item State Machine
+## 3. Roles & Responsibilities (RBAC)
+The previous 2-role (`OWNER`/`ACCOUNTANT`), `STAFF` (`/bills`), and Partner (`Recommended By`) workflows are deprecated. **Payment Desk v2** uses **4 Operational Roles** plus an **`is_admin`** capability flag. Multiple users can be assigned to any role, and each user is granted access to `INDFURN`, `VINMORE`, or `Both`.
 
-```text
-       (DRAFT) ──► Accountant edits / deletes draft
-          │
-          ▼  [Submit to Owner]
-  (PENDING_APPROVAL) ◄──────────────┐
-      │     │     │                 │
-      │     │     └──► (ON_HOLD) ───┘ [Owner resumes]
-      │     │
-      │     └────────► (REJECTED) [End state; Accountant may re-create]
-      │
-      ▼  [Owner Approves -> AMOUNT, VENDOR, INVOICE LOCKED]
-   (APPROVED)
-      │
-      ▼  [Accountant enters Unique UTR + Uploads Bank Receipt]
-     (PAID) [Final immutable state]
-```
+| Role | Primary Operator | Core Responsibilities & Permissions |
+| :--- | :--- | :--- |
+| **Admin** (`is_admin = true`) | Owner / Developer | Creates, edits, enables, and disables team users; assigns roles and company access (`INDFURN` / `VINMORE` / `Both`); manages company bank accounts. |
+| **Preparer / Executor** (`PREPARER`) | Accounts Executive | Creates, edits, and submits draft payment entries; maintains the Vendor Master; updates current **Available Bank Balances**; exports **Bank Bulk Upload Excel** for approved payments; records unique **UTR** (or **Cheque No + Date**) and uploads **Bank Acknowledgement PDF** to mark entries `PAID`; tracks Accounts-only **Monthly Reminders** (KSEB, Staff Salary). |
+| **Verifier** (`VERIFIER`) | Senior Accountant | Reviews `PENDING_VERIFICATION` entries for amount, TDS, due date, and vendor beneficiary accuracy; either **Verifies** (forwards to Approver) or **Returns / Rejects** with a mandatory note back to Preparer. |
+| **Approver** (`APPROVER`) | Owner (Final Authority) | Reviews verified payments (`PENDING_APPROVAL` and `ON_HOLD`); monitors **Available Balance vs. Projected Remaining Balance**; prioritizes bills by Due Date and Vendor Search; performs **Individual Approve**, **Bulk Approve**, **Hold**, or **Reject** (with mandatory reason). Never edits financial fields directly — any revision is sent back to Preparer. Has override authority to approve even if a Verifier is unavailable. Every payment requires Owner approval (no auto-approval limit). |
+| **Auditor** (`AUDITOR`) | Internal / External Auditor | Strictly **read-only** for financial data (no data entry or edits). Reviews `PAID` history alongside the digital Payment Voucher and uploaded **Bank Acknowledgement PDF**, then clicks **`Mark Audited`** to stamp an immutable audit verification. |
 
 ---
 
-## 5. Core Data Fields
+## 4. End-to-End Business Workflow
 
-| Field | Type / Format | Required? | Notes / Examples |
-|---|---|---|---|
-| **Date** | `YYYY-MM-DD` | Yes | Approval sheet date |
-| **Vendor / Supplier** | FK (`vendors`) | Yes | e.g., VINMORE, Ariham Industries, KSEB |
-| **Invoice / Ref No** | Text | Yes | Bill/PI number, On Account, NA |
-| **Due Date** | `YYYY-MM-DD` | Yes | Payment due date |
-| **Purpose** | Preset + Text | Yes | Against Bill, Against PI, Transfer, etc. |
-| **Amount (₹)** | `NUMERIC(12,2)` | Yes | Gross amount in INR (> 0) |
-| **TDS (₹)** | `NUMERIC(12,2)` | No | Default 0.00 (`NA` on print form if 0) |
-| **Net Payable (₹)** | Computed | Auto | Amount - TDS |
-| **Source Bank** | FK (`company_banks`) | Yes | Axis Bank or South Indian Bank (SIB) |
-| **Payment Ref No (UTR)** | Text (UNIQUE) | On `PAID` | Unique transaction reference |
-| **Remarks** | Text | No | Additional notes |
-| **Invoice File** | Storage Path | Optional | Supplier bill/PI photo or PDF |
-| **Bank Receipt File** | Storage Path | On `PAID` | Bank transaction advice PDF/Image |
-| **Sign-off Metadata** | User IDs + Times | Auto | `created_by`, `approved_by`, `paid_by` |
+### Lifecycle Pipeline
+`DRAFT` → `PENDING_VERIFICATION` → `PENDING_APPROVAL` → `APPROVED` *(Ready to Pay / Pending UTR)* → `PAID` *(Completed)* → `Audited`
+
+*(Exception states: `ON_HOLD`, `REJECTED`, `CANCELLED`)*
+
+### Step-by-Step Operational Flow
+1. **Bank Balance Update & Bill Preparation (`PREPARER`):**
+   - Updates current **Available Balance** per company bank before preparing a batch.
+   - Creates payment entries for either **Exact Bill-by-Bill** settlements (`Against Bill`, `Against PI`, `Electricity Charge`, etc.) or **On-Account / Running Balance** lump sums (e.g., ₹50,000 / ₹1,00,000).
+   - Selects payment mode: **NEFT/RTGS** (default) or **Cheque** (for rare one-time parties). Cash and UPI are out of scope.
+   - `Net Payable = Amount - TDS` is calculated automatically (`TDS` displays `NA` when `0`).
+   - Attaching a Supplier Invoice is **optional**. Submits entries to `PENDING_VERIFICATION`.
+2. **Verification (`VERIFIER`):**
+   - Receives notification of newly submitted entries.
+   - Cross-checks bill details and beneficiary info, then **Verifies** (`PENDING_APPROVAL`) or **Returns/Rejects** with a reason.
+3. **Owner Decision & Cash Visibility (`APPROVER`):**
+   - Receives notification of verified entries.
+   - Dashboard shows 4 key live metrics for the active company:
+     1. **Total Available Balance** *(with expandable per-bank breakdown)*
+     2. **Pending Verification** *(total currently with Verifier)*
+     3. **Pending Approval** *(total awaiting Owner decision)*
+     4. **Projected Remaining Balance** *(live calculation: `Available Balance - Approved/Selected Total`)*
+   - Reviews entries using **Due Date / Overdue** indicators and **Vendor Search**.
+   - Performs **Bulk Approve** (multi-select checkboxes) or line-by-line **Approve**, **Hold**, or **Reject** (mandatory reason).
+   - **No Clock Time Locks:** Standard batches run around 11:00 AM and 4:00 PM, but approvals are permitted anytime (including evenings/travel). Every transition records an exact **Timestamp**.
+4. **Bank Bulk Execution & UTR Settlement (`PREPARER`):**
+   - Receives notification once entries are approved, held, or rejected.
+   - Opens the **Ready to Pay / Pending UTR** queue and exports the **Bank Bulk Upload Excel (`.xlsx`)**.
+   - System auto-separates **Same-Bank** vs. **Other-Bank (NEFT/RTGS)** rows using each vendor's **IFSC prefix** and populates `beneficiary_name`, `account_number`, `ifsc_code`, and `net_payable` automatically *(starting with Axis Bank's two bulk upload templates, extensible to SIB/HDFC/Kotak)*.
+   - Uploads the Excel to the corporate bank portal (Owner authorizes via bank OTP).
+   - Returns to Payment Desk, enters each payment's unique **UTR Number** (or **Cheque No + Cheque Date** for cheques), and uploads the **Bank Acknowledgement PDF**. Only then does the item move from `Pending UTR` to `PAID`.
+5. **Audit & Archival (`AUDITOR`, `APPROVER`, `PREPARER`):**
+   - **Pending UTR Tracking:** Both Preparer and Owner overview highlight approved items still missing UTR/PDF proof.
+   - **Audit Verification:** Auditor filters completed `PAID` records by date/month/vendor, compares the Payment Voucher against the Bank Acknowledgement PDF, and marks items **`Audited`**.
+   - **PDF Voucher & History:** Any payment batch or entry can be searched, filtered, and saved/printed as a clean A4 PDF Voucher (`/print`).
+
+---
+
+## 5. Key Functional Modules
+- **Smart Vendor Master (Lean):** Stores only **Party Name** (trade/display name, e.g., `Naas Hardware`), **Beneficiary Name** (bank account holder name, e.g., `Manoj`), **Account Number**, **IFSC Code**, and optional **Remarks**. GSTIN and mobile numbers are intentionally excluded.
+- **Bank Bulk Upload Excel Exporter:** Replaces Tally integration (Tally export is not required). Generates bank-ready `.xlsx` files split automatically into Same-Bank and Other-Bank templates.
+- **Workflow Notifications (In-App + PWA Push):**
+  - `PREPARER` submits → notifies `VERIFIER`.
+  - `VERIFIER` verifies → notifies `APPROVER`.
+  - `APPROVER` approves / holds / rejects → notifies `PREPARER`.
+  - No notification is sent when an item is marked `PAID`.
+- **Accounts-Only Monthly Reminders:** Lightweight reminder tracker for recurring fixed obligations (e.g., KSEB electricity bills, staff salaries), visible exclusively to `PREPARER` / Accounts staff.
+- **Financial Safeguards:**
+  - Duplicate Bill Number warning per `(company, vendor, invoice_ref)`.
+  - Strict unique UTR enforcement (duplicate UTRs blocked at DB & UI levels).
+  - Core financial fields permanently locked once `APPROVED`.
+  - Zero hard deletes on submitted/paid records (`DRAFT` only).
+  - Private Supabase Storage for Bank Acknowledgement PDFs and optional Invoices.
+
+---
+
+## 6. Explicitly Out of Scope (v2)
+- Public user self-registration / sign-up.
+- Creating arbitrary new companies beyond `INDFURN` and `VINMORE`.
+- Cash or UPI payment tracking.
+- Tally ERP export or direct banking API integrations.
+- AI/OCR automatic UTR extraction from Bank Acknowledgement PDFs.
+- Decorative dashboard analytics charts or complex monthly BI reports (clean filterable History & Audit log suffices).
+- Clock-based submission or approval time locks.

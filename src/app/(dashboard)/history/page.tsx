@@ -1,14 +1,14 @@
 import * as React from 'react';
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
-import { getCurrentUserAndProfile } from '@/lib/auth';
+import { getCurrentUserContext } from '@/lib/auth';
 import { HistoryView } from '@/components/history/history-view';
 import { Loader2 } from 'lucide-react';
 import type { CompanyBank, PaymentItem } from '@/types/database';
 
 export const metadata = {
-  title: 'History & UTR Audit | INDFURN PayFlow',
-  description: 'Search past approvals, verified UTR references, and export audit sheets.',
+  title: 'History & Archive | Payment Desk',
+  description: 'Search past approvals, verified UTR/Cheque references, audit status, and export PDF/CSV.',
 };
 
 function HistoryLoadingSkeleton() {
@@ -21,7 +21,7 @@ function HistoryLoadingSkeleton() {
 }
 
 export default async function HistoryPage() {
-  const { user, profile } = await getCurrentUserAndProfile();
+  const { user, profile, activeCompany } = await getCurrentUserContext();
 
   if (!user) {
     redirect('/login');
@@ -31,28 +31,28 @@ export default async function HistoryPage() {
     redirect('/login?error=disabled');
   }
 
-  // Strict role check: Only Owner and Accountant can access history
-  if (profile.role !== 'OWNER' && profile.role !== 'ACCOUNTANT') {
-    redirect('/login');
-  }
-
   const supabase = await createClient();
 
-  // Concurrently fetch active banks and all payment items in parallel
-  const [banksRes, paymentsRes] = await Promise.all([
-    supabase
-      .from('company_banks')
-      .select('id, short_name, full_name, account_mask, is_active, created_at')
-      .eq('is_active', true)
-      .order('short_name', { ascending: true }),
-    supabase
-      .from('payment_items')
-      .select(
-        '*, vendor:vendors(id, name, gstin, bank_account_no, ifsc_code), source_bank:company_banks(id, short_name, full_name)'
-      )
-      .order('sheet_date', { ascending: false })
-      .order('created_at', { ascending: false }),
-  ]);
+  let banksQuery = supabase
+    .from('company_banks')
+    .select('*')
+    .eq('is_active', true)
+    .order('short_code', { ascending: true });
+
+  let paymentsQuery = supabase
+    .from('payment_items')
+    .select(
+      '*, vendor:vendors(*), source_bank:company_banks(*), creator:profiles!created_by(id, full_name, role), verifier:profiles!verified_by(id, full_name, role), approver:profiles!approved_by(id, full_name, role), payer:profiles!paid_by(id, full_name, role), auditor:profiles!audited_by(id, full_name, role)'
+    )
+    .order('sheet_date', { ascending: false })
+    .order('created_at', { ascending: false });
+
+  if (activeCompany) {
+    banksQuery = banksQuery.eq('company_id', activeCompany.id);
+    paymentsQuery = paymentsQuery.eq('company_id', activeCompany.id);
+  }
+
+  const [banksRes, paymentsRes] = await Promise.all([banksQuery, paymentsQuery]);
 
   const banks = (banksRes.data || []) as CompanyBank[];
   const payments = (paymentsRes.data || []) as PaymentItem[];
@@ -62,7 +62,8 @@ export default async function HistoryPage() {
       <HistoryView
         initialPayments={payments}
         banks={banks}
-        currentRole={profile.role}
+        companyCode={activeCompany?.code || 'INDFURN'}
+        companyName={activeCompany?.name || 'INDFURN'}
       />
     </React.Suspense>
   );

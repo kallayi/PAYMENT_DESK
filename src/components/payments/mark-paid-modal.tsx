@@ -13,13 +13,12 @@ import {
   Lock,
   Upload,
   FileCheck2,
-  Paperclip,
   Loader2,
   X,
   AlertCircle,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { markPaidWithUtr, uploadReceiptFile } from '@/actions/payments';
+import { markPaymentPaid, uploadReceiptFile } from '@/actions/payments';
 import { formatINR } from '@/lib/format';
 import type { PaymentItem } from '@/types/database';
 
@@ -37,6 +36,8 @@ export function MarkPaidModal({
   onSuccess,
 }: MarkPaidModalProps) {
   const [utrNumber, setUtrNumber] = React.useState<string>('');
+  const [chequeNumber, setChequeNumber] = React.useState<string>('');
+  const [chequeDate, setChequeDate] = React.useState<string>('');
   const [remarks, setRemarks] = React.useState<string>('');
   const [receiptFilePath, setReceiptFilePath] = React.useState<string | null>(null);
   const [receiptFileName, setReceiptFileName] = React.useState<string | null>(null);
@@ -50,20 +51,35 @@ export function MarkPaidModal({
   React.useEffect(() => {
     if (!open || !payment) {
       setUtrNumber('');
+      setChequeNumber('');
+      setChequeDate('');
       setRemarks('');
       setReceiptFilePath(null);
       setReceiptFileName(null);
       setErrorMessage(null);
       return;
     }
+
+    setUtrNumber(payment.utr_number || '');
+    setChequeNumber(payment.cheque_number || '');
+    setChequeDate(payment.cheque_date || new Date().toISOString().split('T')[0]);
     setRemarks(payment.remarks || '');
+    setReceiptFilePath(payment.receipt_file_path || null);
+    setReceiptFileName(
+      payment.receipt_file_path
+        ? payment.receipt_file_path.split('/').pop() || 'Attached Receipt'
+        : null
+    );
     setErrorMessage(null);
   }, [open, payment]);
 
   if (!payment) return null;
 
-  const vendorName = payment.vendor?.name || 'Unknown Vendor';
-  const bankName = payment.source_bank?.full_name || 'Bank';
+  const isCheque = payment.payment_mode === 'CHEQUE';
+  const partyName = payment.vendor?.party_name || payment.vendor?.name || 'Unknown Party';
+  const beneficiaryName = payment.vendor?.beneficiary_name || partyName;
+  const bankName = payment.source_bank?.bank_name || payment.source_bank?.full_name || 'Bank';
+  const bankCode = payment.source_bank?.short_code || payment.source_bank?.short_name || 'BANK';
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -88,16 +104,18 @@ export function MarkPaidModal({
     try {
       const formData = new FormData();
       formData.append('file', file);
+      formData.append('paymentId', payment.id);
 
       const res = await uploadReceiptFile(formData);
       if (!res.success) {
         toast.error(res.error);
+        setErrorMessage(res.error);
         return;
       }
 
       setReceiptFilePath(res.data.filePath);
       setReceiptFileName(res.data.fileName);
-      toast.success('Bank receipt attached');
+      toast.success('Bank acknowledgement receipt uploaded.');
     } catch {
       toast.error('Failed to upload bank receipt.');
     } finally {
@@ -107,24 +125,37 @@ export function MarkPaidModal({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setErrorMessage(null);
 
-    if (!utrNumber.trim()) {
-      setErrorMessage('Please enter the UTR / Payment Ref No.');
-      return;
-    }
-
-    if (!receiptFilePath) {
-      setErrorMessage('Bank transaction receipt file is required.');
-      return;
+    if (!isCheque) {
+      if (!utrNumber.trim()) {
+        setErrorMessage('Please enter the unique UTR / Payment Reference Number.');
+        return;
+      }
+      if (!receiptFilePath) {
+        setErrorMessage('Bank Acknowledgement PDF / Receipt upload is required.');
+        return;
+      }
+    } else {
+      if (!chequeNumber.trim()) {
+        setErrorMessage('Please enter the Cheque Number.');
+        return;
+      }
+      if (!chequeDate.trim()) {
+        setErrorMessage('Please select the Cheque Date.');
+        return;
+      }
     }
 
     setIsSubmitting(true);
-    setErrorMessage(null);
 
     try {
-      const res = await markPaidWithUtr({
+      const res = await markPaymentPaid({
         payment_id: payment.id,
-        utr_number: utrNumber.trim().toUpperCase(),
+        payment_mode: (payment.payment_mode || 'NEFT_RTGS') as 'NEFT_RTGS' | 'CHEQUE',
+        utr_number: isCheque ? null : utrNumber.trim().toUpperCase(),
+        cheque_number: isCheque ? chequeNumber.trim() : null,
+        cheque_date: isCheque ? chequeDate.trim() : null,
         receipt_file_path: receiptFilePath,
         remarks: remarks.trim() || null,
       });
@@ -135,11 +166,15 @@ export function MarkPaidModal({
         return;
       }
 
-      toast.success(`Payment marked Paid (UTR: ${res.data.utr_number})`);
+      toast.success(
+        isCheque
+          ? `Payment marked Paid (Cheque #${res.data.cheque_number})`
+          : `Payment marked Paid (UTR: ${res.data.utr_number})`
+      );
       onSuccess(res.data);
       onOpenChange(false);
     } catch {
-      toast.error('An unexpected error occurred while marking paid.');
+      toast.error('An unexpected error occurred while marking payment paid.');
     } finally {
       setIsSubmitting(false);
     }
@@ -150,30 +185,47 @@ export function MarkPaidModal({
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="text-base font-semibold text-slate-900">
-            Enter UTR & Bank Receipt
+            {isCheque
+              ? 'Record Cheque Settlement'
+              : 'Enter UTR & Bank Acknowledgement PDF'}
           </DialogTitle>
           <DialogDescription className="text-xs text-slate-500">
-            Reconcile disbursement and close the payment cycle.
+            Reconcile disbursement and seal this payment record for post-payment audit.
           </DialogDescription>
         </DialogHeader>
 
-        {/* READ-ONLY LOCKED SUMMARY HEADER (Screen C & ui-reference.html) */}
-        <div className="p-3.5 rounded-lg bg-slate-50 border border-slate-200 space-y-1.5 text-xs">
-          <div className="flex items-center gap-1.5 text-[11px] font-medium text-slate-500 mb-1">
-            <Lock className="w-3.5 h-3.5 text-slate-600" />
-            <span>Locked after Owner approval</span>
+        {/* LOCKED SUMMARY HEADER */}
+        <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-1.5 text-xs">
+          <div className="flex items-center justify-between text-[11px] font-medium text-slate-500 mb-1">
+            <span className="inline-flex items-center gap-1.5">
+              <Lock className="w-3.5 h-3.5 text-slate-600" />
+              <span>Locked after Owner approval</span>
+            </span>
+            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-200 text-slate-800">
+              {isCheque ? 'CHEQUE' : 'NEFT / RTGS'}
+            </span>
           </div>
-          <div className="flex justify-between">
-            <span className="text-slate-500">Vendor</span>
-            <span className="font-semibold text-slate-900">{vendorName}</span>
+
+          <div className="flex justify-between gap-2">
+            <span className="text-slate-500 shrink-0">Party Name</span>
+            <span className="font-semibold text-slate-900 text-right truncate">{partyName}</span>
           </div>
-          <div className="flex justify-between">
-            <span className="text-slate-500">Approved Bank</span>
-            <span className="font-medium text-slate-800">{bankName}</span>
+          <div className="flex justify-between gap-2">
+            <span className="text-slate-500 shrink-0">Beneficiary Name</span>
+            <span className="font-medium text-slate-800 text-right truncate">{beneficiaryName}</span>
           </div>
-          <div className="flex justify-between pt-1.5 border-t border-slate-200">
-            <span className="font-medium text-slate-700">Net Payable</span>
-            <span className="font-bold text-slate-900 tabular-nums">
+          <div className="flex justify-between items-center gap-2">
+            <span className="text-slate-500 shrink-0">Approved Bank</span>
+            <span className="font-semibold text-slate-900 inline-flex items-center gap-1.5">
+              <span>{bankName}</span>
+              <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-200 text-slate-800">
+                {bankCode}
+              </span>
+            </span>
+          </div>
+          <div className="flex justify-between items-center pt-2 border-t border-slate-200">
+            <span className="font-semibold text-slate-700">Net Payable</span>
+            <span className="text-base font-bold text-slate-900 tabular-nums">
               {formatINR(payment.net_payable)}
             </span>
           </div>
@@ -187,33 +239,82 @@ export function MarkPaidModal({
         )}
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          {/* UTR NUMBER INPUT */}
-          <div>
-            <label
-              htmlFor="utr-number"
-              className="block text-xs font-medium text-slate-700 mb-1"
-            >
-              UTR / Payment Ref No <span className="text-rose-600">*</span>
-            </label>
-            <input
-              id="utr-number"
-              type="text"
-              required
-              autoFocus
-              placeholder="e.g., AXCOH32315623899"
-              value={utrNumber}
-              onChange={(e) => {
-                setUtrNumber(e.target.value.toUpperCase());
-                setErrorMessage(null);
-              }}
-              className="w-full min-h-[44px] sm:min-h-[38px] px-3 rounded-lg border border-slate-200 bg-white text-sm font-mono uppercase tabular-nums outline-none focus:border-slate-900 focus:ring-1 focus:ring-slate-900 transition-colors"
-            />
-          </div>
+          {!isCheque ? (
+            /* NEFT / RTGS: UTR NUMBER INPUT */
+            <div>
+              <label
+                htmlFor="utr-number"
+                className="block text-xs font-medium text-slate-700 mb-1"
+              >
+                UTR / Payment Reference No <span className="text-rose-600">*</span>
+              </label>
+              <input
+                id="utr-number"
+                type="text"
+                required
+                autoFocus
+                placeholder="e.g., AXCOH32315623899"
+                value={utrNumber}
+                onChange={(e) => {
+                  setUtrNumber(e.target.value.toUpperCase());
+                  setErrorMessage(null);
+                }}
+                className="w-full min-h-[44px] sm:min-h-[38px] px-3 rounded-lg border border-slate-200 bg-white text-sm font-mono uppercase tabular-nums outline-none focus:border-brand focus:ring-1 focus:ring-brand transition-colors"
+              />
+            </div>
+          ) : (
+            /* CHEQUE: CHEQUE NUMBER + CHEQUE DATE */
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label
+                  htmlFor="cheque-number"
+                  className="block text-xs font-medium text-slate-700 mb-1"
+                >
+                  Cheque Number <span className="text-rose-600">*</span>
+                </label>
+                <input
+                  id="cheque-number"
+                  type="text"
+                  required
+                  autoFocus
+                  placeholder="e.g., 004821"
+                  value={chequeNumber}
+                  onChange={(e) => {
+                    setChequeNumber(e.target.value);
+                    setErrorMessage(null);
+                  }}
+                  className="w-full min-h-[44px] sm:min-h-[38px] px-3 rounded-lg border border-slate-200 bg-white text-sm font-mono tabular-nums outline-none focus:border-brand focus:ring-1 focus:ring-brand transition-colors"
+                />
+              </div>
+              <div>
+                <label
+                  htmlFor="cheque-date"
+                  className="block text-xs font-medium text-slate-700 mb-1"
+                >
+                  Cheque Date <span className="text-rose-600">*</span>
+                </label>
+                <input
+                  id="cheque-date"
+                  type="date"
+                  required
+                  value={chequeDate}
+                  onChange={(e) => {
+                    setChequeDate(e.target.value);
+                    setErrorMessage(null);
+                  }}
+                  className="w-full min-h-[44px] sm:min-h-[38px] px-3 rounded-lg border border-slate-200 bg-white text-xs sm:text-sm tabular-nums outline-none focus:border-brand focus:ring-1 focus:ring-brand transition-colors"
+                />
+              </div>
+            </div>
+          )}
 
-          {/* BANK RECEIPT UPLOAD */}
+          {/* BANK ACKNOWLEDGEMENT PDF / RECEIPT UPLOAD */}
           <div>
             <label className="block text-xs font-medium text-slate-700 mb-1">
-              Bank Transaction Receipt <span className="text-rose-600">*</span>
+              {isCheque
+                ? 'Cheque Scan / Receipt Copy (Optional)'
+                : 'Bank Acknowledgement PDF / Receipt'}{' '}
+              {!isCheque && <span className="text-rose-600">*</span>}
             </label>
             <input
               ref={fileInputRef}
@@ -238,6 +339,7 @@ export function MarkPaidModal({
                     setReceiptFileName(null);
                   }}
                   className="p-1 text-slate-400 hover:text-rose-600 rounded transition-colors"
+                  title="Remove file"
                 >
                   <X className="w-3.5 h-3.5" />
                 </button>
@@ -245,7 +347,11 @@ export function MarkPaidModal({
             ) : (
               <div className="px-3 py-2.5 rounded-lg border border-dashed border-slate-300 bg-slate-50 flex items-center justify-between gap-2">
                 <span className="text-xs text-slate-500 truncate">
-                  {isUploadingFile ? 'Uploading receipt...' : 'No receipt file selected'}
+                  {isUploadingFile
+                    ? 'Uploading acknowledgement...'
+                    : isCheque
+                      ? 'No scan uploaded (optional)'
+                      : 'No receipt file selected'}
                 </span>
                 <button
                   type="button"
@@ -263,7 +369,7 @@ export function MarkPaidModal({
               </div>
             )}
             <p className="text-[11px] text-slate-400 mt-1">
-              Accepted: PDF, JPG, PNG, WEBP up to 5MB.
+              Accepted: PDF, JPG, PNG, WEBP up to 5 MB. Stored privately for Auditor review.
             </p>
           </div>
 
@@ -280,8 +386,8 @@ export function MarkPaidModal({
               type="text"
               value={remarks}
               onChange={(e) => setRemarks(e.target.value)}
-              placeholder="Optional transfer note"
-              className="w-full min-h-[44px] sm:min-h-[38px] px-3 rounded-lg border border-slate-200 bg-white text-sm outline-none focus:border-slate-900 focus:ring-1 focus:ring-slate-900 transition-colors"
+              placeholder="Optional settlement note"
+              className="w-full min-h-[44px] sm:min-h-[38px] px-3 rounded-lg border border-slate-200 bg-white text-sm outline-none focus:border-brand focus:ring-1 focus:ring-brand transition-colors"
             />
           </div>
 

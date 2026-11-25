@@ -6,8 +6,8 @@ import type { ActionResult } from '@/types/database';
 export type StorageBucket = 'supplier-invoices' | 'bank-receipts';
 
 /**
- * Generate a short-lived (5-minute) signed URL for private bucket file access.
- * Strictly verifies role: Only ACCOUNTANT and OWNER can access.
+ * Generate a short-lived (15-minute) signed URL for private bucket file access.
+ * Verifies active session so users do not get timed out mid-review.
  * NEVER calls getPublicUrl().
  */
 export async function getSignedFileUrl(
@@ -38,18 +38,10 @@ export async function getSignedFileUrl(
     return { success: false, error: 'Account disabled or profile not found.' };
   }
 
-  // Only ACCOUNTANT and OWNER can access files
-  if (profile.role !== 'ACCOUNTANT' && profile.role !== 'OWNER') {
-    return {
-      success: false,
-      error: 'Access denied: You do not have permission to view documents.',
-    };
-  }
-
-  // Create temporary signed URL with 300 seconds (5 minutes) expiry
+  // Create temporary signed URL with 900 seconds (15 minutes) expiry
   const { data, error } = await supabase.storage
     .from(bucket)
-    .createSignedUrl(filePath, 300);
+    .createSignedUrl(filePath, 900);
 
   if (error || !data?.signedUrl) {
     return {

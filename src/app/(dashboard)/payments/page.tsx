@@ -1,14 +1,14 @@
 import * as React from 'react';
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
-import { getCurrentUserAndProfile } from '@/lib/auth';
+import { getCurrentUserContext } from '@/lib/auth';
 import { PaymentsWorkspace } from '@/components/payments/payments-workspace';
 import { Loader2 } from 'lucide-react';
-import type { CompanyBank, PaymentItem, Vendor } from '@/types/database';
+import type { CompanyBank, PaymentItem, Vendor, RecurringReminder } from '@/types/database';
 
 export const metadata = {
-  title: 'Payments | INDFURN',
-  description: 'Manage payments ledger and submit for owner approval.',
+  title: 'Payments | Payment Desk',
+  description: 'Manage payments ledger and submit for approval.',
 };
 
 function PaymentsLoadingSkeleton() {
@@ -20,8 +20,12 @@ function PaymentsLoadingSkeleton() {
   );
 }
 
-export default async function PaymentsPage() {
-  const { user, profile } = await getCurrentUserAndProfile();
+interface PaymentsPageProps {
+  searchParams?: Promise<{ fromReminder?: string }>;
+}
+
+export default async function PaymentsPage({ searchParams }: PaymentsPageProps) {
+  const { user, profile, activeCompany } = await getCurrentUserContext();
 
   if (!user) {
     redirect('/login');
@@ -31,40 +35,67 @@ export default async function PaymentsPage() {
     redirect('/login?error=disabled');
   }
 
-  // Strict role check: Owner belongs on /approvals, not Accountant draft workspace
-  if (profile.role === 'OWNER') {
+  // Approvers without admin belong on /approvals
+  if (profile.role === 'APPROVER' && !profile.is_admin) {
     redirect('/approvals');
   }
 
-  if (profile.role !== 'ACCOUNTANT') {
+  if (profile.role !== 'PREPARER' && profile.role !== 'APPROVER' && !profile.is_admin) {
     redirect('/login');
   }
+
+  const resolvedParams = searchParams ? await searchParams : {};
+  const fromReminderId = resolvedParams.fromReminder;
 
   const supabase = await createClient();
 
   // Concurrently fetch active vendors, banks, and payment ledger in parallel
-  const [vendorsRes, banksRes, paymentsRes] = await Promise.all([
-    supabase
-      .from('vendors')
-      .select('id, name, gstin, bank_account_no, ifsc_code, notes, is_active, created_by, created_at')
-      .eq('is_active', true)
-      .order('name', { ascending: true }),
-    supabase
-      .from('company_banks')
-      .select('id, short_name, full_name, account_mask, is_active, created_at')
-      .eq('is_active', true)
-      .order('short_name', { ascending: true }),
-    supabase
-      .from('payment_items')
-      .select(
-        '*, vendor:vendors(id, name, gstin, bank_account_no, ifsc_code), source_bank:company_banks(id, short_name, full_name)'
-      )
-      .order('created_at', { ascending: false }),
+  let vendorsQuery = supabase
+    .from('vendors')
+    .select('*')
+    .eq('is_active', true)
+    .order('party_name', { ascending: true });
+
+  let banksQuery = supabase
+    .from('company_banks')
+    .select('*, balance_updater:profiles!balance_updated_by(full_name)')
+    .eq('is_active', true)
+    .order('short_code', { ascending: true });
+
+  let paymentsQuery = supabase
+    .from('payment_items')
+    .select(
+      '*, vendor:vendors(*), source_bank:company_banks(*)'
+    )
+    .order('created_at', { ascending: false });
+
+  if (activeCompany) {
+    vendorsQuery = vendorsQuery.eq('company_id', activeCompany.id);
+    banksQuery = banksQuery.eq('company_id', activeCompany.id);
+    paymentsQuery = paymentsQuery.eq('company_id', activeCompany.id);
+  }
+
+  let reminderPromise: Promise<{ data: RecurringReminder | null }> = Promise.resolve({ data: null });
+  if (fromReminderId && activeCompany) {
+    reminderPromise = supabase
+      .from('recurring_reminders')
+      .select('id, title, estimated_amount, vendor_id')
+      .eq('id', fromReminderId)
+      .eq('company_id', activeCompany.id)
+      .maybeSingle() as unknown as Promise<{ data: RecurringReminder | null }>;
+  }
+
+  const [vendorsRes, banksRes, paymentsRes, reminderRes] = await Promise.all([
+    vendorsQuery,
+    banksQuery,
+    paymentsQuery,
+    reminderPromise,
   ]);
 
   const vendors = (vendorsRes.data || []) as Vendor[];
   const banks = (banksRes.data || []) as CompanyBank[];
   const payments = (paymentsRes.data || []) as PaymentItem[];
+  const initialReminder = reminderRes.data;
 
   return (
     <React.Suspense fallback={<PaymentsLoadingSkeleton />}>
@@ -72,6 +103,17 @@ export default async function PaymentsPage() {
         initialPayments={payments}
         vendors={vendors}
         banks={banks}
+        companyCode={activeCompany?.code || 'INDFURN'}
+        initialFromReminder={
+          initialReminder
+            ? {
+              id: initialReminder.id,
+              title: initialReminder.title,
+              estimated_amount: initialReminder.estimated_amount,
+              vendor_id: initialReminder.vendor_id,
+            }
+            : null
+        }
       />
     </React.Suspense>
   );

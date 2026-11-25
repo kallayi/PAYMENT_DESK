@@ -1,5 +1,5 @@
 /**
- * Safe CSV Generation and Export utility for INDFURN PayFlow
+ * Safe CSV Generation and Export utility for Payment Desk (v2)
  * Strictly prevents CSV Formula Injection (CWE-1236) by neutralizing formula prefixes.
  */
 
@@ -33,33 +33,60 @@ export function generatePaymentsCSV(items: PaymentItem[]): string {
   const headers = [
     'Sl No',
     'Sheet Date',
-    'Vendor Name',
-    'Invoice / Ref No',
     'Due Date',
+    'Party Name',
+    'Beneficiary Name',
+    'Account Number',
+    'IFSC Code',
+    'Invoice / Ref No',
     'Purpose',
+    'Payment Type',
+    'Payment Mode',
     'Gross Amount (INR)',
     'TDS (INR)',
     'Net Payable (INR)',
     'Bank',
     'Status',
-    'UTR / Payment Ref',
+    'UTR / Cheque Ref',
+    'Audit Status',
+    'Audited At',
     'Remarks',
   ];
 
   const rows = items.map((item, index) => {
+    const partyName = item.vendor?.party_name || item.vendor?.name || 'Unknown Party';
+    const beneficiaryName = item.vendor?.beneficiary_name || partyName;
+    const refNo =
+      item.payment_mode === 'CHEQUE' && item.cheque_number
+        ? `CHQ #${item.cheque_number}${item.cheque_date ? ` (${item.cheque_date})` : ''}`
+        : item.utr_number || '';
+    const auditStatus =
+      item.status === 'PAID'
+        ? item.audited_at
+          ? 'Audited'
+          : 'Unaudited'
+        : '—';
+
     return [
       sanitizeCSVCell(index + 1),
       sanitizeCSVCell(item.sheet_date),
-      sanitizeCSVCell(item.vendor?.name || 'Unknown Vendor'),
-      sanitizeCSVCell(item.invoice_ref),
       sanitizeCSVCell(item.due_date),
+      sanitizeCSVCell(partyName),
+      sanitizeCSVCell(beneficiaryName),
+      sanitizeCSVCell(item.vendor?.account_number || ''),
+      sanitizeCSVCell(item.vendor?.ifsc_code || ''),
+      sanitizeCSVCell(item.invoice_ref),
       sanitizeCSVCell(item.purpose),
+      sanitizeCSVCell(item.payment_type === 'ON_ACCOUNT' ? 'On Account' : 'Against Bill'),
+      sanitizeCSVCell(item.payment_mode === 'CHEQUE' ? 'Cheque' : 'NEFT/RTGS'),
       sanitizeCSVCell(Number(item.amount || 0).toFixed(2)),
-      sanitizeCSVCell(Number(item.tds || 0).toFixed(2)),
+      sanitizeCSVCell(Number(item.tds || 0) > 0 ? Number(item.tds).toFixed(2) : 'NA'),
       sanitizeCSVCell(Number(item.net_payable || 0).toFixed(2)),
-      sanitizeCSVCell(item.source_bank?.short_name || 'Bank'),
+      sanitizeCSVCell(item.source_bank?.short_code || item.source_bank?.short_name || 'Bank'),
       sanitizeCSVCell(item.status),
-      sanitizeCSVCell(item.utr_number || ''),
+      sanitizeCSVCell(refNo),
+      sanitizeCSVCell(auditStatus),
+      sanitizeCSVCell(item.audited_at || ''),
       sanitizeCSVCell(item.remarks || ''),
     ].join(',');
   });

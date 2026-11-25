@@ -14,17 +14,21 @@ import type { PaymentItem } from '@/types/database';
 
 interface PrintSheetViewProps {
   payments: PaymentItem[];
-  selectedDate: string;
-  userRole: 'OWNER' | 'ACCOUNTANT';
-  userName: string;
+  companyCode: string;
+  companyName: string;
+  filterSummary: string;
 }
 
 export function PrintSheetView({
   payments,
-  selectedDate,
-  userRole,
-  userName,
+  companyCode,
+  companyName,
+  filterSummary,
 }: PrintSheetViewProps) {
+  const [generatedAt] = React.useState<string>(() =>
+    formatDateTime(new Date().toISOString())
+  );
+
   const handlePrint = () => {
     window.print();
   };
@@ -37,26 +41,37 @@ export function PrintSheetView({
     return payments.reduce((sum, p) => sum + Number(p.tds || 0), 0);
   }, [payments]);
 
-  const netPayableTotal = totalGross - totalTds;
+  const netPayableTotal = payments.reduce(
+    (sum, p) => sum + Number(p.net_payable || 0),
+    0
+  );
 
-  // Sign-off metadata extraction
-  const firstPrepared = payments.find((p) => p.creator?.full_name);
-  const preparedName =
-    firstPrepared?.creator?.full_name ||
-    (userRole === 'ACCOUNTANT' ? userName : 'Accountant');
-  const preparedTimestamp = firstPrepared?.submitted_at || firstPrepared?.created_at;
+  // Bank-wise breakup summary
+  const bankBreakup = React.useMemo(() => {
+    const map = new Map<string, { label: string; count: number; total: number }>();
+    for (const p of payments) {
+      const code = p.source_bank?.short_code || p.source_bank?.short_name || 'BANK';
+      const existing = map.get(code) || { label: code, count: 0, total: 0 };
+      existing.count += 1;
+      existing.total += Number(p.net_payable || 0);
+      map.set(code, existing);
+    }
+    return Array.from(map.values());
+  }, [payments]);
 
-  const firstApproved = payments.find((p) => p.approver?.full_name && p.status !== 'PENDING_APPROVAL');
-  const approvedName = firstApproved?.approver?.full_name;
-  const approvedTimestamp = firstApproved?.approved_at;
+  // 4-Stage Digital Sign-off extraction (latest/first non-null actor per stage)
+  const preparedSample = payments.find((p) => p.creator?.full_name);
+  const verifiedSample = payments.find((p) => p.verified_at && p.verifier?.full_name);
+  const approvedSample = payments.find((p) => p.approved_at && p.approver?.full_name);
+  const auditedSample = payments.find((p) => p.audited_at && p.auditor?.full_name);
 
-  // Minimum 6 rows for authentic physical sheet height
-  const emptyRowsCount = Math.max(0, 6 - payments.length);
+  // Minimum 5 rows for clean formal A4 sheet proportions
+  const emptyRowsCount = Math.max(0, 5 - payments.length);
 
   return (
     <div className="min-h-screen bg-slate-100/70 p-4 sm:p-8 print:p-0 print:bg-white">
-      {/* Top Floating / Screen Toolbar (Hidden on Print) */}
-      <div className="max-w-5xl mx-auto mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-3 no-print bg-white p-3.5 rounded-xl border border-slate-200 shadow-sm">
+      {/* Top Floating Toolbar (Hidden on Print) */}
+      <div className="max-w-5xl mx-auto mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-3 no-print print:hidden bg-white p-3.5 rounded-xl border border-slate-200 shadow-sm">
         <div className="flex items-center gap-3">
           <Link href="/history">
             <Button
@@ -70,206 +85,266 @@ export function PrintSheetView({
             </Button>
           </Link>
           <div className="text-xs text-slate-500">
-            Sheet Date:{' '}
-            <span className="font-semibold text-slate-900 tabular-nums">
-              {selectedDate === 'ALL' ? 'All Dates' : formatDDMMYYYY(selectedDate)}
-            </span>{' '}
-            ({payments.length} items)
+            <strong className="text-slate-900">{companyName}</strong> · {filterSummary} ({payments.length} entries)
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          <Button
-            type="button"
-            onClick={handlePrint}
-            className="min-h-[38px] px-4 bg-slate-900 hover:bg-slate-800 text-white text-xs font-medium shadow-sm"
-          >
-            <Printer className="w-4 h-4 mr-1.5" />
-            Print / Save as PDF
-          </Button>
-        </div>
+        <Button
+          type="button"
+          onClick={handlePrint}
+          className="min-h-[38px] px-4 bg-brand hover:bg-brand-hover text-white text-xs font-semibold shadow-sm"
+        >
+          <Printer className="w-4 h-4 mr-1.5" />
+          Print / Save as PDF
+        </Button>
       </div>
 
-      {/* Replicated INDFURN Physical Form (A4 Sheet Container) */}
+      {/* Formal A4 Printable Voucher Sheet */}
       <div
         id="printable-sheet"
-        className="max-w-5xl mx-auto bg-white p-8 sm:p-12 border border-slate-300 shadow-sm print:border-none print:shadow-none print:p-0 print:max-w-none print:w-full"
+        className="max-w-5xl mx-auto bg-white p-6 sm:p-10 border border-slate-300 shadow-sm print:border-none print:shadow-none print:p-0 print:max-w-none print:w-full text-slate-900"
       >
         {/* Header Block */}
-        <div className="mb-6">
-          <div className="flex items-center justify-between pb-3 border-b-2 border-slate-900">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src="/logo.png"
-              alt="INDFURN"
-              className="h-9 max-h-[36px] w-auto object-contain"
-            />
-            <h1 className="text-center text-base sm:text-lg font-bold tracking-tight text-slate-900 uppercase">
-              Payment Approval Form
+        <div className="mb-5 pb-3 border-b-2 border-[#7F1D1D] flex flex-col sm:flex-row sm:items-end justify-between gap-3">
+          <div>
+            <div className="text-[10px] font-bold uppercase tracking-widest text-[#7F1D1D]">
+              Payment Desk · Official Record
+            </div>
+            <h1 className="text-xl font-extrabold tracking-tight text-slate-900 uppercase mt-0.5">
+              {companyName} ({companyCode})
             </h1>
-            <span className="text-xs font-bold text-slate-900 tabular-nums">
-              Date: {selectedDate === 'ALL' ? 'All Dates' : formatDDMMYYYY(selectedDate)}
-            </span>
+            <p className="text-xs font-bold uppercase tracking-wide text-slate-700">
+              Payment Approval &amp; Disbursement Voucher
+            </p>
+          </div>
+
+          <div className="text-left sm:text-right text-[11px] text-slate-600 space-y-0.5">
+            <div>
+              <span className="font-semibold text-slate-800">Scope:</span> {filterSummary}
+            </div>
+            <div className="tabular-nums">
+              <span className="font-semibold text-slate-800">Generated:</span> {generatedAt}
+            </div>
+            <div>
+              <span className="font-semibold text-slate-800">Entries:</span> {payments.length}
+            </div>
           </div>
         </div>
 
-        {/* Exact Replicated Table */}
-        <table className="w-full border-collapse border border-slate-900 text-[11px] sm:text-xs">
+        {/* Formal 10-Column Line-Item Table */}
+        <table className="w-full border-collapse border border-slate-800 text-[10px] leading-tight">
           <thead>
-            <tr className="bg-slate-100 text-slate-900 font-bold border-b border-slate-900">
-              <th className="border border-slate-900 py-2 px-1 text-center w-10">
-                SL No.
-              </th>
-              <th className="border border-slate-900 py-2 px-2.5 text-left">
-                Vendor/Supplier
-              </th>
-              <th className="border border-slate-900 py-2 px-2 text-center">
-                Invoice / Ref No
-              </th>
-              <th className="border border-slate-900 py-2 px-2 text-center">
-                Due Date
-              </th>
-              <th className="border border-slate-900 py-2 px-2 text-center">
-                Purpose
-              </th>
-              <th className="border border-slate-900 py-2 px-2 text-right">
-                Amount (₹)
-              </th>
-              <th className="border border-slate-900 py-2 px-2 text-center">
-                TDS (₹)
-              </th>
-              <th className="border border-slate-900 py-2 px-2 text-center">
-                Payment Ref NO
-              </th>
-              <th className="border border-slate-900 py-2 px-2 text-center">
-                Remarks
-              </th>
+            <tr className="bg-slate-100 text-slate-900 font-bold border-b border-slate-800">
+              <th className="border border-slate-800 py-2 px-1 text-center w-8">SL</th>
+              <th className="border border-slate-800 py-2 px-1.5 text-left">Party / Beneficiary</th>
+              <th className="border border-slate-800 py-2 px-1.5 text-center">Invoice / Ref</th>
+              <th className="border border-slate-800 py-2 px-1.5 text-center">Due Date</th>
+              <th className="border border-slate-800 py-2 px-1.5 text-left">Purpose &amp; Mode</th>
+              <th className="border border-slate-800 py-2 px-1.5 text-right">Gross (₹)</th>
+              <th className="border border-slate-800 py-2 px-1.5 text-right">TDS (₹)</th>
+              <th className="border border-slate-800 py-2 px-1.5 text-right">Net Payable (₹)</th>
+              <th className="border border-slate-800 py-2 px-1.5 text-left">Bank &amp; UTR / Cheque</th>
+              <th className="border border-slate-800 py-2 px-1.5 text-center">Status</th>
             </tr>
           </thead>
           <tbody>
             {payments.map((p, index) => {
-              const bankShort = p.source_bank?.short_name || 'Bank';
-              const remarksText = p.remarks
-                ? `${bankShort} · ${p.remarks}`
-                : bankShort;
+              const partyName = p.vendor?.party_name || p.vendor?.name || 'Unknown Party';
+              const beneficiary = p.vendor?.beneficiary_name || '';
+              const bankShort = p.source_bank?.short_code || p.source_bank?.short_name || 'Bank';
+              const modeLabel = p.payment_mode === 'CHEQUE' ? 'Cheque' : 'NEFT/RTGS';
+              const refText =
+                p.payment_mode === 'CHEQUE' && p.cheque_number
+                  ? `CHQ #${p.cheque_number}`
+                  : p.utr_number || 'Pending';
 
               return (
-                <tr key={p.id} className="border-b border-slate-900">
-                  <td className="border border-slate-900 py-2 px-1 text-center tabular-nums font-medium text-slate-800">
+                <tr key={p.id} className="border-b border-slate-800 break-inside-avoid">
+                  <td className="border border-slate-800 py-1.5 px-1 text-center tabular-nums font-medium">
                     {index + 1}
                   </td>
-                  <td className="border border-slate-900 py-2 px-2.5 font-semibold text-slate-900">
-                    {p.vendor?.name || 'Unknown Vendor'}
+                  <td className="border border-slate-800 py-1.5 px-1.5">
+                    <div className="font-bold text-slate-900">{partyName}</div>
+                    {beneficiary && beneficiary !== partyName && (
+                      <div className="text-[9px] text-slate-600">Ben: {beneficiary}</div>
+                    )}
                   </td>
-                  <td className="border border-slate-900 py-2 px-2 text-center font-mono tabular-nums text-slate-800">
+                  <td className="border border-slate-800 py-1.5 px-1.5 text-center font-mono tabular-nums">
                     {p.invoice_ref}
                   </td>
-                  <td className="border border-slate-900 py-2 px-2 text-center tabular-nums whitespace-nowrap text-slate-800">
+                  <td className="border border-slate-800 py-1.5 px-1.5 text-center tabular-nums whitespace-nowrap">
                     {formatDDMMYYYY(p.due_date)}
                   </td>
-                  <td className="border border-slate-900 py-2 px-2 text-center text-slate-800">
-                    {p.purpose}
+                  <td className="border border-slate-800 py-1.5 px-1.5">
+                    <div>{p.purpose}</div>
+                    <div className="text-[9px] text-slate-600">
+                      {modeLabel}
+                      {p.payment_type === 'ON_ACCOUNT' ? ' · On Account' : ''}
+                    </div>
                   </td>
-                  <td className="border border-slate-900 py-2 px-2 text-right font-medium tabular-nums text-slate-900">
+                  <td className="border border-slate-800 py-1.5 px-1.5 text-right tabular-nums">
                     {formatINRPlain(p.amount)}
                   </td>
-                  <td className="border border-slate-900 py-2 px-2 text-center tabular-nums text-slate-800">
+                  <td className="border border-slate-800 py-1.5 px-1.5 text-right tabular-nums">
                     {Number(p.tds || 0) > 0 ? formatINRPlain(p.tds) : 'NA'}
                   </td>
-                  <td className="border border-slate-900 py-2 px-2 text-center font-mono text-[11px] tabular-nums text-slate-800">
-                    {p.utr_number || '—'}
+                  <td className="border border-slate-800 py-1.5 px-1.5 text-right font-bold tabular-nums">
+                    {formatINRPlain(p.net_payable)}
                   </td>
-                  <td className="border border-slate-900 py-2 px-2 text-center text-[11px] text-slate-800">
-                    {remarksText}
+                  <td className="border border-slate-800 py-1.5 px-1.5">
+                    <div className="font-semibold">{bankShort}</div>
+                    <div className="font-mono text-[9px] text-slate-700">{refText}</div>
+                  </td>
+                  <td className="border border-slate-800 py-1.5 px-1.5 text-center font-semibold uppercase text-[9px]">
+                    <div>{p.status.replace('_', ' ')}</div>
+                    {p.audited_at && (
+                      <div className="text-[8px] text-emerald-800 font-bold">AUDITED</div>
+                    )}
                   </td>
                 </tr>
               );
             })}
 
-            {/* Empty padding rows for physical sheet layout consistency */}
             {Array.from({ length: emptyRowsCount }).map((_, i) => (
-              <tr key={`empty-${i}`} className="h-8 border-b border-slate-900">
-                <td className="border border-slate-900"></td>
-                <td className="border border-slate-900"></td>
-                <td className="border border-slate-900"></td>
-                <td className="border border-slate-900"></td>
-                <td className="border border-slate-900"></td>
-                <td className="border border-slate-900"></td>
-                <td className="border border-slate-900"></td>
-                <td className="border border-slate-900"></td>
-                <td className="border border-slate-900"></td>
+              <tr key={`empty-${i}`} className="h-7 border-b border-slate-800">
+                <td className="border border-slate-800"></td>
+                <td className="border border-slate-800"></td>
+                <td className="border border-slate-800"></td>
+                <td className="border border-slate-800"></td>
+                <td className="border border-slate-800"></td>
+                <td className="border border-slate-800"></td>
+                <td className="border border-slate-800"></td>
+                <td className="border border-slate-800"></td>
+                <td className="border border-slate-800"></td>
+                <td className="border border-slate-800"></td>
               </tr>
             ))}
 
-            {/* Total Row */}
-            <tr className="font-bold bg-slate-50 border-t-2 border-slate-900">
+            {/* Grand Total Row */}
+            <tr className="font-bold bg-slate-100 border-t-2 border-slate-900 break-inside-avoid">
               <td
                 colSpan={5}
-                className="border border-slate-900 py-2 px-3 text-right uppercase tracking-wider text-xs"
+                className="border border-slate-800 py-2 px-2 text-right uppercase tracking-wider text-[10px]"
               >
-                Total
+                Grand Total ({payments.length} items)
               </td>
-              <td className="border border-slate-900 py-2 px-2 text-right tabular-nums text-slate-900">
+              <td className="border border-slate-800 py-2 px-1.5 text-right tabular-nums">
                 {formatINRPlain(totalGross)}
               </td>
-              <td className="border border-slate-900 py-2 px-2 text-center tabular-nums text-slate-900">
+              <td className="border border-slate-800 py-2 px-1.5 text-right tabular-nums">
                 {totalTds > 0 ? formatINRPlain(totalTds) : 'NA'}
               </td>
-              <td
-                colSpan={2}
-                className="border border-slate-900 py-2 px-2 text-center text-[11px] font-semibold text-slate-800"
-              >
-                Net: {formatINR(netPayableTotal)}
+              <td className="border border-slate-800 py-2 px-1.5 text-right tabular-nums text-[11px] text-[#7F1D1D]">
+                {formatINR(netPayableTotal)}
               </td>
+              <td colSpan={2} className="border border-slate-800 py-2 px-1.5"></td>
             </tr>
           </tbody>
         </table>
 
-        {/* Footer Sign-Off Row */}
-        <div className="mt-14 grid grid-cols-3 gap-8 text-xs">
-          {/* Prepared By */}
+        {/* Bank-Wise Breakup Summary */}
+        {bankBreakup.length > 0 && (
+          <div className="mt-4 p-3 border border-slate-300 rounded bg-slate-50/70 break-inside-avoid">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-slate-700 mb-1.5">
+              Bank-Wise Disbursement Summary
+            </div>
+            <div className="flex flex-wrap gap-4 text-[11px]">
+              {bankBreakup.map((b) => (
+                <div key={b.label} className="flex items-center gap-1.5">
+                  <span className="font-bold text-slate-900">{b.label}:</span>
+                  <span className="font-bold tabular-nums text-slate-900">
+                    {formatINR(b.total)}
+                  </span>
+                  <span className="text-slate-500">({b.count})</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* 4-Stage Digital Timestamped Sign-Off Footer */}
+        <div className="mt-10 grid grid-cols-2 sm:grid-cols-4 gap-6 text-[10px] break-inside-avoid">
+          {/* 1. Prepared By */}
           <div className="text-center">
-            <div className="h-12 flex flex-col justify-end pb-1 text-[11px] text-slate-800">
-              <span className="font-semibold text-slate-900">{preparedName}</span>
-              {preparedTimestamp && (
-                <span className="text-[10px] text-slate-500 tabular-nums">
-                  {formatDateTime(preparedTimestamp)}
-                </span>
+            <div className="h-11 flex flex-col justify-end pb-1">
+              {preparedSample?.creator?.full_name ? (
+                <>
+                  <span className="font-bold text-slate-900">
+                    {preparedSample.creator.full_name}
+                  </span>
+                  <span className="text-[9px] text-slate-500 tabular-nums">
+                    {formatDateTime(preparedSample.submitted_at || preparedSample.created_at)}
+                  </span>
+                </>
+              ) : (
+                <span className="text-[9px] text-slate-400 italic">—</span>
               )}
             </div>
-            <div className="border-t border-slate-900 pt-1.5 font-bold text-slate-900 uppercase tracking-wider text-[11px]">
+            <div className="border-t border-slate-800 pt-1.5 font-bold uppercase tracking-wider text-slate-900">
               Prepared By
             </div>
           </div>
 
-          {/* Checked By */}
+          {/* 2. Verified By */}
           <div className="text-center">
-            <div className="h-12"></div>
-            <div className="border-t border-slate-900 pt-1.5 font-bold text-slate-900 uppercase tracking-wider text-[11px]">
-              Checked By
+            <div className="h-11 flex flex-col justify-end pb-1">
+              {verifiedSample?.verifier?.full_name ? (
+                <>
+                  <span className="font-bold text-slate-900">
+                    {verifiedSample.verifier.full_name}
+                  </span>
+                  <span className="text-[9px] text-slate-500 tabular-nums">
+                    {formatDateTime(verifiedSample.verified_at)}
+                  </span>
+                </>
+              ) : (
+                <span className="text-[9px] text-slate-400 italic">Pending / Override</span>
+              )}
+            </div>
+            <div className="border-t border-slate-800 pt-1.5 font-bold uppercase tracking-wider text-slate-900">
+              Verified By
             </div>
           </div>
 
-          {/* Approved By */}
+          {/* 3. Approved By */}
           <div className="text-center">
-            <div className="h-12 flex flex-col justify-end pb-1 text-[11px] text-slate-800">
-              {approvedName ? (
+            <div className="h-11 flex flex-col justify-end pb-1">
+              {approvedSample?.approver?.full_name ? (
                 <>
-                  <span className="font-bold text-slate-900">{approvedName}</span>
-                  {approvedTimestamp && (
-                    <span className="text-[10px] text-slate-500 tabular-nums">
-                      {formatDateTime(approvedTimestamp)}
-                    </span>
-                  )}
+                  <span className="font-bold text-slate-900">
+                    {approvedSample.approver.full_name}
+                  </span>
+                  <span className="text-[9px] text-slate-500 tabular-nums">
+                    {formatDateTime(approvedSample.approved_at)}
+                  </span>
                 </>
               ) : (
-                <span className="text-[10px] text-slate-400 italic">
-                  Awaiting Approval
-                </span>
+                <span className="text-[9px] text-slate-400 italic">Awaiting Approval</span>
               )}
             </div>
-            <div className="border-t border-slate-900 pt-1.5 font-bold text-slate-900 uppercase tracking-wider text-[11px]">
+            <div className="border-t border-slate-800 pt-1.5 font-bold uppercase tracking-wider text-slate-900">
               Approved By
+            </div>
+          </div>
+
+          {/* 4. Audited By */}
+          <div className="text-center">
+            <div className="h-11 flex flex-col justify-end pb-1">
+              {auditedSample?.auditor?.full_name ? (
+                <>
+                  <span className="font-bold text-emerald-800">
+                    {auditedSample.auditor.full_name}
+                  </span>
+                  <span className="text-[9px] text-slate-500 tabular-nums">
+                    {formatDateTime(auditedSample.audited_at)}
+                  </span>
+                </>
+              ) : (
+                <span className="text-[9px] text-slate-400 italic">Pending Audit</span>
+              )}
+            </div>
+            <div className="border-t border-slate-800 pt-1.5 font-bold uppercase tracking-wider text-slate-900">
+              Audited By
             </div>
           </div>
         </div>

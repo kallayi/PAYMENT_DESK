@@ -3,6 +3,21 @@ import { NextResponse, type NextRequest } from 'next/server';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Database, UserRole } from '@/types/database';
 
+function getRoleLandingRoute(role: UserRole | string | null): string {
+  switch (role) {
+    case 'APPROVER':
+      return '/approvals';
+    case 'PREPARER':
+      return '/payments';
+    case 'VERIFIER':
+      return '/verify';
+    case 'AUDITOR':
+      return '/audit';
+    default:
+      return '/';
+  }
+}
+
 export async function middleware(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
 
@@ -66,46 +81,92 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(redirectUrl);
   }
 
-  // 2. Authenticated user visiting /login -> redirect to / so src/app/page.tsx handles role landing
-  if (pathname === '/login') {
-    const redirectUrl = request.nextUrl.clone();
-    redirectUrl.pathname = '/';
-    redirectUrl.searchParams.delete('error');
-    return NextResponse.redirect(redirectUrl);
-  }
+  // 2. Fetch authenticated user role & admin status strictly from admin-controlled app_metadata:
+  const role: UserRole | string | null = (user.app_metadata?.role as UserRole) || null;
+  const isAdmin: boolean = Boolean(user.app_metadata?.is_admin);
 
-  // Allow root / to reach src/app/page.tsx for cached role-based redirection
-  if (pathname === '/') {
+  // If role is not in app_metadata, do not guess; allow request to pass to Server Component
+  // layer (getCurrentUserContext()), which reads public.profiles and syncs app_metadata in background.
+  if (!role) {
+    if (pathname === '/login') {
+      const redirectUrl = request.nextUrl.clone();
+      redirectUrl.pathname = '/';
+      return NextResponse.redirect(redirectUrl);
+    }
     return response;
   }
 
-  // 3. Strict Role Guards (based on user_metadata.role for zero-latency middleware checks)
-  const role: UserRole = (user.user_metadata?.role as UserRole) || 'ACCOUNTANT';
+  const landingRoute = getRoleLandingRoute(role);
 
-  if (role === 'ACCOUNTANT') {
-    // ACCOUNTANT cannot visit /approvals or /settings
-    const accountantBlocked =
-      pathname === '/approvals' ||
-      pathname.startsWith('/approvals/') ||
-      pathname === '/settings' ||
-      pathname.startsWith('/settings/');
+  // 3. Authenticated user visiting /login -> redirect to landing route
+  if (pathname === '/login') {
+    const redirectUrl = request.nextUrl.clone();
+    redirectUrl.searchParams.delete('error');
+    redirectUrl.pathname = landingRoute;
+    return NextResponse.redirect(redirectUrl);
+  }
 
-    if (accountantBlocked) {
+  // 4. Authenticated user visiting root / -> redirect to role landing route
+  if (pathname === '/') {
+    const redirectUrl = request.nextUrl.clone();
+    redirectUrl.pathname = landingRoute;
+    return NextResponse.redirect(redirectUrl);
+  }
+
+  // 5. Strict Role Guards (ONLY when role is definitively known)
+  // Admins with is_admin = true have access across routes
+  if (isAdmin) {
+    return response;
+  }
+
+  // Guard /settings: Strictly requires is_admin === true
+  if (pathname === '/settings' || pathname.startsWith('/settings/')) {
+    const redirectUrl = request.nextUrl.clone();
+    redirectUrl.pathname = landingRoute;
+    return NextResponse.redirect(redirectUrl);
+  }
+
+  // Guard /reminders: Strictly requires PREPARER role
+  if (pathname === '/reminders' || pathname.startsWith('/reminders/')) {
+    if (role !== 'PREPARER') {
       const redirectUrl = request.nextUrl.clone();
-      redirectUrl.pathname = '/payments';
+      redirectUrl.pathname = landingRoute;
       return NextResponse.redirect(redirectUrl);
     }
   }
 
-  if (role === 'OWNER') {
-    // OWNER belongs on /approvals, not the Accountant's payment entry workspace
-    const ownerBlocked =
-      pathname === '/payments' ||
-      pathname.startsWith('/payments/');
-
-    if (ownerBlocked) {
+  // Guard /approvals: APPROVER only
+  if (pathname === '/approvals' || pathname.startsWith('/approvals/')) {
+    if (role !== 'APPROVER') {
       const redirectUrl = request.nextUrl.clone();
-      redirectUrl.pathname = '/approvals';
+      redirectUrl.pathname = landingRoute;
+      return NextResponse.redirect(redirectUrl);
+    }
+  }
+
+  // Guard /verify: VERIFIER only
+  if (pathname === '/verify' || pathname.startsWith('/verify/')) {
+    if (role !== 'VERIFIER') {
+      const redirectUrl = request.nextUrl.clone();
+      redirectUrl.pathname = landingRoute;
+      return NextResponse.redirect(redirectUrl);
+    }
+  }
+
+  // Guard /audit: AUDITOR only
+  if (pathname === '/audit' || pathname.startsWith('/audit/')) {
+    if (role !== 'AUDITOR') {
+      const redirectUrl = request.nextUrl.clone();
+      redirectUrl.pathname = landingRoute;
+      return NextResponse.redirect(redirectUrl);
+    }
+  }
+
+  // Guard /payments: PREPARER only
+  if (pathname === '/payments' || pathname.startsWith('/payments/')) {
+    if (role !== 'PREPARER') {
+      const redirectUrl = request.nextUrl.clone();
+      redirectUrl.pathname = landingRoute;
       return NextResponse.redirect(redirectUrl);
     }
   }

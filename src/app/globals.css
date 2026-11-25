@@ -4,23 +4,29 @@
 
 @layer base {
   :root {
-    --background: 210 40% 98%; /* #F8FAFC (slate-50) */
-    --foreground: 222.2 84% 4.9%; /* #0F172A (slate-900) */
+    /* Payment Desk Light Palette */
+    --background: 210 40% 98%;
+    /* #F8FAFC (Canvas) */
+    --foreground: 222.2 84% 4.9%;
+    /* #0F172A (Text Primary) */
 
-    --card: 0 0% 100%; /* #FFFFFF */
+    --card: 0 0% 100%;
+    /* #FFFFFF (Surface) */
     --card-foreground: 222.2 84% 4.9%;
 
     --popover: 0 0% 100%;
     --popover-foreground: 222.2 84% 4.9%;
 
-    --primary: 222.2 47.4% 11.2%; /* #1E293B (slate-800) */
-    --primary-foreground: 210 40% 98%;
+    /* Brand Primary Accent: Maroon #7F1D1D (0 63% 31% in HSL) */
+    --primary: 0 63% 31%;
+    --primary-foreground: 0 0% 100%;
 
     --secondary: 210 40% 96.1%;
     --secondary-foreground: 222.2 47.4% 11.2%;
 
     --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%; /* #64748B (slate-500) */
+    --muted-foreground: 215.4 16.3% 46.9%;
+    /* #64748B (Text Secondary) */
 
     --accent: 210 40% 96.1%;
     --accent-foreground: 222.2 47.4% 11.2%;
@@ -28,11 +34,26 @@
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 210 40% 98%;
 
-    --border: 214.3 31.8% 91.4%; /* #E2E8F0 (slate-200) */
+    --border: 214.3 31.8% 91.4%;
+    /* #E2E8F0 (Borders) */
     --input: 214.3 31.8% 91.4%;
-    --ring: 222.2 84% 4.9%;
+    --ring: 0 63% 31%;
+    /* Focus ring matches maroon accent */
 
     --radius: 0.5rem;
+
+    /* Hex design tokens specified in docs/UI_UX_DESIGN.md */
+    --bg-canvas: #F8FAFC;
+    --bg-surface: #FFFFFF;
+    --border-subtle: #E2E8F0;
+    --text-primary: #0F172A;
+    --text-secondary: #475569;
+    --brand-primary: #7F1D1D;
+    --brand-primary-hover: #991B1B;
+    --brand-tint: #FEF2F2;
+    --status-success: #047857;
+    --status-warning: #B45309;
+    --status-danger: #BE123C;
   }
 }
 
@@ -40,8 +61,9 @@
   * {
     @apply border-border;
   }
+
   body {
-    @apply bg-background text-foreground antialiased font-sans selection:bg-slate-200 selection:text-slate-900;
+    @apply bg-background text-foreground antialiased font-sans selection:bg-rose-100 selection:text-rose-950;
   }
 }
 
@@ -50,18 +72,42 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* Brand helper classes */
+.bg-brand {
+  background-color: var(--brand-primary);
+}
+
+.bg-brand-hover:hover {
+  background-color: var(--brand-primary-hover);
+}
+
+.bg-brand-tint {
+  background-color: var(--brand-tint);
+}
+
+.text-brand {
+  color: var(--brand-primary);
+}
+
+.border-brand {
+  border-color: var(--brand-primary);
+}
+
 /* Subtle scrollbars */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
+
 ::-webkit-scrollbar-track {
   background: transparent;
 }
+
 ::-webkit-scrollbar-thumb {
   background: #CBD5E1;
   border-radius: 9999px;
 }
+
 ::-webkit-scrollbar-thumb:hover {
   background: #94A3B8;
 }
@@ -74,19 +120,19 @@
 /* Dedicated A4 Print Stylesheet */
 @media print {
   @page {
-    size: A4 landscape;
+    size: A4 portrait;
     margin: 12mm;
   }
-  body * {
-    visibility: hidden !important;
+
+  body {
+    background: #ffffff !important;
   }
-  #printable-sheet,
-  #printable-sheet * {
-    visibility: visible !important;
+
+  .no-print {
+    display: none !important;
   }
+
   #printable-sheet {
-    position: fixed !important;
-    inset: 0 !important;
     width: 100% !important;
     max-width: none !important;
     margin: 0 !important;
@@ -94,8 +140,5 @@
     border: none !important;
     box-shadow: none !important;
     background: #ffffff !important;
-  }
-  .no-print {
-    display: none !important;
   }
 }

@@ -1,15 +1,16 @@
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
-import { getCurrentUserAndProfile } from '@/lib/auth';
+import { getCurrentUserContext } from '@/lib/auth';
 import { VendorManagement } from '@/components/vendors/vendor-management';
+import type { Vendor } from '@/types/database';
 
 export const metadata = {
-  title: 'Vendors | INDFURN',
-  description: 'Manage verified vendors, bank accounts, and GSTIN details.',
+  title: 'Vendors | Payment Desk',
+  description: 'Lean beneficiary directory and bank routing details for active company.',
 };
 
 export default async function VendorsPage() {
-  const { user, profile } = await getCurrentUserAndProfile();
+  const { user, profile, activeCompany } = await getCurrentUserContext();
 
   if (!user) {
     redirect('/login');
@@ -21,10 +22,24 @@ export default async function VendorsPage() {
 
   const supabase = await createClient();
 
-  const { data: vendors } = await supabase
+  let query = supabase
     .from('vendors')
-    .select('id, name, gstin, bank_account_no, ifsc_code, notes, is_active, created_by, created_at')
-    .order('name', { ascending: true });
+    .select('*')
+    .order('party_name', { ascending: true });
 
-  return <VendorManagement initialVendors={vendors || []} />;
+  if (activeCompany) {
+    query = query.eq('company_id', activeCompany.id);
+  }
+
+  const { data: vendors } = await query;
+
+  const canManage = profile.role === 'PREPARER' || profile.is_admin;
+
+  return (
+    <VendorManagement
+      initialVendors={(vendors || []) as Vendor[]}
+      activeCompany={activeCompany}
+      canManage={canManage}
+    />
+  );
 }

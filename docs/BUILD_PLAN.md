@@ -1,136 +1,158 @@
-# 06 — Phased Build Plan & Agent Prompts: INDFURN PayFlow
+# Payment Desk — Phased Upgrade & Build Plan (v2)
 
-> **How to use this plan with Antigravity (Flash Model):**
-> Execute **one Phase per prompt**. Test each phase in your browser before moving to the next. This prevents complexity creep and keeps code clean.
-
----
-
-## Pre-Flight Manual Setup (Do Once Before Phase 1 — ~5 mins)
-1. Create a new Supabase project (`indfurn-payflow`).
-2. In Supabase Dashboard -> **Authentication -> Providers -> Email**:
-   - Keep Email enabled.
-   - Disable "Allow new users to sign up" (Owner creates accounts internally).
-3. In Supabase Dashboard -> **Storage**:
-   - Create Private Bucket 1: `supplier-invoices` (`Public = OFF`, max 5MB).
-   - Create Private Bucket 2: `bank-receipts` (`Public = OFF`, max 5MB).
-4. Copy `.env.local` values (`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`).
-5. Place `docs/01_*.md` through `docs/06_*.md` in your workspace and copy `05_AGENT_RULES.md` to `.agent/rules/indfurn-rules.md`.
+> **Execution Rule:** Build and verify **one phase at a time**. At the end of every phase, run `npx tsc --noEmit` and `npm run build` (must pass with **0 errors**) and complete the phase's verification checklist before starting the next phase.
 
 ---
 
-## Phase 1: Foundation, Database, Auth & Role Middleware
-**Goal:** Working Next.js app connected to Supabase with full SQL schema applied, clean Login screen, and role-based redirects.
-
-**Tasks:**
-- Initialize Next.js (App Router, TypeScript, Tailwind CSS) and install core dependencies (`@supabase/supabase-js`, `@supabase/ssr`, `zod`, `react-hook-form`, `@hookform/resolvers`, `lucide-react`, `sonner`, `date-fns`).
-- Initialize `shadcn/ui` and add essential components (`button`, `card`, `input`, `label`, `select`, `badge`, `dialog`, `sheet`, `tabs`, `table`, `textarea`, `separator`).
-- Save `supabase/migrations/001_initial_schema.sql` using the exact SQL from `docs/03_DATABASE_SECURITY.md` (apply it in Supabase SQL Editor).
-- Build `src/lib/supabase/{client,server,admin}.ts`, `src/lib/format.ts`, `src/types/database.ts`.
-- Build `src/middleware.ts` for auth refresh and strict role route guards.
-- Build `/login` page matching `docs/02_UI_UX_DESIGN.md`.
-
-**Copy-Paste Prompt for Antigravity:**
-> Read `docs/03_DATABASE_SECURITY.md`, `docs/04_TECH_ARCHITECTURE.md`, and follow `.agent/rules/indfurn-rules.md`. Complete **Phase 1** of `docs/06_BUILD_PLAN.md` only: set up dependencies, shadcn/ui, Supabase clients, formatting helpers, TypeScript types, auth middleware, and the `/login` page. Do not build dashboard screens yet.
-
-**Manual Verification:**
-- Run SQL migration in Supabase SQL Editor.
-- Create 3 test users in Supabase Auth (`owner@indfurn.com`, `accounts@indfurn.com`, `staff@indfurn.com`) and insert matching rows in `public.profiles` with roles `OWNER`, `ACCOUNTANT`, `STAFF`.
-- Confirm logging in as each user redirects to `/approvals`, `/payments`, and `/bills` respectively.
+## Pre-Build Inputs (Can Be Dropped In Anytime)
+These two external assets do NOT block Phases A–C and can be plugged in cleanly once received from the Owner / Accounts team:
+1. **Exact INDFURN Maroon Hex Code** → Drop into `--brand-primary` CSS variable in `src/app/globals.css`.
+2. **Official Axis Bank Bulk Upload Sample `.xlsx` Templates** (Same-Bank & Other-Bank) → Map exact column headers inside `src/lib/excel/axis-adapter.ts` in Phase D.
 
 ---
 
-## Phase 2: App Shell (Responsive Nav) & Master Data (Vendors, Banks, Users)
-**Goal:** Clean light-mode layout that feels great on both laptop and phone, plus Vendor/Bank/User management.
+## Phase A: Database Schema v2, Multi-Company Isolation & Auth Foundation
+**Goal:** Upgrade the Supabase PostgreSQL schema and Next.js auth/session layer to support 2 isolated companies (`INDFURN`, `VINMORE`), 4 operational roles + `is_admin`, and tamper-proof `app_metadata` routing.
 
-**Tasks:**
-- Build `src/components/layout/app-shell.tsx` (Slim desktop left sidebar + Mobile top bar + Fixed bottom tab bar tailored per role).
-- Build `/vendors` page (Accountant & Owner): list, search, add, edit vendors (Name, GSTIN, Bank A/C, IFSC).
-- Build `/settings` page (Owner only):
-  - Manage Company Banks (verify default `Axis Bank` & `South Indian Bank` load cleanly; allow adding/toggling banks).
-  - Manage Team Users (create new Staff/Accountant user via Server Action using `admin.ts`, toggle `is_active`).
+### Deliverables
+1. **Database Migration (`supabase/migrations/003_payment_desk_v2.sql`):**
+   - Idempotent SQL migration (safe for Supabase SQL Editor; **never** run `ALTER TABLE storage.objects ENABLE ROW LEVEL SECURITY`).
+   - Create `public.companies` and seed strictly `INDFURN` and `VINMORE`.
+   - Update `public.user_role` (`PREPARER`, `VERIFIER`, `APPROVER`, `AUDITOR`), `public.payment_status` (add `PENDING_VERIFICATION`), and add `public.payment_mode` (`NEFT_RTGS`, `CHEQUE`), `public.payment_type` (`AGAINST_BILL`, `ON_ACCOUNT`), `public.notification_event`.
+   - Update `public.profiles` (add `is_admin`) and create `public.user_company_access`.
+   - Update `public.company_banks` (add `company_id`, `ifsc_prefix`, `available_balance`, `balance_updated_at`, `balance_updated_by`, `is_primary`) and seed:
+     - **INDFURN:** Axis (`UTIB`, primary), SIB (`SIBL`), HDFC (`HDFC`), Kotak (`KKBK`).
+     - **VINMORE:** Axis (`UTIB`, primary), HDFC (`HDFC`), Kotak (`KKBK`).
+   - Update `public.vendors` to lean beneficiary schema (`company_id`, `party_name`, `beneficiary_name`, `account_number`, `ifsc_code`, `remarks`; remove mandatory GSTIN/mobile constraints).
+   - Update `public.payment_items` (`company_id`, `payment_type`, `payment_mode`, `cheque_number`, `cheque_date`, `verified_by`, `verified_at`, `audited_by`, `audited_at`).
+   - Create `public.notifications`, `public.push_subscriptions`, and `public.recurring_reminders`.
+   - Deploy `public.get_my_role()`, `public.is_admin_user()`, `public.has_company_access(uuid)`, NULL-safe `public.enforce_payment_integrity()` trigger, idempotent `public.handle_new_user()` trigger, RLS policies, Storage RLS policies, and standard schema/table `GRANT`s.
+2. **TypeScript & Auth Context:**
+   - Rewrite `src/types/database.ts` to match the v2 schema.
+   - Update `src/lib/auth.ts` with `React.cache()` `getCurrentUserContext()` returning `{ user, profile, allowedCompanies, activeCompany }`.
+   - Create `src/actions/company.ts` (`switchActiveCompany` setting HTTP-only cookie `pd_active_company`).
+   - Update `src/middleware.ts`, `src/actions/auth.ts`, and `src/app/page.tsx` for 4-role landing redirects (`PREPARER` → `/payments`, `VERIFIER` → `/verify`, `APPROVER` → `/approvals`, `AUDITOR` → `/audit`) using `app_metadata` only.
 
-**Copy-Paste Prompt for Antigravity:**
-> Read `docs/02_UI_UX_DESIGN.md` (Sections 3 & 4) and complete **Phase 2** of `docs/06_BUILD_PLAN.md`: build the responsive App Shell (desktop sidebar + mobile bottom tabs per role), the `/vendors` page, and the Owner-only `/settings` page (Banks & Team Users). Keep the UI minimal with zero clutter.
-
-**Manual Verification:**
-- Test responsive view at `390px` (mobile) and `1280px` (desktop).
-- Add 2 sample vendors (`VINMORE`, `Ariham Industries`).
-
----
-
-## Phase 3: Stock Staff Invoice Upload Flow (`/bills`)
-**Goal:** Ultra-simple mobile screen for Stock Staff to snap/upload supplier invoices and send them to the Accountant.
-
-**Tasks:**
-- Build `src/actions/storage.ts` (`getSignedFileUrl`) and `src/actions/bills.ts` (`uploadIncomingBill`, `dismissIncomingBill`).
-- Build `/bills` page:
-  - Simple upload card: File picker (`image/*,application/pdf`, max 5MB, direct upload to `supplier-invoices` bucket), Vendor select (or fallback name), Invoice/PI Ref, optional Amount, Note.
-  - "My Recent Uploads" list showing simple status badges (`Waiting for Accountant` / `Added to Payment Queue`).
-
-**Copy-Paste Prompt for Antigravity:**
-> Read `docs/01_PROJECT_OVERVIEW.md` (Step 1) and `docs/02_UI_UX_DESIGN.md` (Screen D). Complete **Phase 3** of `docs/06_BUILD_PLAN.md`: implement private storage signed URL action, incoming bill actions, and the mobile-first `/bills` screen for Stock Staff.
-
-**Manual Verification:**
-- Log in as `STAFF`, upload a test invoice photo/PDF, confirm it appears in "My Recent Uploads", and confirm `STAFF` gets redirected if trying to open `/payments` or `/approvals`.
+### Phase A Exit Checklist
+- [ ] `003_payment_desk_v2.sql` executes cleanly in Mumbai Supabase SQL Editor.
+- [ ] Admin user (`APPROVER` + `is_admin = true`, access to both companies) logs in and lands on `/approvals`.
+- [ ] `npx tsc --noEmit` & `npm run build` pass with 0 errors.
 
 ---
 
-## Phase 4: Accountant Workspace (`/payments`)
-**Goal:** Fast desktop-friendly workspace to convert incoming bills or add entries, detect duplicate invoices, and submit to Owner.
+## Phase B: `Payment Desk` Branding, Company Switcher, Admin Settings & Lean Vendors
+**Goal:** Establish the standalone `Payment Desk` Maroon/Light visual identity, top workspace switcher, Admin user/bank management, and lean Beneficiary Master.
 
-**Tasks:**
-- Build `src/actions/payments.ts` (Part 1: `createPayment`, `updateDraftPayment`, `submitPayment`, `deleteDraftPayment`, `cancelPayment`, `checkDuplicateInvoice`).
-- Build `src/components/payments/payment-form-sheet.tsx`:
-  - All physical form fields (`Date`, `Vendor` with inline quick-add, `Invoice/Ref No` with amber duplicate warning, `Due Date`, `Purpose` preset chips, `Amount`, `TDS`, live `Net Payable`, `Source Bank`, `Invoice Upload`, `Remarks`).
-  - `Save as Draft` and `Submit for Approval` actions.
-- Build `/payments` page:
-  - Status tabs with counts: `Incoming Bills`, `Draft`, `Pending`, `Ready to Pay`, `Paid`, `Rejected`.
-  - Clean 7-column desktop table (collapses to cards on mobile) with bottom Total row.
-  - "Create Payment" action directly from an `Incoming Bill` row (pre-fills vendor, ref, amount, and links `incoming_bill_id` + `invoice_file_path`).
+### Deliverables
+1. **Branding & Theme (`globals.css`, `manifest.ts`, `login/page.tsx`, `app-shell.tsx`):**
+   - Replace single-company header branding with standalone **`Payment Desk`** emblem & wordmark.
+   - Apply plain light `#F8FAFC` / `#FFFFFF` palette with `--brand-primary` Maroon accent (`#7F1D1D` default, ready for exact INDFURN hex).
+   - Update `src/app/manifest.ts` and PWA icons (`192x192`, `512x512`).
+   - Build top header **Company Switcher** (`INDFURN` ↔ `VINMORE` for multi-company users; fixed badge for single-company users) + Role/Admin badges + Notification Bell shell.
+   - Add `src/app/(dashboard)/loading.tsx` skeleton for instant transitions.
+2. **Admin Settings (`/settings` — `is_admin` Only):**
+   - **Team Users Tab:** Create/Edit/Enable/Disable users with Role (`PREPARER`, `VERIFIER`, `APPROVER`, `AUDITOR`), `is_admin` toggle, and Company Access checkboxes (`INDFURN`, `VINMORE`) using `createAdminClient()` + `.upsert()` on `public.profiles` + atomic rollback on failure.
+   - **Company Banks Tab:** View/Add/Edit/Toggle active banks scoped to the currently active company (showing IFSC prefix & current balance).
+3. **Lean Vendor Master (`/vendors`):**
+   - Update `src/actions/vendors.ts`, `src/lib/validators.ts`, and `vendor-management.tsx` to strictly 5 fields: `Party Name`, `Beneficiary Name`, `Account Number`, `IFSC Code` (auto bank chip), `Remarks (Optional)`. Remove GSTIN & mobile inputs.
+   - Scope all vendor queries and creations strictly to `activeCompany.id`.
 
-**Copy-Paste Prompt for Antigravity:**
-> Read `docs/02_UI_UX_DESIGN.md` (Screen C) and `docs/03_DATABASE_SECURITY.md`. Complete **Phase 4** of `docs/06_BUILD_PLAN.md`: build the Accountant `/payments` workspace, status tabs, Incoming Bills conversion, Payment Entry slide-over form with inline duplicate invoice warning, and Draft/Submit actions.
-
-**Manual Verification:**
-- Log in as `ACCOUNTANT`, convert the Staff bill into a payment entry, add 2 more entries (e.g., `Axis` and `SIB`), test duplicate invoice warning, and submit them to `PENDING_APPROVAL`.
-
----
-
-## Phase 5: Owner Mobile-First Approval & Detail Drawer (`/approvals`)
-**Goal:** 60-second thumb-friendly approval experience for the Owner with inline bank override and document preview.
-
-**Tasks:**
-- Extend `src/actions/payments.ts` (Part 2: `ownerApprovePayment`, `ownerHoldPayment`, `ownerRejectPayment`, `ownerSwitchBank`).
-- Build `src/components/payments/payment-detail-drawer.tsx`:
-  - Full payment breakdown, inline Invoice & Bank Receipt viewer (using 5-min Signed URLs), and collapsible Audit Log timeline (`audit_logs` joined with user names).
-- Build `/approvals` page (Owner):
-  - Compact top summary strip: Total Pending Amount + `Axis` / `SIB` split pills.
-  - Tabs: `Pending` and `On Hold`.
-  - Date-grouped clean 4-row approval cards (`owner-approval-card.tsx`) with inline Bank switcher (`Axis` ↔ `SIB`), `View Bill` button, and `Approve` / `Hold` / `Reject` (with required reason modal).
-
-**Copy-Paste Prompt for Antigravity:**
-> Read `docs/02_UI_UX_DESIGN.md` (Screens B & E). Complete **Phase 5** of `docs/06_BUILD_PLAN.md`: build the Owner mobile-first `/approvals` screen (compact summary bar, date-grouped approval cards, inline bank switcher, Approve/Hold/Reject dialogs) and the shared Payment Detail Drawer with Signed URL invoice viewer and Audit Log timeline.
-
-**Manual Verification:**
-- Log in as `OWNER` on mobile viewport (`390px`), open a bill preview, switch one item's bank from `Axis` to `SIB`, approve two items, reject one with a reason, and verify the Audit Log records every step.
+### Phase B Exit Checklist
+- [ ] Switching `INDFURN` ↔ `VINMORE` isolates banks and vendors completely.
+- [ ] Admin creates test accounts for all 4 roles (`PREPARER`, `VERIFIER`, `APPROVER`, `AUDITOR`) with single and dual company access.
+- [ ] Vendor can be saved with different `Party Name` (`Naas Hardware`) and `Beneficiary Name` (`Manoj`) without GSTIN/mobile.
+- [ ] `npx tsc --noEmit` & `npm run build` pass with 0 errors.
 
 ---
 
-## Phase 6: UTR Reconciliation, History, Printable INDFURN Form & PWA Polish
-**Goal:** Complete the post-payment cycle (UTR + Bank Receipt), searchable history, A4 official print sheet, CSV export, and installable PWA.
+## Phase C: Core 3-Stage Workflow, Live Cash Projection & Monthly Reminders
+**Goal:** Deliver the complete daily Prepare → Verify → Approve loop with Owner live balance visibility, Bulk Approve, and Accounts-only Reminders.
 
-**Tasks:**
-- Extend `src/actions/payments.ts` (Part 3: `markPaidWithUtr`) — enforces unique UTR error handling and locks record as `PAID`.
-- Build `src/components/payments/mark-paid-modal.tsx` triggered from Accountant's `Ready to Pay` tab (read-only locked Vendor/Amount/Bank + required UTR input + required Bank Receipt upload to `bank-receipts` bucket).
-- Build `/history` page (Owner & Accountant): Search by Vendor/Invoice/UTR, filter by Date Range, Status, Bank, Total summary, and `Export CSV` (`src/lib/csv.ts`).
-- Build `/print` route (`/print?date=YYYY-MM-DD`): Clean A4 printable replica of INDFURN's `Payment Approval Form` (exact columns, `NA` for `0` TDS, Total row, `Prepared By` & `Approved By` timestamps, and `Print / Save PDF` button).
-- Add PWA files (`src/app/manifest.ts`, `public/sw.js`, `src/components/layout/pwa-register.tsx`, icons) and run final `npx tsc --noEmit` & production build check (`npm run build`).
+### Deliverables
+1. **Preparer Workspace (`/payments`):**
+   - **Available Bank Balance Bar & Modal (`updateBankBalances`):** Preparer updates live balances per company bank with timestamp & actor attribution.
+   - **Payment Entry Sheet (`payment-form-sheet.tsx`):**
+     - Vendor search showing read-only Beneficiary/Account/IFSC preview.
+     - `Payment Type` (`Against Bill` vs `On Account`) & `Payment Mode` (`NEFT_RTGS` vs `CHEQUE`).
+     - Duplicate `(company_id, vendor_id, invoice_ref)` live warning.
+     - Auto `Net Payable = Amount - TDS` (`NA` when `0`).
+     - Optional Supplier Invoice upload (never blocks submit).
+   - Status tabs (`Draft`, `Pending Verification`, `Pending Approval` / `On Hold`, `Ready to Pay (Pending UTR)`, `Paid`, `Rejected`) with live counts.
+2. **Verifier Queue (`/verify`):**
+   - Dedicated desktop-first table of `PENDING_VERIFICATION` entries showing full beneficiary details (`Beneficiary Name`, `A/C`, `IFSC`), Due Date/Overdue pills, and amounts.
+   - Actions: 1-click **Verify & Forward** (`PENDING_APPROVAL`) and **Return / Reject** (mandatory note back to Preparer), with optimistic UI.
+3. **Approver Dashboard & Queue (`/approvals` — Mobile-First):**
+   - **4-Card Cash Overview:**
+     1. `Total Available Balance` (clickable bank-wise breakdown popover)
+     2. `Pending Verification`
+     3. `Pending Approval`
+     4. Live `Projected Remaining Balance` (`Available - (Ready to Pay + Selected)`)
+   - Subtle `Pending UTR` overview indicator.
+   - Instant **Vendor Search**, **Overdue Only** filter, Due Date grouping/badges.
+   - Checkbox multi-select + sticky **Bulk Approve** bar (`bulkApprovePayments`).
+   - Individual **Approve**, **Hold**, **Reject** (mandatory reason modal), inline Bank Switch, and Owner Override tab for `PENDING_VERIFICATION` when Verifier is unavailable. Zero direct amount editing by Owner.
+4. **Accounts-Only Monthly Reminders (`/reminders` — `PREPARER` Only):**
+   - CRUD checklist for recurring monthly obligations (KSEB, Staff Salary) with `Mark Done for Month` and `+ Create Payment Entry` pre-fill button. Hidden from all other roles.
 
-**Copy-Paste Prompt for Antigravity:**
-> Read `docs/02_UI_UX_DESIGN.md` (Screens F & G) and `docs/04_TECH_ARCHITECTURE.md` (Section 7). Complete **Phase 6** of `docs/06_BUILD_PLAN.md`: implement the `Mark Paid / Enter UTR` modal (with bank receipt upload and duplicate UTR error handling), `/history` search + CSV export, the A4 `/print` INDFURN Payment Approval Form, and PWA manifest/service worker setup. Run `npm run build` to verify zero errors.
+### Phase C Exit Checklist
+- [ ] Full 3-stage test across 3 accounts: Preparer updates balance & submits → Verifier verifies → Approver sees live Projected Remaining Balance drop as bills are checked → Bulk Approve & Reject (with reason) work smoothly.
+- [ ] Owner override works on an unverified item when Verifier is absent.
+- [ ] Non-Preparer users cannot view or access `/reminders`.
+- [ ] `npx tsc --noEmit` & `npm run build` pass with 0 errors.
 
-**Final End-to-End Security & Flow Check:**
-1. Verify an `APPROVED` item CANNOT have its amount edited via UI or direct API call (blocked by DB trigger).
-2. Verify entering an existing UTR returns a friendly duplicate error.
-3. Verify `/print?date=YYYY-MM-DD` prints cleanly on A4 paper without sidebar/navigation clutter.
-4. Deploy to Vercel, open on mobile Chrome/Safari, and tap **Add to Home Screen** to verify PWA install.
+---
+
+## Phase D: Bank Bulk Upload Excel Engine, UTR/Cheque Settlement, Auditor & A4 Voucher
+**Goal:** Eliminate single-entry bank portal typing via IFSC-split Bulk Excel export, enforce UTR/Cheque + PDF proof, and enable independent read-only Auditing.
+
+### Deliverables
+1. **Bank Bulk Upload Excel Engine (`src/lib/excel/` + `/api/export/bank-excel`):**
+   - Install `exceljs` (text-safe cell formatting for bank account numbers).
+   - Implement `ifsc.ts` auto-splitting `APPROVED` (`NEFT_RTGS`) items into **Same-Bank** vs **Other-Bank** batches by matching `vendor.ifsc_code.slice(0, 4)` against `company_bank.ifsc_prefix`.
+   - Implement `axis-adapter.ts` (Axis Bank Neo Same-Bank & Other-Bank `.xlsx` templates, automatically mapping `beneficiary_name`, `account_number`, `ifsc_code`, `net_payable`, and narration) + extensible bank adapter registry for SIB/HDFC/Kotak.
+   - Add **Export Bank Bulk Excel** modal on `Ready to Pay (Pending UTR)` tab in `/payments`.
+2. **Mark Paid (`mark-paid-modal.tsx`):**
+   - `NEFT_RTGS`: Mandatory unique **UTR** + mandatory **Bank Acknowledgement PDF/Receipt** upload to private `bank-receipts` bucket (`<company_id>/<payment_id>/...`).
+   - `CHEQUE`: Mandatory **Cheque Number** + **Cheque Date** + optional receipt copy.
+   - Friendly duplicate UTR error handling (`23505`).
+3. **Auditor Workspace (`/audit` — Read-Only + Audit Tick):**
+   - Date-range & status filters (`Unaudited` default, `Audited`, `All`), Vendor Search, Bank filter.
+   - Wide **Side-by-Side Audit Drawer**: Left = Digital Payment Voucher + full stage timestamps (`Prepared`, `Verified`, `Approved`, `Paid`); Right = embedded Bank Acknowledgement PDF via 15-min signed URL.
+   - Single immutable **`Mark Audited`** button (`markPaymentAudited`). Zero financial edit/create controls visible.
+4. **History & A4 PDF Voucher (`/history`, `/print`):**
+   - Company-scoped filterable archive with Audit status badge, 15-min signed PDF preview, CSV export, and A4 `@media print` / Save-as-PDF voucher displaying active company header (`INDFURN` or `VINMORE`) and 4-stage timestamped sign-offs.
+
+### Phase D Exit Checklist
+- [ ] Selecting mixed Axis & Non-Axis vendors in `Ready to Pay` auto-splits and downloads separate Same-Bank and Other-Bank `.xlsx` files with `beneficiary_name` populated and intact account numbers.
+- [ ] Duplicate UTR is cleanly rejected; Cheque mode requires Cheque No & Date.
+- [ ] Auditor can view Bank PDF side-by-side and stamp `Audited`, and PostgreSQL rejects any attempt by Auditor to modify amounts or re-audit.
+- [ ] `/print` produces a crisp A4 PDF voucher for both INDFURN and VINMORE.
+- [ ] `npx tsc --noEmit` & `npm run build` pass with 0 errors.
+
+---
+
+## Phase E: Workflow Notifications, PWA Web Push, Security Audit & Vercel Deploy
+**Goal:** Connect real-time workflow alerts across all 3 active stages, harden security, and deploy Payment Desk to production.
+
+### Deliverables
+1. **In-App & PWA Web Push Notifications:**
+   - Generate VAPID keys and configure `.env.local` + Vercel env vars (`NEXT_PUBLIC_VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT`).
+   - Implement `src/actions/notifications.ts`, `src/lib/push.ts`, `/api/push/subscribe`, and update `public/sw.js` (`push` and `notificationclick` listeners).
+   - Wire exact trigger matrix:
+     - `PREPARER` submits → notify `VERIFIER`
+     - `VERIFIER` verifies → notify `APPROVER`
+     - `APPROVER` approves/holds/rejects (or `VERIFIER` returns) → notify `PREPARER`
+     - **Zero** notification when marked `PAID`.
+   - Wire interactive Notification Bell popover in `app-shell.tsx` with Mark Read / Mark All Read and deep-link navigation.
+2. **Final Client Alignment & Polish:**
+   - Plug in exact INDFURN Maroon hex code (if different from `#7F1D1D`).
+   - Verify Axis Bank `.xlsx` export files against the official Axis Neo portal bulk import check with the Accounts team.
+3. **Pre-Launch Security & Production Deployment:**
+   - Run full review of `src/actions/*`, `src/app/api/*`, and `src/middleware.ts` verifying strict `company_id` scoping and zero leaked `SUPABASE_SERVICE_ROLE_KEY` imports.
+   - Ensure GitHub repository is switched to **Private**.
+   - Deploy to **Vercel** connected to Mumbai Supabase (`ap-south-1`), test PWA install on mobile (Android/iOS) & desktop, and complete live UAT with Owner, Verifier, Preparer, and Auditor accounts.
+
+### Phase E Exit Checklist
+- [ ] Mobile & desktop push notifications fire cleanly for Submit → Verify → Approve/Hold/Reject, and stay silent on Paid.
+- [ ] PWA installs cleanly as **"Payment Desk"** with Maroon icon on phone home screen.
+- [ ] GitHub repo is **Private**, Vercel production build passes with 0 errors, and all 4 roles pass live UAT.

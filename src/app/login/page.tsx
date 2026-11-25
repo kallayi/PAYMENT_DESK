@@ -8,6 +8,7 @@ import { login } from '@/actions/auth';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
+import { PaymentDeskLogo } from '@/components/layout/payment-desk-logo';
 
 function LoginForm() {
   const router = useRouter();
@@ -47,15 +48,13 @@ function LoginForm() {
     <div className="w-full max-w-sm">
       {/* Centered White Login Card */}
       <div className="bg-white rounded-xl border border-slate-200 p-6 sm:p-7 shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
-        {/* Brand Mark */}
+        {/* Brand Mark — Clean Standalone Payment Desk Identity */}
         <div className="flex flex-col items-center text-center mb-6">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src="/logo.png"
-            alt="INDFURN Logo"
-            className="h-12 max-h-[52px] w-auto object-contain mb-2"
-          />
-          <p className="text-xs text-slate-500 font-medium">Payment Approval Portal</p>
+          <PaymentDeskLogo size="lg" showWordmark={false} className="mb-2.5" />
+          <h1 className="text-lg font-bold tracking-tight text-slate-900">Payment Desk</h1>
+          <p className="text-xs text-slate-500 font-medium mt-0.5">
+            Internal Payment Approval & Execution
+          </p>
         </div>
 
         {/* Inline Error Banner */}
@@ -115,10 +114,11 @@ function LoginForm() {
             </div>
           </div>
 
+          {/* Primary Action Button styled in Maroon Accent */}
           <Button
             type="submit"
             disabled={isPending}
-            className="w-full min-h-[44px] rounded-lg bg-slate-900 hover:bg-slate-800 active:scale-[0.99] text-white text-sm font-medium transition-all"
+            className="w-full min-h-[44px] rounded-lg bg-[#7F1D1D] hover:bg-[#991B1B] active:scale-[0.99] text-white text-sm font-medium transition-all shadow-sm"
           >
             {isPending ? (
               <span className="inline-flex items-center gap-2">
@@ -132,9 +132,9 @@ function LoginForm() {
         </form>
       </div>
 
-      {/* Subtle Footer */}
+      {/* Subtle Footer (Strictly internal, no sign up link) */}
       <div className="mt-4 text-center text-[11px] text-slate-400">
-        <span>INDFURN Internal PWA</span>
+        <span>Payment Desk · Internal PWA (INDFURN & VINMORE)</span>
       </div>
     </div>
   );

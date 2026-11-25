@@ -1,6 +1,6 @@
 // ==========================================
-// Zod Validation Schemas for INDFURN PayFlow
-// Simplified 2-Role Architecture: ACCOUNTANT and OWNER
+// Zod Validation Schemas for Payment Desk (v2)
+// INDFURN & VINMORE Multi-Company Architecture
 // ==========================================
 
 import { z } from 'zod';
@@ -14,11 +14,14 @@ export type LoginInput = z.infer<typeof loginSchema>;
 
 export const createPaymentSchema = z
   .object({
+    company_id: z.string().uuid().optional(),
     sheet_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Valid sheet date (YYYY-MM-DD) is required'),
     due_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Valid due date (YYYY-MM-DD) is required'),
     vendor_id: z.string().uuid('Please select a valid vendor'),
     invoice_ref: z.string().trim().min(1, 'Invoice / Ref No is required'),
     purpose: z.string().trim().min(1, 'Purpose is required'),
+    payment_type: z.enum(['AGAINST_BILL', 'ON_ACCOUNT']).optional().default('AGAINST_BILL'),
+    payment_mode: z.enum(['NEFT_RTGS', 'CHEQUE']).optional().default('NEFT_RTGS'),
     amount: z.coerce.number().positive('Amount must be greater than 0'),
     tds: z.coerce.number().min(0, 'TDS cannot be negative').default(0),
     source_bank_id: z.string().uuid('Please select a valid bank'),
@@ -42,12 +45,21 @@ export type UpdateDraftPaymentInput = z.infer<typeof updateDraftPaymentSchema>;
 
 export const markPaidSchema = z.object({
   payment_id: z.string().uuid('Valid payment ID is required'),
+  payment_mode: z.enum(['NEFT_RTGS', 'CHEQUE']).optional().default('NEFT_RTGS'),
   utr_number: z
     .string()
     .trim()
-    .min(1, 'UTR / Payment Ref No is required')
-    .transform((val) => val.toUpperCase()),
-  receipt_file_path: z.string().trim().min(1, 'Bank transaction receipt file is required'),
+    .optional()
+    .nullable()
+    .transform((val) => (val ? val.toUpperCase() : val)),
+  cheque_number: z.string().trim().optional().nullable(),
+  cheque_date: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, 'Valid Cheque Date (YYYY-MM-DD) is required')
+    .or(z.literal(''))
+    .optional()
+    .nullable(),
+  receipt_file_path: z.string().trim().optional().nullable(),
   remarks: z.string().trim().optional().nullable(),
 });
 
@@ -67,31 +79,100 @@ export const switchBankSchema = z.object({
 
 export type SwitchBankInput = z.infer<typeof switchBankSchema>;
 
+// Strict 5-Field Lean Vendor Schema for UI Form
+export const leanVendorSchema = z.object({
+  party_name: z.string().trim().min(1, 'Party Name is required'),
+  beneficiary_name: z.string().trim().min(1, 'Beneficiary Name (Bank Account Holder) is required'),
+  account_number: z.string().trim().min(1, 'Account number is required'),
+  ifsc_code: z
+    .string()
+    .trim()
+    .toUpperCase()
+    .regex(/^[A-Z]{4}0[A-Z0-9]{6}$/, 'IFSC code must be 11 uppercase characters (e.g. UTIB0001462)'),
+  remarks: z.string().trim().optional().nullable(),
+});
+
+export type LeanVendorInput = z.infer<typeof leanVendorSchema>;
+
+// General Vendor Input Schema (supports both 5-field lean form and quick-add)
 export const vendorSchema = z.object({
-  name: z.string().trim().min(1, 'Vendor name is required'),
-  gstin: z.string().trim().toUpperCase().optional().nullable(),
-  bank_account_no: z.string().trim().optional().nullable(),
+  company_id: z.string().uuid().optional(),
+  party_name: z.string().trim().min(1, 'Party Name is required').optional(),
+  beneficiary_name: z.string().trim().min(1, 'Beneficiary Name is required').optional(),
+  account_number: z.string().trim().min(1, 'Account number is required').optional(),
   ifsc_code: z.string().trim().toUpperCase().optional().nullable(),
+  remarks: z.string().trim().optional().nullable(),
+  // Backward compatibility aliases
+  name: z.string().trim().optional(),
   notes: z.string().trim().optional().nullable(),
+  gstin: z.string().trim().optional().nullable(),
+  bank_account_no: z.string().trim().optional().nullable(),
 });
 
 export type VendorInput = z.infer<typeof vendorSchema>;
 
+// Company Bank Schema
 export const companyBankSchema = z.object({
-  short_name: z.string().trim().min(1, 'Short label is required'),
-  full_name: z.string().trim().min(1, 'Bank full name is required'),
+  company_id: z.string().uuid().optional(),
+  bank_name: z.string().trim().min(1, 'Bank name is required').optional(),
+  short_code: z.string().trim().min(1, 'Short code is required (e.g. AXIS)').optional(),
+  ifsc_prefix: z
+    .string()
+    .trim()
+    .toUpperCase()
+    .optional(),
+  account_number_masked: z.string().trim().optional().nullable(),
+  available_balance: z.coerce.number().optional().default(0),
+  is_primary: z.boolean().optional().default(false),
+  is_active: z.boolean().optional().default(true),
+  // Backward compatibility
+  short_name: z.string().trim().optional(),
+  full_name: z.string().trim().optional(),
   account_mask: z.string().trim().optional().nullable(),
 });
 
 export type CompanyBankInput = z.infer<typeof companyBankSchema>;
 
+// User Management Schemas
 export const createUserSchema = z.object({
   full_name: z.string().trim().min(1, 'Full name is required'),
   email: z.string().trim().email('Valid email address is required'),
   password: z.string().min(6, 'Password must be at least 6 characters'),
-  role: z.enum(['ACCOUNTANT', 'OWNER'], {
-    errorMap: () => ({ message: 'Role must be ACCOUNTANT or OWNER' }),
+  role: z.enum(['PREPARER', 'VERIFIER', 'APPROVER', 'AUDITOR'] as const, {
+    errorMap: () => ({ message: 'Role must be PREPARER, VERIFIER, APPROVER, or AUDITOR' }),
   }),
+  is_admin: z.boolean().optional().default(false),
+  company_ids: z.array(z.string().uuid()).min(1, 'At least one company workspace must be assigned'),
 });
 
 export type CreateUserInput = z.infer<typeof createUserSchema>;
+
+export const updateUserSchema = z.object({
+  user_id: z.string().uuid('Valid user ID required'),
+  full_name: z.string().trim().min(1, 'Full name is required'),
+  role: z.enum(['PREPARER', 'VERIFIER', 'APPROVER', 'AUDITOR'] as const, {
+    errorMap: () => ({ message: 'Role must be PREPARER, VERIFIER, APPROVER, or AUDITOR' }),
+  }),
+  is_admin: z.boolean().default(false),
+  is_active: z.boolean().default(true),
+  company_ids: z.array(z.string().uuid()).min(1, 'At least one company workspace must be assigned'),
+});
+
+export type UpdateUserInput = z.infer<typeof updateUserSchema>;
+
+// Recurring Reminder Schema
+export const recurringReminderSchema = z.object({
+  company_id: z.string().uuid().optional(),
+  title: z.string().trim().min(1, 'Title is required'),
+  due_day_of_month: z.coerce
+    .number()
+    .int('Day must be an integer')
+    .min(1, 'Day must be between 1 and 31')
+    .max(31, 'Day must be between 1 and 31'),
+  estimated_amount: z.coerce.number().min(0, 'Estimated amount cannot be negative').optional().nullable(),
+  vendor_id: z.string().uuid().optional().nullable(),
+  remarks: z.string().trim().optional().nullable(),
+  is_active: z.boolean().optional().default(true),
+});
+
+export type RecurringReminderInput = z.infer<typeof recurringReminderSchema>;

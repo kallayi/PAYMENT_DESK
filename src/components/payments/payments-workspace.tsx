@@ -13,11 +13,19 @@ import {
   ExternalLink,
   Edit2,
   Eye,
+  Landmark,
+  AlertTriangle,
+  Clock,
+  ArrowRight,
+  Info,
+  FileSpreadsheet,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { PaymentFormSheet } from '@/components/payments/payment-form-sheet';
 import { PaymentDetailDrawer } from '@/components/payments/payment-detail-drawer';
 import { MarkPaidModal } from '@/components/payments/mark-paid-modal';
+import { UpdateBalancesModal } from '@/components/payments/update-balances-modal';
+import { BankExcelExportModal } from '@/components/payments/bank-excel-export-modal';
 import { PaymentStatusBadge, BankBadge } from '@/components/payments/payment-status-badge';
 import { deleteDraftPayment, submitPayment } from '@/actions/payments';
 import { getSignedFileUrl } from '@/actions/storage';
@@ -33,30 +41,52 @@ interface PaymentsWorkspaceProps {
   initialPayments: PaymentItem[];
   vendors: Vendor[];
   banks: CompanyBank[];
+  companyCode?: string;
+  initialFromReminder?: {
+    id: string;
+    title: string;
+    estimated_amount: number | null;
+    vendor_id: string | null;
+  } | null;
 }
 
-type AccountantTab =
+type PreparerTab =
   | 'DRAFT'
+  | 'PENDING_VERIFICATION'
   | 'PENDING_APPROVAL'
   | 'APPROVED'
   | 'PAID'
   | 'REJECTED';
 
+function isOverdue(dueDateStr: string, status: PaymentStatus): boolean {
+  if (['PAID', 'REJECTED', 'CANCELLED'].includes(status)) return false;
+  if (!dueDateStr) return false;
+  const today = new Date().toISOString().split('T')[0];
+  return dueDateStr < today;
+}
+
 export function PaymentsWorkspace({
   initialPayments,
   vendors: initialVendors,
-  banks,
+  banks: initialBanks,
+  companyCode = 'INDFURN',
+  initialFromReminder,
 }: PaymentsWorkspaceProps) {
   const [payments, setPayments] = React.useState<PaymentItem[]>(initialPayments);
   const [vendors, setVendors] = React.useState<Vendor[]>(initialVendors);
+  const [banks, setBanks] = React.useState<CompanyBank[]>(initialBanks);
 
   // Active Tab: Defaults to DRAFT
-  const [activeTab, setActiveTab] = React.useState<AccountantTab>('DRAFT');
+  const [activeTab, setActiveTab] = React.useState<PreparerTab>('DRAFT');
+
+  // Ready-to-Pay Excel Export Selection State
+  const [selectedApprovedIds, setSelectedApprovedIds] = React.useState<Set<string>>(new Set());
+  const [isExcelModalOpen, setIsExcelModalOpen] = React.useState<boolean>(false);
 
   // Drawer & modal state
-  const [isDrawerOpen, setIsDrawerOpen] = React.useState<boolean>(false);
-  const [selectedEditPayment, setSelectedEditPayment] =
-    React.useState<PaymentItem | null>(null);
+  const [isDrawerOpen, setIsDrawerOpen] = React.useState<boolean>(Boolean(initialFromReminder));
+  const [isBalancesModalOpen, setIsBalancesModalOpen] = React.useState<boolean>(false);
+  const [selectedEditPayment, setSelectedEditPayment] = React.useState<PaymentItem | null>(null);
   const [detailPayment, setDetailPayment] = React.useState<PaymentItem | null>(null);
   const [utrPayment, setUtrPayment] = React.useState<PaymentItem | null>(null);
 
@@ -70,19 +100,71 @@ export function PaymentsWorkspace({
     setPayments(initialPayments);
   }, [initialPayments]);
 
+  React.useEffect(() => {
+    setBanks(initialBanks);
+  }, [initialBanks]);
+
+  React.useEffect(() => {
+    setSelectedApprovedIds(new Set());
+  }, [activeTab]);
+
+  const approvedItemsList = React.useMemo(
+    () => payments.filter((p) => p.status === 'APPROVED'),
+    [payments]
+  );
+
+  const toggleSelectApproved = (id: string) => {
+    setSelectedApprovedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAllApproved = () => {
+    if (selectedApprovedIds.size === approvedItemsList.length) {
+      setSelectedApprovedIds(new Set());
+    } else {
+      setSelectedApprovedIds(new Set(approvedItemsList.map((p) => p.id)));
+    }
+  };
+
+  const itemsForExcelModal = React.useMemo(() => {
+    if (selectedApprovedIds.size > 0) {
+      return approvedItemsList.filter((p) => selectedApprovedIds.has(p.id));
+    }
+    return approvedItemsList;
+  }, [approvedItemsList, selectedApprovedIds]);
+
   // Tab live counts
   const draftCount = payments.filter((p) => p.status === 'DRAFT').length;
-  const pendingCount = payments.filter(
+  const pendingVerificationCount = payments.filter(
+    (p) => p.status === 'PENDING_VERIFICATION'
+  ).length;
+  const pendingApprovalCount = payments.filter(
     (p) => p.status === 'PENDING_APPROVAL' || p.status === 'ON_HOLD'
   ).length;
+  const holdCount = payments.filter((p) => p.status === 'ON_HOLD').length;
   const approvedCount = payments.filter((p) => p.status === 'APPROVED').length;
   const paidCount = payments.filter((p) => p.status === 'PAID').length;
   const rejectedCount = payments.filter((p) => p.status === 'REJECTED').length;
 
-  const tabs: Array<{ id: AccountantTab; label: string; count: number }> = [
+  const tabs: Array<{ id: PreparerTab; label: string; count: number; badgeExtra?: React.ReactNode }> = [
     { id: 'DRAFT', label: 'Draft', count: draftCount },
-    { id: 'PENDING_APPROVAL', label: 'Pending', count: pendingCount },
-    { id: 'APPROVED', label: 'Ready to Pay', count: approvedCount },
+    { id: 'PENDING_VERIFICATION', label: 'Pending Verification', count: pendingVerificationCount },
+    {
+      id: 'PENDING_APPROVAL',
+      label: 'Pending Approval',
+      count: pendingApprovalCount,
+      badgeExtra:
+        holdCount > 0 ? (
+          <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-amber-100 text-amber-800">
+            {holdCount} on hold
+          </span>
+        ) : null,
+    },
+    { id: 'APPROVED', label: 'Ready to Pay (Pending UTR)', count: approvedCount },
     { id: 'PAID', label: 'Paid', count: paidCount },
     { id: 'REJECTED', label: 'Rejected', count: rejectedCount },
   ];
@@ -111,33 +193,32 @@ export function PaymentsWorkspace({
       return [savedPayment, ...prev];
     });
 
-    // Auto-switch to the relevant tab if submitted
-    if (savedPayment.status === 'PENDING_APPROVAL') {
+    if (savedPayment.status === 'PENDING_VERIFICATION') {
+      setActiveTab('PENDING_VERIFICATION');
+    } else if (savedPayment.status === 'PENDING_APPROVAL') {
       setActiveTab('PENDING_APPROVAL');
     } else if (savedPayment.status === 'DRAFT') {
       setActiveTab('DRAFT');
     }
   };
 
-  // Quick submit a draft payment directly from table row (Optimistic UI)
+  // Submit draft payment directly from table row (Optimistic UI)
   const handleSubmitDraft = async (paymentId: string) => {
     const previousPayments = payments;
 
-    // Immediate UI update
     setPayments((prev) =>
       prev.map((p) =>
         p.id === paymentId
-          ? { ...p, status: 'PENDING_APPROVAL', submitted_at: new Date().toISOString() }
+          ? { ...p, status: 'PENDING_VERIFICATION', submitted_at: new Date().toISOString() }
           : p
       )
     );
-    toast.success('Payment submitted for Owner approval');
+    toast.success('Payment submitted for Senior Accountant verification.');
 
     setSubmittingPaymentId(paymentId);
     try {
       const res = await submitPayment(paymentId);
       if (!res.success) {
-        // Rollback on error
         setPayments(previousPayments);
         toast.error(res.error || 'Failed to submit payment.');
         return;
@@ -160,16 +241,13 @@ export function PaymentsWorkspace({
     }
 
     const previousPayments = payments;
-
-    // Immediate UI update
     setPayments((prev) => prev.filter((p) => p.id !== paymentId));
-    toast.success('Draft payment deleted');
+    toast.success('Draft payment deleted.');
 
     setDeletingPaymentId(paymentId);
     try {
       const res = await deleteDraftPayment(paymentId);
       if (!res.success) {
-        // Rollback on error
         setPayments(previousPayments);
         toast.error(res.error || 'Failed to delete draft payment.');
         return;
@@ -219,33 +297,68 @@ export function PaymentsWorkspace({
     0
   );
 
+  const activeBanks = banks.filter((b) => b.is_active);
+
   return (
     <div className="w-full max-w-7xl mx-auto space-y-5 pb-12">
-      {/* WORKSPACE HEADER */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div>
-          <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">
-            Payments Workspace
-          </h1>
-          <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
-            Prepare payment entries, verify invoices, and submit for Owner approval.
-          </p>
+      {/* TOP BANK BALANCE STRIP & ACTION HEADER */}
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 p-4 rounded-xl border border-slate-200 bg-white shadow-sm">
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl font-bold tracking-tight text-slate-900">
+              Payments Ledger
+            </h1>
+            <span className="text-xs text-slate-400 font-medium hidden sm:inline">
+              • Prepare, verify, and track disbursements
+            </span>
+          </div>
+
+          {/* Live Bank Balance Pills */}
+          <div className="flex items-center gap-2 flex-wrap">
+            {activeBanks.map((b) => {
+              const code = b.short_code || b.short_name || 'BANK';
+              const bal = b.available_balance ?? 0;
+              return (
+                <div
+                  key={b.id}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-50 border border-slate-200 text-xs hover:border-slate-300 transition-colors"
+                  title={`Last updated: ${b.balance_updated_at ? formatHumanDate(b.balance_updated_at) : 'Not updated yet'}`}
+                >
+                  <span className="font-bold text-slate-700">{code}:</span>
+                  <span className="font-bold text-slate-900 tabular-nums">
+                    {formatINR(bal)}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          <Link href="/history">
+        {/* Action Buttons */}
+        <div className="flex items-center gap-2 flex-wrap shrink-0">
+          <button
+            type="button"
+            onClick={() => setIsBalancesModalOpen(true)}
+            className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 inline-flex items-center gap-1.5 transition-colors shadow-xs"
+          >
+            <Landmark className="w-4 h-4 text-brand" />
+            <span>Update Balances</span>
+          </button>
+
+          <Link href="/print">
             <button
               type="button"
-              className="min-h-[44px] sm:min-h-[38px] px-3.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs font-medium text-slate-700 inline-flex items-center gap-1.5 transition-colors shadow-xs cursor-pointer"
+              className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs font-medium text-slate-700 inline-flex items-center gap-1.5 transition-colors shadow-xs"
             >
               <Printer className="w-4 h-4 text-slate-500" />
-              <span>Print Form</span>
+              <span>Print Voucher</span>
             </button>
           </Link>
+
           <button
             type="button"
             onClick={handleOpenNewEntry}
-            className="flex-1 sm:flex-initial min-h-[44px] sm:min-h-[38px] px-4 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-medium inline-flex items-center justify-center gap-1.5 transition-colors shadow-xs cursor-pointer"
+            className="px-4 py-1.5 rounded-lg bg-brand hover:bg-brand-hover text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors shadow-xs"
           >
             <Plus className="w-4 h-4" />
             <span>New Entry</span>
@@ -262,22 +375,21 @@ export function PaymentsWorkspace({
               key={tab.id}
               type="button"
               onClick={() => setActiveTab(tab.id)}
-              className={`min-h-[38px] px-3.5 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap inline-flex items-center gap-2 transition-colors cursor-pointer ${
-                isActive
-                  ? 'bg-slate-900 text-white shadow-xs'
+              className={`min-h-[38px] px-3.5 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap inline-flex items-center gap-2 transition-colors cursor-pointer ${isActive
+                  ? 'bg-brand text-white shadow-xs'
                   : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
-              }`}
+                }`}
             >
               <span>{tab.label}</span>
               <span
-                className={`tabular-nums text-[11px] px-1.5 py-0.2 rounded-full ${
-                  isActive
+                className={`tabular-nums text-[11px] px-1.5 py-0.2 rounded-full ${isActive
                     ? 'bg-white/20 text-white'
                     : 'bg-slate-200/80 text-slate-600'
-                }`}
+                  }`}
               >
                 {tab.count}
               </span>
+              {tab.badgeExtra}
             </button>
           );
         })}
@@ -286,19 +398,18 @@ export function PaymentsWorkspace({
       {/* TAB CONTENT: PAYMENTS TABLE / CARDS */}
       <div>
         {filteredRows.length === 0 ? (
-          <div className="bg-white rounded-xl border border-slate-200 p-10 text-center">
+          <div className="bg-white rounded-xl border border-slate-200 p-12 text-center">
             <div className="text-sm font-semibold text-slate-900">
-              No payment entries found
+              No entries in &ldquo;{tabs.find((t) => t.id === activeTab)?.label}&rdquo;
             </div>
             <p className="text-xs text-slate-500 mt-1">
-              Entries matching the &ldquo;{tabs.find((t) => t.id === activeTab)?.label}&rdquo;
-              status will appear here.
+              Payment items matching this lifecycle state will appear here.
             </p>
             {activeTab === 'DRAFT' && (
               <button
                 type="button"
                 onClick={handleOpenNewEntry}
-                className="mt-4 min-h-[38px] px-4 rounded-lg bg-slate-900 text-white text-xs font-medium inline-flex items-center gap-1.5 hover:bg-slate-800 transition-colors"
+                className="mt-4 px-4 py-2 rounded-lg bg-brand text-white text-xs font-semibold inline-flex items-center gap-1.5 hover:bg-brand-hover transition-colors"
               >
                 <Plus className="w-4 h-4" />
                 <span>Create Draft Entry</span>
@@ -307,18 +418,81 @@ export function PaymentsWorkspace({
           </div>
         ) : (
           <div className="space-y-3">
-            {/* DESKTOP TABLE VIEW (>= 768px) */}
+            {/* READY TO PAY: BANK BULK EXCEL EXPORT TOOLBAR */}
+            {activeTab === 'APPROVED' && (
+              <div className="p-3.5 rounded-xl bg-white border border-slate-200 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-3 flex-wrap">
+                  <label className="inline-flex items-center gap-2 text-xs font-semibold text-slate-700 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={
+                        approvedItemsList.length > 0 &&
+                        selectedApprovedIds.size === approvedItemsList.length
+                      }
+                      onChange={toggleSelectAllApproved}
+                      className="w-4 h-4 rounded border-slate-300 text-brand focus:ring-brand"
+                    />
+                    <span>Select All ({approvedItemsList.length})</span>
+                  </label>
+                  <span className="text-xs text-slate-500">
+                    {selectedApprovedIds.size > 0 ? (
+                      <>
+                        <strong className="text-slate-900">{selectedApprovedIds.size}</strong> selected ·{' '}
+                        <strong className="text-slate-900 tabular-nums">
+                          {formatINR(
+                            itemsForExcelModal.reduce(
+                              (sum, p) => sum + Number(p.net_payable || 0),
+                              0
+                            )
+                          )}
+                        </strong>
+                      </>
+                    ) : (
+                      <span>Select specific rows or export all Ready-to-Pay items</span>
+                    )}
+                  </span>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setIsExcelModalOpen(true)}
+                  className="min-h-[38px] px-3.5 py-1.5 rounded-lg bg-brand hover:bg-brand-hover text-white text-xs font-semibold inline-flex items-center justify-center gap-1.5 shadow-xs transition-colors cursor-pointer"
+                >
+                  <FileSpreadsheet className="w-4 h-4" />
+                  <span>
+                    Export Bank Bulk Excel
+                    {selectedApprovedIds.size > 0 ? ` (${selectedApprovedIds.size})` : ''}
+                  </span>
+                </button>
+              </div>
+            )}
+
+            {/* DESKTOP 7-COLUMN TABLE VIEW (>= 768px) */}
             <div className="hidden md:block bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
               <table className="w-full border-collapse text-left text-xs">
                 <thead>
                   <tr className="bg-slate-50/80 border-b border-slate-200 text-slate-600 font-semibold uppercase tracking-wider text-[11px]">
-                    <th className="py-3 px-3.5">Date</th>
-                    <th className="py-3 px-3.5">Vendor</th>
-                    <th className="py-3 px-3.5">Invoice / Ref</th>
-                    <th className="py-3 px-3.5">Purpose</th>
+                    {activeTab === 'APPROVED' && (
+                      <th className="py-3 pl-3.5 pr-1 w-8">
+                        <input
+                          type="checkbox"
+                          aria-label="Select all ready to pay items"
+                          checked={
+                            approvedItemsList.length > 0 &&
+                            selectedApprovedIds.size === approvedItemsList.length
+                          }
+                          onChange={toggleSelectAllApproved}
+                          className="w-3.5 h-3.5 rounded border-slate-300 text-brand focus:ring-brand cursor-pointer"
+                        />
+                      </th>
+                    )}
+                    <th className="py-3 px-3.5">Due Date / Sheet Date</th>
+                    <th className="py-3 px-3.5">Party Name</th>
+                    <th className="py-3 px-3.5">Invoice / Ref & Purpose</th>
+                    <th className="py-3 px-3.5 text-right">Gross & TDS</th>
                     <th className="py-3 px-3.5 text-right">Net Payable</th>
-                    <th className="py-3 px-3.5 text-center">Bank</th>
-                    <th className="py-3 px-3.5 text-right w-36">Actions</th>
+                    <th className="py-3 px-3.5 text-center">Source Bank & Status</th>
+                    <th className="py-3 px-3.5 text-right w-40">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -326,33 +500,82 @@ export function PaymentsWorkspace({
                     const isSubmitting = submittingPaymentId === item.id;
                     const isDeleting = deletingPaymentId === item.id;
                     const isViewingFile = viewingFileId === item.id;
+                    const overdue = isOverdue(item.due_date, item.status);
+                    const vendorDisplayName =
+                      item.vendor?.party_name || item.vendor?.name || 'Unknown Party';
 
                     return (
                       <tr
                         key={item.id}
                         onClick={() => setDetailPayment(item)}
-                        className="hover:bg-slate-50/60 transition-colors cursor-pointer group"
+                        className={`hover:bg-slate-50/60 transition-colors cursor-pointer group ${activeTab === 'APPROVED' && selectedApprovedIds.has(item.id)
+                            ? 'bg-brand/5'
+                            : ''
+                          }`}
                       >
-                        {/* 1. Date */}
-                        <td className="py-3 px-3.5 tabular-nums text-slate-600 whitespace-nowrap">
-                          {formatHumanDate(item.sheet_date)}
-                        </td>
-
-                        {/* 2. Vendor */}
-                        <td className="py-3 px-3.5 font-medium text-slate-900 max-w-[180px] truncate">
-                          {item.vendor?.name || 'Unknown Vendor'}
-                        </td>
-
-                        {/* 3. Invoice / Ref + File Link */}
-                        <td className="py-3 px-3.5 tabular-nums text-slate-600 whitespace-nowrap">
+                        {activeTab === 'APPROVED' && (
+                          <td
+                            className="py-3 pl-3.5 pr-1"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <input
+                              type="checkbox"
+                              aria-label={`Select payment for ${vendorDisplayName}`}
+                              checked={selectedApprovedIds.has(item.id)}
+                              onChange={() => toggleSelectApproved(item.id)}
+                              className="w-3.5 h-3.5 rounded border-slate-300 text-brand focus:ring-brand cursor-pointer"
+                            />
+                          </td>
+                        )}
+                        {/* 1. Due Date / Sheet Date */}
+                        <td className="py-3 px-3.5 whitespace-nowrap">
                           <div className="flex items-center gap-1.5">
-                            <span className="font-mono text-slate-700">
-                              {item.invoice_ref}
+                            <span className="tabular-nums font-semibold text-slate-900">
+                              {formatShortDate(item.due_date || item.sheet_date)}
                             </span>
+                            {overdue && (
+                              <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-100 text-rose-800 uppercase">
+                                Overdue
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[10px] text-slate-400 tabular-nums">
+                            Sheet: {formatShortDate(item.sheet_date)}
+                          </div>
+                        </td>
+
+                        {/* 2. Party Name + Micro-tags */}
+                        <td className="py-3 px-3.5 max-w-[200px]">
+                          <div className="font-semibold text-slate-900 truncate">
+                            {vendorDisplayName}
+                          </div>
+                          <div className="flex items-center gap-1 mt-0.5">
+                            {item.payment_type === 'ON_ACCOUNT' && (
+                              <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-purple-100 text-purple-800">
+                                On Account
+                              </span>
+                            )}
+                            {item.payment_mode === 'CHEQUE' && (
+                              <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-blue-100 text-blue-800">
+                                Cheque {item.cheque_number ? `#${item.cheque_number}` : ''}
+                              </span>
+                            )}
+                            {item.vendor?.account_number && (
+                              <span className="text-[10px] text-slate-400 font-mono">
+                                A/C: {item.vendor.account_number}
+                              </span>
+                            )}
+                          </div>
+                        </td>
+
+                        {/* 3. Invoice / Ref & Purpose */}
+                        <td className="py-3 px-3.5 max-w-[200px]">
+                          <div className="flex items-center gap-1.5 font-mono text-slate-800 font-medium">
+                            <span>{item.invoice_ref}</span>
                             {item.invoice_file_path && (
                               <button
                                 type="button"
-                                title="View attached invoice"
+                                title="View attached bill"
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   handleViewInvoiceFile(
@@ -362,34 +585,51 @@ export function PaymentsWorkspace({
                                   );
                                 }}
                                 disabled={isViewingFile}
-                                className="text-slate-400 hover:text-blue-600 p-0.5 rounded cursor-pointer"
+                                className="text-brand hover:underline p-0.5 rounded cursor-pointer"
                               >
                                 {isViewingFile ? (
-                                  <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-600" />
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin text-brand" />
                                 ) : (
-                                  <Paperclip className="w-3.5 h-3.5" />
+                                  <Paperclip className="w-3.5 h-3.5 text-brand" />
                                 )}
                               </button>
                             )}
                           </div>
+                          <div className="text-slate-500 truncate text-[11px] mt-0.5">
+                            {item.purpose}
+                          </div>
                         </td>
 
-                        {/* 4. Purpose */}
-                        <td className="py-3 px-3.5 text-slate-600 max-w-[160px] truncate">
-                          {item.purpose}
+                        {/* 4. Gross & TDS */}
+                        <td className="py-3 px-3.5 text-right whitespace-nowrap">
+                          <div className="font-medium tabular-nums text-slate-800">
+                            {formatINR(item.amount)}
+                          </div>
+                          <div className="text-[10px] tabular-nums mt-0.5">
+                            {item.tds > 0 ? (
+                              <span className="text-amber-700 font-medium">TDS: {formatINR(item.tds)}</span>
+                            ) : (
+                              <span className="text-slate-400">TDS: NA</span>
+                            )}
+                          </div>
                         </td>
 
                         {/* 5. Net Payable */}
-                        <td className="py-3 px-3.5 text-right font-semibold tabular-nums text-slate-900 whitespace-nowrap">
-                          {formatINR(item.net_payable)}
+                        <td className="py-3 px-3.5 text-right whitespace-nowrap">
+                          <div className="font-bold tabular-nums text-slate-900 text-sm">
+                            {formatINR(item.net_payable)}
+                          </div>
                         </td>
 
-                        {/* 6. Bank */}
+                        {/* 6. Source Bank & Status */}
                         <td className="py-3 px-3.5 text-center whitespace-nowrap">
-                          <BankBadge
-                            shortName={item.source_bank?.short_name}
-                            fullName={item.source_bank?.full_name}
-                          />
+                          <div className="flex flex-col items-center gap-1">
+                            <BankBadge
+                              shortName={item.source_bank?.short_code || item.source_bank?.short_name}
+                              fullName={item.source_bank?.bank_name || item.source_bank?.full_name}
+                            />
+                            <PaymentStatusBadge status={item.status} />
+                          </div>
                         </td>
 
                         {/* 7. Actions */}
@@ -426,7 +666,8 @@ export function PaymentsWorkspace({
                                   type="button"
                                   onClick={() => handleSubmitDraft(item.id)}
                                   disabled={isSubmitting}
-                                  className="h-8 px-2.5 rounded-md bg-slate-900 hover:bg-slate-800 text-white text-xs font-medium inline-flex items-center gap-1 transition-colors disabled:opacity-50 cursor-pointer"
+                                  className="h-8 px-2.5 rounded-md bg-brand hover:bg-brand-hover text-white text-xs font-semibold inline-flex items-center gap-1 transition-colors disabled:opacity-50 cursor-pointer"
+                                  title="Submit for Senior Accountant verification"
                                 >
                                   {isSubmitting ? (
                                     <Loader2 className="w-3 h-3 animate-spin" />
@@ -443,11 +684,22 @@ export function PaymentsWorkspace({
                               <button
                                 type="button"
                                 onClick={() => setUtrPayment(item)}
-                                className="h-8 px-3 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium inline-flex items-center gap-1.5 transition-colors shadow-xs cursor-pointer"
+                                className="h-8 px-3 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors shadow-xs cursor-pointer"
                               >
                                 <CheckCircle2 className="w-3.5 h-3.5" />
                                 <span>Mark Paid</span>
                               </button>
+                            )}
+
+                            {/* REJECTED: Show tooltip / note */}
+                            {item.status === 'REJECTED' && (
+                              <div
+                                className="flex items-center gap-1 text-xs text-rose-600 bg-rose-50 px-2 py-1 rounded border border-rose-200 max-w-[140px] truncate"
+                                title={`Rejection reason: ${item.rejection_reason || 'No reason provided'}`}
+                              >
+                                <Info className="w-3 h-3 shrink-0" />
+                                <span className="truncate">{item.rejection_reason || 'Rejected'}</span>
+                              </div>
                             )}
 
                             {/* PAID Action: View UTR info */}
@@ -461,10 +713,10 @@ export function PaymentsWorkspace({
                               </button>
                             )}
 
-                            {/* Other Statuses (PENDING, REJECTED): View Details */}
-                            {item.status !== 'DRAFT' &&
-                              item.status !== 'APPROVED' &&
-                              item.status !== 'PAID' && (
+                            {/* PENDING_VERIFICATION & PENDING_APPROVAL: View Details */}
+                            {(item.status === 'PENDING_VERIFICATION' ||
+                              item.status === 'PENDING_APPROVAL' ||
+                              item.status === 'ON_HOLD') && (
                                 <button
                                   type="button"
                                   onClick={() => setDetailPayment(item)}
@@ -482,10 +734,13 @@ export function PaymentsWorkspace({
                 </tbody>
                 <tfoot>
                   <tr className="bg-slate-50/80 border-t-2 border-slate-200 font-bold text-slate-900 text-xs">
-                    <td colSpan={4} className="py-3 px-3.5 text-right uppercase tracking-wider text-[11px] text-slate-600">
+                    <td
+                      colSpan={activeTab === 'APPROVED' ? 5 : 4}
+                      className="py-3 px-3.5 text-right uppercase tracking-wider text-[11px] text-slate-600"
+                    >
                       Total ({tabs.find((t) => t.id === activeTab)?.label})
                     </td>
-                    <td className="py-3 px-3.5 text-right tabular-nums text-slate-900 font-bold">
+                    <td className="py-3 px-3.5 text-right tabular-nums text-slate-900 font-bold text-sm">
                       {formatINR(totalVisibleNet)}
                     </td>
                     <td colSpan={2} className="py-3 px-3.5 text-slate-400 font-normal">
@@ -501,6 +756,9 @@ export function PaymentsWorkspace({
               {filteredRows.map((item) => {
                 const isSubmitting = submittingPaymentId === item.id;
                 const isDeleting = deletingPaymentId === item.id;
+                const overdue = isOverdue(item.due_date, item.status);
+                const vendorDisplayName =
+                  item.vendor?.party_name || item.vendor?.name || 'Unknown Party';
 
                 return (
                   <div
@@ -510,21 +768,43 @@ export function PaymentsWorkspace({
                   >
                     {/* Header Row: Vendor Name + Net Amount */}
                     <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <div className="font-semibold text-sm text-slate-900 truncate">
-                          {item.vendor?.name || 'Unknown Vendor'}
-                        </div>
-                        <div className="flex items-center gap-2 mt-0.5 text-xs text-slate-500 font-mono">
-                          <span>{formatShortDate(item.sheet_date)}</span>
-                          <span>•</span>
-                          <span className="truncate">{item.invoice_ref}</span>
+                      <div className="min-w-0 flex items-start gap-2.5">
+                        {activeTab === 'APPROVED' && (
+                          <input
+                            type="checkbox"
+                            aria-label={`Select payment for ${vendorDisplayName}`}
+                            checked={selectedApprovedIds.has(item.id)}
+                            onChange={() => toggleSelectApproved(item.id)}
+                            onClick={(e) => e.stopPropagation()}
+                            className="mt-1 w-4 h-4 rounded border-slate-300 text-brand focus:ring-brand shrink-0 cursor-pointer"
+                          />
+                        )}
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="font-bold text-sm text-slate-900 truncate">
+                              {vendorDisplayName}
+                            </span>
+                            {overdue && (
+                              <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-rose-100 text-rose-800 uppercase">
+                                Overdue
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2 mt-0.5 text-xs text-slate-500 font-mono">
+                            <span>Due: {formatShortDate(item.due_date || item.sheet_date)}</span>
+                            <span>•</span>
+                            <span className="truncate">{item.invoice_ref}</span>
+                          </div>
                         </div>
                       </div>
                       <div className="text-right shrink-0">
                         <div className="font-bold text-sm text-slate-900 tabular-nums">
                           {formatINR(item.net_payable)}
                         </div>
-                        <div className="mt-0.5">
+                        <div className="text-[11px] text-slate-500 tabular-nums mt-0.5">
+                          TDS: {item.tds > 0 ? formatINR(item.tds) : 'NA'}
+                        </div>
+                        <div className="mt-1">
                           <PaymentStatusBadge status={item.status} />
                         </div>
                       </div>
@@ -534,8 +814,8 @@ export function PaymentsWorkspace({
                     <div className="flex items-center justify-between text-xs text-slate-600 bg-slate-50/70 p-2 rounded-lg border border-slate-100">
                       <span className="truncate max-w-[200px]">{item.purpose}</span>
                       <BankBadge
-                        shortName={item.source_bank?.short_name}
-                        fullName={item.source_bank?.full_name}
+                        shortName={item.source_bank?.short_code || item.source_bank?.short_name}
+                        fullName={item.source_bank?.bank_name || item.source_bank?.full_name}
                       />
                     </div>
 
@@ -567,14 +847,14 @@ export function PaymentsWorkspace({
                             type="button"
                             onClick={() => handleSubmitDraft(item.id)}
                             disabled={isSubmitting}
-                            className="flex-1 min-h-[44px] px-4 rounded-lg bg-slate-900 text-white text-xs font-medium inline-flex items-center justify-center gap-1.5 cursor-pointer"
+                            className="flex-1 min-h-[44px] px-4 rounded-lg bg-brand text-white text-xs font-semibold inline-flex items-center justify-center gap-1.5 cursor-pointer"
                           >
                             {isSubmitting ? (
                               <Loader2 className="w-3.5 h-3.5 animate-spin" />
                             ) : (
                               <Send className="w-3.5 h-3.5" />
                             )}
-                            <span>Submit for Approval</span>
+                            <span>Submit</span>
                           </button>
                         </>
                       )}
@@ -583,7 +863,7 @@ export function PaymentsWorkspace({
                         <button
                           type="button"
                           onClick={() => setUtrPayment(item)}
-                          className="w-full min-h-[44px] px-4 rounded-lg bg-emerald-600 text-white text-xs font-medium inline-flex items-center justify-center gap-1.5 shadow-xs cursor-pointer"
+                          className="w-full min-h-[44px] px-4 rounded-lg bg-emerald-600 text-white text-xs font-semibold inline-flex items-center justify-center gap-1.5 shadow-xs cursor-pointer"
                         >
                           <CheckCircle2 className="w-4 h-4" />
                           <span>Mark Paid & Enter UTR</span>
@@ -604,6 +884,16 @@ export function PaymentsWorkspace({
         )}
       </div>
 
+      {/* UPDATE LIVE BALANCES MODAL */}
+      <UpdateBalancesModal
+        open={isBalancesModalOpen}
+        onOpenChange={setIsBalancesModalOpen}
+        banks={banks}
+        onSuccess={(updated) => {
+          setBanks(updated);
+        }}
+      />
+
       {/* PAYMENT ENTRY SLIDE-OVER DRAWER */}
       <PaymentFormSheet
         open={isDrawerOpen}
@@ -611,6 +901,7 @@ export function PaymentsWorkspace({
         vendors={vendors}
         banks={banks}
         editPayment={selectedEditPayment}
+        initialFromReminder={initialFromReminder}
         onSuccess={handleDrawerSuccess}
         onVendorCreated={(newV) => setVendors((prev) => [newV, ...prev])}
       />
@@ -635,7 +926,21 @@ export function PaymentsWorkspace({
           setPayments((prev) =>
             prev.map((p) => (p.id === paidItem.id ? paidItem : p))
           );
+          setSelectedApprovedIds((prev) => {
+            const next = new Set(prev);
+            next.delete(paidItem.id);
+            return next;
+          });
         }}
+      />
+
+      {/* BANK BULK UPLOAD EXCEL EXPORT MODAL */}
+      <BankExcelExportModal
+        open={isExcelModalOpen}
+        onOpenChange={setIsExcelModalOpen}
+        readyToPayItems={itemsForExcelModal}
+        banks={banks}
+        companyCode={companyCode}
       />
     </div>
   );

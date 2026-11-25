@@ -1,317 +1,75 @@
-# 03 — Database Schema & Financial Security: INDFURN Payment System
+# Payment Desk — Database Schema & Security Specification (v2)
 
-## 1. Security & Data Integrity Principles
-Because this application authorizes real B2B financial payouts, security MUST be enforced at the **PostgreSQL database layer** (RLS + Triggers + Constraints)—never solely in frontend UI code.
-
-1. **Exact Decimal Arithmetic:** Always use `NUMERIC(12,2)` for all currency values. Never use `FLOAT`, `REAL`, or `DOUBLE PRECISION`.
-2. **Strict Post-Approval Immutability:** Once a payment item is `APPROVED` or `PAID`, its financial fields (`vendor_id`, `invoice_ref`, `amount`, `tds`, `purpose`) are locked by a PostgreSQL trigger.
-3. **Zero Hard Deletes:** Submitted payment items (`status != 'DRAFT'`) cannot be deleted from the database. Use `CANCELLED` status instead.
-4. **Unique UTR Guarantee:** Prevent accidental duplicate UTR entry using a normalized case-insensitive unique index.
-5. **Role Separation:** `STAFF` has zero read access to `payment_items`, `company_banks`, or `audit_logs`. They can only access `incoming_bills` and `vendors`.
-6. **Private Document Storage:** Supplier invoices and bank transaction receipts (which contain account numbers and corporate KYC metadata) are stored in **private Supabase buckets** and accessed exclusively through short-lived **Signed URLs (5-minute expiry)**.
+## 1. Architecture & Security Principles
+- **Database Engine:** Supabase PostgreSQL (Region: South Asia — Mumbai `ap-south-1`).
+- **Strict Multi-Company Isolation:** Every operational table carries a non-null `company_id` referencing `public.companies(id)`. Row Level Security (RLS) enforces that users can ONLY read or write data belonging to companies explicitly assigned to them in `public.user_company_access`.
+- **Zero-Trust Defense in Depth:** Financial rules, state transitions, post-approval locks, and terminal immutability are enforced across **3 layers**: UI → Next.js Server Actions → PostgreSQL RLS & Triggers.
+- **Tamper-Proof Role Caching:** User role and admin status are cached exclusively in admin-only `auth.users.raw_app_meta_data` (`app_metadata`), NEVER in user-writable `user_metadata`.
+- **No Public Self-Registration:** User creation is strictly a server-only Admin operation using `SUPABASE_SERVICE_ROLE_KEY`.
 
 ---
 
-## 2. Complete PostgreSQL Schema (Supabase SQL)
-
-Run in Supabase SQL Editor or save as initial migration (`supabase/migrations/001_initial_schema.sql`).
+## 2. Custom PostgreSQL Enums
 
 ```sql
--- ==========================================
--- 1. ENUMS
--- ==========================================
-CREATE TYPE public.user_role AS ENUM ('STAFF', 'ACCOUNTANT', 'OWNER');
+-- Operational roles (is_admin flag on profiles grants Admin privileges)
+CREATE TYPE public.user_role AS ENUM (
+  'PREPARER',
+  'VERIFIER',
+  'APPROVER',
+  'AUDITOR'
+);
 
+-- Canonical 3-stage payment workflow + exception states
 CREATE TYPE public.payment_status AS ENUM (
   'DRAFT',
+  'PENDING_VERIFICATION',
   'PENDING_APPROVAL',
+  'APPROVED',       -- Ready to Pay / Pending UTR
+  'PAID',           -- Completed (UTR/Cheque + Receipt recorded)
   'ON_HOLD',
-  'APPROVED',
-  'PAID',
   'REJECTED',
   'CANCELLED'
 );
 
-CREATE TYPE public.incoming_bill_status AS ENUM ('NEW', 'CONVERTED', 'DISMISSED');
-
--- ==========================================
--- 2. PROFILES (Linked to auth.users)
--- ==========================================
-CREATE TABLE public.profiles (
-  id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
-  full_name TEXT NOT NULL,
-  role public.user_role NOT NULL DEFAULT 'STAFF',
-  is_active BOOLEAN NOT NULL DEFAULT TRUE,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+-- Supported disbursement modes (no Cash/UPI in v2)
+CREATE TYPE public.payment_mode AS ENUM (
+  'NEFT_RTGS',
+  'CHEQUE'
 );
 
--- ==========================================
--- 3. MASTER TABLES: VENDORS & COMPANY BANKS
--- ==========================================
-CREATE TABLE public.vendors (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  name TEXT NOT NULL UNIQUE,
-  gstin TEXT,
-  bank_account_no TEXT,
-  ifsc_code TEXT,
-  notes TEXT,
-  is_active BOOLEAN NOT NULL DEFAULT TRUE,
-  created_by UUID REFERENCES public.profiles(id),
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+-- Supports both exact invoice payments and round lump-sum on-account transfers
+CREATE TYPE public.payment_type AS ENUM (
+  'AGAINST_BILL',
+  'ON_ACCOUNT'
 );
 
-CREATE TABLE public.company_banks (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  short_name TEXT NOT NULL UNIQUE,       -- e.g., 'Axis', 'SIB'
-  full_name TEXT NOT NULL,               -- e.g., 'Axis Bank (Neo Corporate)', 'South Indian Bank'
-  account_mask TEXT,                     -- e.g., 'XXXX0698' (never store full raw credentials)
-  is_active BOOLEAN NOT NULL DEFAULT TRUE,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+-- Workflow notification event types (NO notification on PAID)
+CREATE TYPE public.notification_event AS ENUM (
+  'SUBMITTED_FOR_VERIFICATION',
+  'VERIFIED_FOR_APPROVAL',
+  'APPROVED',
+  'HELD',
+  'REJECTED'
 );
-
--- Seed default INDFURN company banks
-INSERT INTO public.company_banks (short_name, full_name)
-VALUES
-  ('Axis', 'Axis Bank'),
-  ('SIB', 'South Indian Bank')
-ON CONFLICT (short_name) DO NOTHING;
-
--- ==========================================
--- 4. INCOMING BILLS (Uploaded by Stock Staff)
--- ==========================================
-CREATE TABLE public.incoming_bills (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  vendor_id UUID REFERENCES public.vendors(id),
-  vendor_name_fallback TEXT,             -- Used if vendor is not yet in master table
-  invoice_ref TEXT NOT NULL,
-  estimated_amount NUMERIC(12,2) CHECK (estimated_amount IS NULL OR estimated_amount > 0),
-  file_path TEXT NOT NULL,               -- Private storage path in 'supplier-invoices'
-  notes TEXT,
-  status public.incoming_bill_status NOT NULL DEFAULT 'NEW',
-  uploaded_by UUID NOT NULL REFERENCES public.profiles(id),
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
--- ==========================================
--- 5. PAYMENT ITEMS (Core Approval & UTR Ledger)
--- ==========================================
-CREATE TABLE public.payment_items (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  sheet_date DATE NOT NULL DEFAULT CURRENT_DATE,
-  incoming_bill_id UUID REFERENCES public.incoming_bills(id),
-
-  vendor_id UUID NOT NULL REFERENCES public.vendors(id),
-  invoice_ref TEXT NOT NULL,             -- e.g., '0282', 'On Account', 'Sep-Oct', 'NA'
-  due_date DATE NOT NULL,
-  purpose TEXT NOT NULL,                 -- e.g., 'Against Bill', 'Against PI', 'Transfer', 'Electricity Charge'
-
-  amount NUMERIC(12,2) NOT NULL CHECK (amount > 0),
-  tds NUMERIC(12,2) NOT NULL DEFAULT 0.00 CHECK (tds >= 0 AND tds <= amount),
-  net_payable NUMERIC(12,2) GENERATED ALWAYS AS (amount - tds) STORED,
-
-  source_bank_id UUID NOT NULL REFERENCES public.company_banks(id),
-  invoice_file_path TEXT,                -- Private storage path in 'supplier-invoices'
-
-  status public.payment_status NOT NULL DEFAULT 'DRAFT',
-  remarks TEXT,
-  rejection_reason TEXT,
-
-  -- Post-payment UTR reconciliation fields
-  utr_number TEXT,
-  receipt_file_path TEXT,                -- Private storage path in 'bank-receipts'
-
-  -- Sign-off metadata
-  created_by UUID NOT NULL REFERENCES public.profiles(id),
-  submitted_at TIMESTAMPTZ,
-  approved_by UUID REFERENCES public.profiles(id),
-  approved_at TIMESTAMPTZ,
-  paid_by UUID REFERENCES public.profiles(id),
-  paid_at TIMESTAMPTZ,
-
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-
-  -- Data consistency constraints
-  CONSTRAINT chk_paid_requires_utr CHECK (
-    status <> 'PAID' OR (utr_number IS NOT NULL AND TRIM(utr_number) <> '' AND receipt_file_path IS NOT NULL)
-  ),
-  CONSTRAINT chk_rejected_requires_reason CHECK (
-    status <> 'REJECTED' OR (rejection_reason IS NOT NULL AND TRIM(rejection_reason) <> '')
-  )
-);
-
--- Enforce globally unique UTR (case-insensitive, trimmed)
-CREATE UNIQUE INDEX idx_payment_items_unique_utr
-  ON public.payment_items (UPPER(TRIM(utr_number)))
-  WHERE utr_number IS NOT NULL AND TRIM(utr_number) <> '';
-
--- Performance indexes for daily sheets, history, and duplicate checks
-CREATE INDEX idx_payment_items_sheet_date ON public.payment_items (sheet_date DESC);
-CREATE INDEX idx_payment_items_status ON public.payment_items (status);
-CREATE INDEX idx_payment_items_vendor_invoice ON public.payment_items (vendor_id, LOWER(TRIM(invoice_ref)));
-
--- ==========================================
--- 6. IMMUTABLE AUDIT LOGS
--- ==========================================
-CREATE TABLE public.audit_logs (
-  id BIGSERIAL PRIMARY KEY,
-  table_name TEXT NOT NULL,
-  record_id UUID NOT NULL,
-  action TEXT NOT NULL,                  -- 'CREATED', 'SUBMITTED', 'APPROVED', 'REJECTED', 'HOLD', 'BANK_CHANGED', 'PAID', 'UPDATED'
-  old_data JSONB,
-  new_data JSONB,
-  changed_by UUID REFERENCES public.profiles(id),
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE INDEX idx_audit_logs_record ON public.audit_logs (record_id, created_at DESC);
-3. Database-Level Security Triggers (Immutability & Auto-Audit)
-SQL
--- Helper function to read current user's role safely
-CREATE OR REPLACE FUNCTION public.get_my_role()
+3. Core Tables & Column Definitions3.1 public.companies (Fixed 2-Company Master)Strictly seeded with INDFURN and VINMORE (no arbitrary company creation UI).ColumnTypeConstraints / NotesiduuidPRIMARY KEY DEFAULT gen_random_uuid()codetextUNIQUE NOT NULL ('INDFURN', 'VINMORE')nametextNOT NULL ('INDFURN', 'VINMORE')is_activebooleanNOT NULL DEFAULT TRUEcreated_attimestamptzNOT NULL DEFAULT NOW()3.2 public.profiles (User Accounts & Roles)1-to-1 with auth.users(id). Never store email or username here (emails are read via Auth/Admin client on server).ColumnTypeConstraints / NotesiduuidPRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADEfull_nametextNOT NULLrolepublic.user_roleNOT NULL DEFAULT 'PREPARER'is_adminbooleanNOT NULL DEFAULT FALSE (Owner / Developer admin flag)is_activebooleanNOT NULL DEFAULT TRUE (Deactivating revokes all DB access immediately)created_attimestamptzNOT NULL DEFAULT NOW()updated_attimestamptzNOT NULL DEFAULT NOW()3.3 public.user_company_access (Company Scope Mapping)Determines whether a user can access INDFURN, VINMORE, or Both.ColumnTypeConstraints / Notesuser_iduuidNOT NULL REFERENCES public.profiles(id) ON DELETE CASCADEcompany_iduuidNOT NULL REFERENCES public.companies(id) ON DELETE CASCADEcreated_attimestamptzNOT NULL DEFAULT NOW()PK(user_id, company_id)Composite primary key3.4 public.company_banks (Company Banks & Live Available Balance)Seeded per company:INDFURN: Axis Bank (UTIB, primary), South Indian Bank (SIBL), HDFC Bank (HDFC), Kotak Mahindra Bank (KKBK).VINMORE: Axis Bank (UTIB, primary), HDFC Bank (HDFC), Kotak Mahindra Bank (KKBK) — no SIB.ColumnTypeConstraints / NotesiduuidPRIMARY KEY DEFAULT gen_random_uuid()company_iduuidNOT NULL REFERENCES public.companies(id) ON DELETE CASCADEbank_nametextNOT NULL (e.g., 'Axis Bank Neo for Corporates')short_codetextNOT NULL ('AXIS', 'SIB', 'HDFC', 'KOTAK')ifsc_prefixtextNOT NULL (4-char uppercase bank prefix: 'UTIB', 'SIBL', 'HDFC', 'KKBK' — used for Same-Bank vs Other-Bank Excel auto-split)account_number_maskedtextOptional masked account suffix (e.g., 'XXXX4821')available_balancenumeric(14,2)NOT NULL DEFAULT 0 (Updated by Preparer before/during batch entry)balance_updated_attimestamptzTimestamp of last balance updatebalance_updated_byuuidREFERENCES public.profiles(id)is_primarybooleanNOT NULL DEFAULT FALSEis_activebooleanNOT NULL DEFAULT TRUEcreated_attimestamptzNOT NULL DEFAULT NOW()updated_attimestamptzNOT NULL DEFAULT NOW()3.5 public.vendors (Lean Beneficiary Master — No GSTIN/Mobile)Separates display party_name from bank beneficiary_name for accurate Bulk Excel exports.ColumnTypeConstraints / NotesiduuidPRIMARY KEY DEFAULT gen_random_uuid()company_iduuidNOT NULL REFERENCES public.companies(id) ON DELETE CASCADEparty_nametextNOT NULL (Trade name shown in UI/approvals, e.g., 'Naas Hardware')beneficiary_nametextNOT NULL (Exact Bank A/C holder name for Excel, e.g., 'Manoj')account_numbertextNOT NULLifsc_codetextNOT NULL CHECK (ifsc_code ~ '^[A-Z]{4}0[A-Z0-9]{6}$')remarkstextOptional short noteis_activebooleanNOT NULL DEFAULT TRUEcreated_byuuidREFERENCES public.profiles(id)created_attimestamptzNOT NULL DEFAULT NOW()updated_attimestamptzNOT NULL DEFAULT NOW()3.6 public.payment_items (Core Payment Ledger)ColumnTypeConstraints / NotesiduuidPRIMARY KEY DEFAULT gen_random_uuid()company_iduuidNOT NULL REFERENCES public.companies(id)sheet_datedateNOT NULL DEFAULT CURRENT_DATEvendor_iduuidNOT NULL REFERENCES public.vendors(id)source_bank_iduuidNOT NULL REFERENCES public.company_banks(id)invoice_reftextNOT NULL (e.g., '0282', 'On Account', 'Sep-Oct')due_datedateNOT NULL (Displayed prominently for overdue prioritization)purposetextNOT NULL ('Against Bill', 'Against PI', 'Electricity Charge', 'On Account', etc.)payment_typepublic.payment_typeNOT NULL DEFAULT 'AGAINST_BILL'payment_modepublic.payment_modeNOT NULL DEFAULT 'NEFT_RTGS'amountnumeric(14,2)NOT NULL CHECK (amount > 0)tdsnumeric(14,2)NOT NULL DEFAULT 0 CHECK (tds >= 0 AND tds < amount)net_payablenumeric(14,2)GENERATED ALWAYS AS (amount - tds) STOREDremarkstextOptional operational noteinvoice_file_pathtextOptional path in private supplier-invoices bucketstatuspublic.payment_statusNOT NULL DEFAULT 'DRAFT'rejection_reasontextMandatory when status = 'REJECTED' or returned by Verifierutr_numbertextUnique when non-null (for NEFT_RTGS settlements)cheque_numbertextRequired when payment_mode = 'CHEQUE' and status = 'PAID'cheque_datedateRequired when payment_mode = 'CHEQUE' and status = 'PAID'receipt_file_pathtextPath to Bank Acknowledgement PDF / Receipt in private bank-receipts bucketcreated_byuuidNOT NULL REFERENCES public.profiles(id)submitted_attimestamptzStamped when DRAFT → PENDING_VERIFICATIONverified_byuuidREFERENCES public.profiles(id)verified_attimestamptzStamped when verifiedapproved_byuuidREFERENCES public.profiles(id)approved_attimestamptzStamped when approvedpaid_byuuidREFERENCES public.profiles(id)paid_attimestamptzStamped when marked PAIDaudited_byuuidREFERENCES public.profiles(id) (Stamped once by AUDITOR)audited_attimestamptzImmutable audit verification timestampcreated_attimestamptzNOT NULL DEFAULT NOW()updated_attimestamptzNOT NULL DEFAULT NOW()Critical Indexes on public.payment_items:idx_payment_items_company_status_due: (company_id, status, due_date ASC)idx_payment_items_company_sheet_date: (company_id, sheet_date DESC)idx_payment_items_vendor: (company_id, vendor_id)uq_payment_items_utr: UNIQUE (utr_number) WHERE utr_number IS NOT NULL AND btrim(utr_number) <> ''idx_payment_items_dup_invoice: (company_id, vendor_id, lower(invoice_ref)) (powers fast duplicate invoice warning)3.7 public.notifications & public.push_subscriptionspublic.notifications: id, company_id, recipient_user_id, payment_item_id, event_type (notification_event), title, body, is_read (boolean DEFAULT FALSE), created_at.Index: (recipient_user_id, is_read, created_at DESC).public.push_subscriptions: id, user_id, endpoint (UNIQUE NOT NULL), p256dh (NOT NULL), auth (NOT NULL), created_at.3.8 public.recurring_reminders (Accounts-Only Monthly Dues)Tracks recurring bills (e.g., KSEB G1 Bill, Staff Salary). Visible strictly to PREPARER users.Columns: id, company_id, title, due_day_of_month (int CHECK (1..31)), estimated_amount (numeric(14,2)), vendor_id (nullable), remarks, last_completed_month (text, e.g., '2026-11'), is_active, created_by, created_at, updated_at.3.9 public.audit_logs (Append-Only Immutable History)Columns: id, company_id, payment_item_id, actor_id, action, old_status, new_status, metadata (jsonb), created_at.Strictly INSERT and SELECT only — zero UPDATE or DELETE policies.4. Security Helper Functions & Grants4.1 Security-Definer HelpersAll helper functions MUST use SECURITY DEFINER and SET search_path = public and enforce is_active = TRUE:SQLCREATE OR REPLACE FUNCTION public.get_my_role()
 RETURNS public.user_role
-LANGUAGE sql
-STABLE
-SECURITY DEFINER
-SET search_path = public
-AS $$ SELECT role FROM public.profiles WHERE id = auth.uid() AND is_active = TRUE; $$;
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public
+AS $$ SELECT role FROM public.profiles WHERE id = auth.uid() AND is_active = TRUE LIMIT 1; $$;
 
--- ==========================================
--- TRIGGER 1: Enforce Workflow, Role Authority & Post-Approval Locking
--- ==========================================
-CREATE OR REPLACE FUNCTION public.enforce_payment_integrity()
-RETURNS TRIGGER
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public
-AS $$ DECLARE v_role public.user_role; BEGIN v_role := public.get_my_role();    -- Block hard deletes on anything except DRAFT IF TG_OP = 'DELETE' THEN IF OLD.status <> 'DRAFT' THEN RAISE EXCEPTION 'Submitted payment records cannot be deleted. Use CANCELLED status instead.'; END IF; RETURN OLD; END IF;    IF TG_OP = 'UPDATE' THEN NEW.updated_at := NOW();      -- 1. Only OWNER can transition to APPROVED, ON_HOLD, or REJECTED IF NEW.status IS DISTINCT FROM OLD.status AND NEW.status IN ('APPROVED', 'ON_HOLD', 'REJECTED') THEN IF v_role <> 'OWNER' THEN RAISE EXCEPTION 'Only OWNER can approve, hold, or reject payment items.'; END IF; END IF;      -- 2. Stamp approval metadata automatically IF NEW.status = 'APPROVED' AND OLD.status <> 'APPROVED' THEN NEW.approved_by := auth.uid(); NEW.approved_at := NOW(); END IF;      -- 3. Stamp paid metadata automatically IF NEW.status = 'PAID' AND OLD.status <> 'PAID' THEN IF OLD.status <> 'APPROVED' THEN RAISE EXCEPTION 'Only APPROVED items can be marked as PAID.'; END IF; NEW.paid_by := auth.uid(); NEW.paid_at := NOW(); END IF;      -- 4. POST-APPROVAL IMMUTABILITY LOCK -- Once APPROVED, lock core financial fields forever IF OLD.status = 'APPROVED' THEN IF NEW.vendor_id IS DISTINCT FROM OLD.vendor_id OR NEW.invoice_ref IS DISTINCT FROM OLD.invoice_ref OR NEW.amount IS DISTINCT FROM OLD.amount OR NEW.tds IS DISTINCT FROM OLD.tds OR NEW.purpose IS DISTINCT FROM OLD.purpose OR NEW.sheet_date IS DISTINCT FROM OLD.sheet_date OR NEW.source_bank_id IS DISTINCT FROM OLD.source_bank_id THEN RAISE EXCEPTION 'Core financial fields are locked after Owner approval.'; END IF; END IF;      -- 5. TERMINAL STATE LOCK (PAID / REJECTED / CANCELLED cannot be mutated) IF OLD.status IN ('PAID', 'REJECTED', 'CANCELLED') THEN RAISE EXCEPTION 'Finalized payment records (\% status) are completely immutable.', OLD.status; END IF; END IF;    RETURN NEW; END; $$;
+CREATE OR REPLACE FUNCTION public.is_admin_user()
+RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public
+AS $$SELECT COALESCE( (SELECT is_admin FROM public.profiles WHERE id = auth.uid() AND is_active = TRUE LIMIT 1), FALSE );$$;
 
-CREATE TRIGGER trg_enforce_payment_integrity
-  BEFORE UPDATE OR DELETE ON public.payment_items
-  FOR EACH ROW
-  EXECUTE FUNCTION public.enforce_payment_integrity();
-
--- ==========================================
--- TRIGGER 2: Automatic Audit Logging
--- ==========================================
-CREATE OR REPLACE FUNCTION public.log_payment_audit()
-RETURNS TRIGGER
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public
-AS $$ DECLARE v_action TEXT; BEGIN IF TG_OP = 'INSERT' THEN v_action := 'CREATED'; INSERT INTO public.audit_logs (table_name, record_id, action, old_data, new_data, changed_by) VALUES ('payment_items', NEW.id, v_action, NULL, to_jsonb(NEW), auth.uid()); RETURN NEW; END IF;    IF TG_OP = 'UPDATE' THEN IF NEW.status IS DISTINCT FROM OLD.status THEN v_action := 'STATUS_' \vert{}\vert{} NEW.status::TEXT; ELSIF NEW.source_bank_id IS DISTINCT FROM OLD.source_bank_id THEN v_action := 'BANK_CHANGED'; ELSE v_action := 'UPDATED'; END IF;      INSERT INTO public.audit_logs (table_name, record_id, action, old_data, new_data, changed_by) VALUES ('payment_items', NEW.id, v_action, to_jsonb(OLD), to_jsonb(NEW), auth.uid()); RETURN NEW; END IF;    RETURN NULL; END; $$;
-
-CREATE TRIGGER trg_log_payment_audit
-  AFTER INSERT OR UPDATE ON public.payment_items
-  FOR EACH ROW
-  EXECUTE FUNCTION public.log_payment_audit();
-4. Row Level Security (RLS) Policies
-Enable RLS on every table with default-deny:
-
-SQL
-ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.vendors ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.company_banks ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.incoming_bills ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.payment_items ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.audit_logs ENABLE ROW LEVEL SECURITY;
-
--- PROFILES: Users see own profile; OWNER & ACCOUNTANT can view all names (for sign-offs)
-CREATE POLICY "profiles_select" ON public.profiles
-  FOR SELECT USING (id = auth.uid() OR public.get_my_role() IN ('OWNER', 'ACCOUNTANT'));
-
-CREATE POLICY "profiles_owner_manage" ON public.profiles
-  FOR ALL USING (public.get_my_role() = 'OWNER');
-
--- VENDORS: All active authenticated users can read; ACCOUNTANT & OWNER can insert/update
-CREATE POLICY "vendors_select" ON public.vendors
-  FOR SELECT USING (public.get_my_role() IS NOT NULL);
-
-CREATE POLICY "vendors_manage" ON public.vendors
-  FOR INSERT WITH CHECK (public.get_my_role() IN ('ACCOUNTANT', 'OWNER', 'STAFF'));
-
-CREATE POLICY "vendors_update" ON public.vendors
-  FOR UPDATE USING (public.get_my_role() IN ('ACCOUNTANT', 'OWNER'));
-
--- COMPANY BANKS: Only ACCOUNTANT & OWNER can view; only OWNER can manage
-CREATE POLICY "banks_select" ON public.company_banks
-  FOR SELECT USING (public.get_my_role() IN ('ACCOUNTANT', 'OWNER'));
-
-CREATE POLICY "banks_owner_manage" ON public.company_banks
-  FOR ALL USING (public.get_my_role() = 'OWNER');
-
--- INCOMING BILLS: STAFF can insert & view own uploads; ACCOUNTANT & OWNER see all
-CREATE POLICY "incoming_bills_select" ON public.incoming_bills
-  FOR SELECT USING (
-    public.get_my_role() IN ('ACCOUNTANT', 'OWNER')
-    OR uploaded_by = auth.uid()
-  );
-
-CREATE POLICY "incoming_bills_insert" ON public.incoming_bills
-  FOR INSERT WITH CHECK (
-    public.get_my_role() IN ('STAFF', 'ACCOUNTANT', 'OWNER')
-    AND uploaded_by = auth.uid()
-  );
-
-CREATE POLICY "incoming_bills_update" ON public.incoming_bills
-  FOR UPDATE USING (public.get_my_role() IN ('ACCOUNTANT', 'OWNER'));
-
--- PAYMENT ITEMS: Strictly hidden from STAFF! Only ACCOUNTANT & OWNER have access.
-CREATE POLICY "payment_items_select" ON public.payment_items
-  FOR SELECT USING (public.get_my_role() IN ('ACCOUNTANT', 'OWNER'));
-
-CREATE POLICY "payment_items_insert" ON public.payment_items
-  FOR INSERT WITH CHECK (
-    public.get_my_role() IN ('ACCOUNTANT', 'OWNER')
-    AND created_by = auth.uid()
-  );
-
-CREATE POLICY "payment_items_update" ON public.payment_items
-  FOR UPDATE USING (public.get_my_role() IN ('ACCOUNTANT', 'OWNER'));
-
-CREATE POLICY "payment_items_delete_draft_only" ON public.payment_items
-  FOR DELETE USING (
-    public.get_my_role() IN ('ACCOUNTANT', 'OWNER')
-    AND status = 'DRAFT'
-  );
-
--- AUDIT LOGS: Read-only for OWNER & ACCOUNTANT; no direct client INSERT/UPDATE/DELETE
-CREATE POLICY "audit_logs_select" ON public.audit_logs
-  FOR SELECT USING (public.get_my_role() IN ('ACCOUNTANT', 'OWNER'));
-5. Private File Storage Security (Supabase Storage)
-Create 2 Private Buckets (public = false):
-
-supplier-invoices — Supplier invoices/PIs uploaded by Staff or Accountant.
-
-bank-receipts — Axis Bank Neo reports & South Indian Bank transaction receipts uploaded by Accountant.
-
-Storage Rules
-Max File Size: 5 MB per file.
-
-Allowed MIME Types: application/pdf, image/jpeg, image/png, image/webp.
-
-Naming Convention: {year}/{month}/{uuid}.{ext} (prevents filename collisions and hides vendor names from paths).
-
-Access Pattern:
-
-NEVER call getPublicUrl().
-
-ALWAYS generate temporary Signed URLs on the server via supabase.storage.from(bucket).createSignedUrl(path, 300) (5-minute validity).
-
-Bucket Access Policies:
-
-supplier-invoices: Upload allowed for STAFF, ACCOUNTANT, OWNER. Read allowed for ACCOUNTANT, OWNER, and the STAFF user who uploaded the file.
-
-bank-receipts: Upload & Read strictly restricted to ACCOUNTANT and OWNER only (STAFF has zero access).
-
-6. Application-Layer Security Checklist
-Server-Side Auth Checks: Every Next.js Server Action / Route Handler must verify supabase.auth.getUser() (never trust getSession() alone on the server) and validate the payload with Zod.
-
-No Service Role Key on Client: Keep SUPABASE_SERVICE_ROLE_KEY strictly on the server (only needed for Owner creating new user accounts via Admin API).
-
-Duplicate Invoice Check Helper: Before inserting a payment_items row, query existing non-rejected/non-cancelled items matching (vendor_id, LOWER(TRIM(invoice_ref))) where invoice_ref is not 'na' or 'on account' and return a clear warning to the UI.
-
-HTTPS & Security Headers: Enforce HTTPS (automatic on Vercel) and disable open user self-signup in Supabase Auth settings (only the Owner creates accounts for INDFURN staff).
-
-Backups: Enable Supabase automatic daily backups (or schedule a weekly pg_dump export if on the Free tier) so financial history is never lost.
+CREATE OR REPLACE FUNCTION public.has_company_access(p_company_id uuid)
+RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public
+AS $$SELECT EXISTS ( SELECT 1 FROM public.profiles p WHERE p.id = auth.uid() AND p.is_active = TRUE AND ( p.is_admin = TRUE OR EXISTS ( SELECT 1 FROM public.user_company_access uca WHERE uca.user_id = p.id AND uca.company_id = p_company_id ) ) );$$;
+4.2 Mandatory Schema & Table GrantsAlways apply standard Supabase table grants so RLS policies evaluate cleanly without triggering PostgreSQL permission denied for table ... errors:SQLGRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO authenticated;
+GRANT ALL ON ALL TABLES IN SCHEMA public TO service_role;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO authenticated;
+GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO service_role;
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO authenticated, service_role;
+5. Row Level Security (RLS) Policy MatrixRLS MUST be enabled on every table in public.TableSELECTINSERTUPDATEDELETEcompaniesActive users with access to companyService role / Admin onlyAdmin onlyBlockedprofilesOwn row (id = auth.uid()) OR any active user (for audit names)Admin / Service role (via upsert)Admin only (self-deactivation blocked)Blockeduser_company_accessOwn rows OR AdminAdmin onlyAdmin onlyAdmin onlycompany_banksActive users with has_company_access(company_id)Admin onlyAdmin (all fields) OR PREPARER (balance update via action/RLS)BlockedvendorsActive users with has_company_access(company_id)PREPARER or Admin (within company)PREPARER or Admin (within company)Blocked (use is_active = false)payment_itemsActive users with has_company_access(company_id)PREPARER (within company, status IN ('DRAFT','PENDING_VERIFICATION'))Role-scoped + strictly guarded by trg_enforce_payment_integrityPREPARER on DRAFT onlynotificationsrecipient_user_id = auth.uid()Authenticated (server actions)recipient_user_id = auth.uid() (is_read only)Blockedpush_subscriptionsuser_id = auth.uid()user_id = auth.uid()user_id = auth.uid()user_id = auth.uid()recurring_remindersPREPARER with has_company_access(company_id) ONLYPREPARER with has_company_access(company_id)PREPARER with has_company_access(company_id)PREPARER with has_company_access(company_id)audit_logsActive users with has_company_access(company_id)Active users with has_company_access(company_id)BlockedBlocked6. Database Integrity Triggers6.1 public.handle_new_user() (Idempotent Auth Sync)Fires AFTER INSERT ON auth.users.Reads role/admin flags strictly from NEW.raw_app_meta_data (NOT raw_user_meta_data).Uses INSERT INTO public.profiles ... ON CONFLICT (id) DO UPDATE so server-side Admin user creation (createAdminClient().from('profiles').upsert(...)) NEVER suffers primary key collision (23505).6.2 public.enforce_payment_integrity() (NULL-Safe Workflow Guard)Fires BEFORE UPDATE OR DELETE ON public.payment_items. All role checks MUST be NULL-safe (v_role IS DISTINCT FROM ... / v_role IS NULL OR ...) so deactivated users can never bypass checks.Delete Guard (TG_OP = 'DELETE'):Allow ONLY if OLD.status = 'DRAFT' and v_role = 'PREPARER' (or v_is_admin = TRUE). Raise exception for any submitted/approved/paid item.Terminal State Lock & Single-Audit Exception (OLD.status IN ('PAID', 'REJECTED', 'CANCELLED')):If OLD.status IN ('REJECTED', 'CANCELLED'): Raise exception unconditionally (100% immutable).If OLD.status = 'PAID':Allow ONLY if OLD.audited_at IS NULL AND NEW.audited_at IS NOT NULL, caller has v_role = 'AUDITOR' (or v_is_admin = TRUE), and every other column (status, amount, tds, vendor_id, source_bank_id, utr_number, cheque_number, receipt_file_path, etc.) is NOT DISTINCT FROM OLD. Stamp NEW.audited_by := auth.uid() and NEW.audited_at := NOW().Reject all other modifications on PAID items.Role-Enforced Transitions:DRAFT → PENDING_VERIFICATION: Requires v_role = 'PREPARER' (or v_is_admin). Stamps submitted_at := NOW().PENDING_VERIFICATION → PENDING_APPROVAL: Requires v_role = 'VERIFIER' OR (v_role = 'APPROVER' / v_is_admin override). Stamps verified_by := auth.uid(), verified_at := NOW().PENDING_VERIFICATION → REJECTED: Requires v_role IN ('VERIFIER', 'APPROVER') or v_is_admin, and non-empty rejection_reason.Any transition to APPROVED, ON_HOLD, or REJECTED (from PENDING_APPROVAL or ON_HOLD), or direct Owner override from PENDING_VERIFICATION → APPROVED: Strictly requires v_role = 'APPROVER' (or v_is_admin).If NEW.status = 'APPROVED': Stamps approved_by := auth.uid(), approved_at := NOW().If NEW.status = 'REJECTED': Requires non-empty rejection_reason.APPROVED → PAID: Requires v_role = 'PREPARER' (or v_is_admin).If NEW.payment_mode = 'NEFT_RTGS': Requires non-empty NEW.utr_number.If NEW.payment_mode = 'CHEQUE': Requires non-empty NEW.cheque_number and NEW.cheque_date IS NOT NULL.Stamps paid_by := auth.uid(), paid_at := NOW().Zero Direct Financial Edits by Approver / Verifier / Auditor:Core financial fields (company_id, vendor_id, invoice_ref, due_date, purpose, payment_type, payment_mode, amount, tds) may ONLY be modified while OLD.status = 'DRAFT' by PREPARER.Exception: source_bank_id may be switched by APPROVER while OLD.status IN ('PENDING_APPROVAL', 'ON_HOLD') before approval.Post-Approval Immutability Lock (OLD.status = 'APPROVED'):Block ANY change to company_id, vendor_id, invoice_ref, due_date, purpose, payment_type, payment_mode, amount, tds, sheet_date, or source_bank_id.Timestamp Auto-Update: Always set NEW.updated_at := NOW().7. Private Supabase Storage Security7.1 BucketsBucket IDPublicFile Size LimitAllowed MIME TypesUsagebank-receiptsfalse5 MB (5242880)application/pdf, image/jpeg, image/png, image/webpBank Acknowledgement PDFs & Receiptssupplier-invoicesfalse5 MB (5242880)application/pdf, image/jpeg, image/png, image/webpOptional Supplier Invoices7.2 Path Convention & Storage RLSCompany-Scoped Object Path: <company_id>/<payment_item_id>/<timestamp>_<sanitized_filename>Storage RLS Policies on storage.objects (TO authenticated):SELECT (both buckets): Allowed if active user has public.has_company_access((storage.foldername(name))[1]::uuid).INSERT (both buckets): Allowed if public.get_my_role() = 'PREPARER' (or public.is_admin_user()) AND public.has_company_access(...).UPDATE / DELETE (supplier-invoices): PREPARER or Admin (within company, for draft replacement).UPDATE / DELETE (bank-receipts): Admin ONLY (protects audit trail).Signed URLs: Generated server-side via src/actions/storage.ts using authenticated session after verifying company access (e.g., 15-minute signed URL so Approver/Auditor never gets timed out mid-review).Migration Safety Rule: NEVER execute ALTER TABLE storage.objects ENABLE ROW LEVEL SECURITY; in SQL migrations — Supabase enables RLS on storage.objects by default, and running this statement throws ERROR 42501: must be owner of table objects.

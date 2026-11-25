@@ -18,6 +18,7 @@ import {
   ChevronDown,
   Loader2,
   AlertCircle,
+  Clock,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { PaymentStatusBadge } from '@/components/payments/payment-status-badge';
@@ -45,7 +46,6 @@ export function PaymentDetailDrawer({
   const [auditLogs, setAuditLogs] = React.useState<AuditLog[]>([]);
   const [isLoadingLogs, setIsLoadingLogs] = React.useState<boolean>(false);
 
-  // Fetch audit logs whenever drawer opens with a payment
   React.useEffect(() => {
     if (!open || !payment) {
       setAuditLogs([]);
@@ -58,11 +58,7 @@ export function PaymentDetailDrawer({
     getPaymentAuditLogs(payment.id)
       .then((res) => {
         if (isMounted) {
-          if (res.success) {
-            setAuditLogs(res.data);
-          } else {
-            setAuditLogs([]);
-          }
+          setAuditLogs(res.success ? res.data : []);
         }
       })
       .catch(() => {
@@ -80,20 +76,21 @@ export function PaymentDetailDrawer({
   if (!payment) return null;
 
   const isLocked = payment.status === 'APPROVED' || payment.status === 'PAID';
-  const vendorName = payment.vendor?.name || 'Unknown Vendor';
-  const bankName = payment.source_bank?.full_name || 'Bank';
-  const bankShort = payment.source_bank?.short_name || 'Bank';
+  const partyName = payment.vendor?.party_name || payment.vendor?.name || 'Unknown Party';
+  const beneficiaryName = payment.vendor?.beneficiary_name || partyName;
+  const bankName = payment.source_bank?.bank_name || payment.source_bank?.full_name || 'Bank';
+  const bankShort = payment.source_bank?.short_code || payment.source_bank?.short_name || 'Bank';
   const invoiceFileName = payment.invoice_file_path
     ? payment.invoice_file_path.split('/').pop() || 'Supplier Invoice'
     : null;
   const receiptFileName = payment.receipt_file_path
-    ? payment.receipt_file_path.split('/').pop() || 'Bank Disbursement Receipt'
+    ? payment.receipt_file_path.split('/').pop() || 'Bank Acknowledgement Receipt'
     : null;
 
   const handleCopyUtr = (utr: string) => {
     navigator.clipboard.writeText(utr);
     setCopiedUtr(true);
-    toast.success('UTR copied to clipboard');
+    toast.success('Reference copied to clipboard');
     setTimeout(() => setCopiedUtr(false), 2000);
   };
 
@@ -130,24 +127,32 @@ export function PaymentDetailDrawer({
     const oldData = (log.old_data || {}) as Record<string, unknown>;
 
     if (act === 'INSERT') {
-      return newData.status === 'PENDING_APPROVAL'
-        ? 'Payment created & submitted for approval'
+      return newData.status === 'PENDING_VERIFICATION'
+        ? 'Payment created & submitted for verification'
         : 'Payment entry created as Draft';
     }
 
     if (act === 'UPDATE') {
+      if (newData.audited_at && !oldData.audited_at) {
+        return 'Stamped as Audited by Auditor';
+      }
+
       if (newData.status && newData.status !== oldData.status) {
         switch (newData.status) {
+          case 'PENDING_VERIFICATION':
+            return 'Submitted for Senior Accountant verification';
           case 'PENDING_APPROVAL':
-            return 'Submitted for Owner approval';
+            return 'Verified & forwarded for Owner approval';
           case 'APPROVED':
-            return 'Approved by Owner';
+            return 'Authorized & Approved by Owner';
           case 'ON_HOLD':
             return 'Placed on hold by Owner';
           case 'REJECTED':
-            return `Rejected by Owner: "${newData.rejection_reason || ''}"`;
+            return `Rejected / Returned: "${newData.rejection_reason || ''}"`;
           case 'PAID':
-            return `Payment disbursed & marked Paid (UTR: ${newData.utr_number || 'N/A'})`;
+            return newData.payment_mode === 'CHEQUE'
+              ? `Settled via Cheque (#${newData.cheque_number || 'NA'})`
+              : `Payment disbursed & marked Paid (UTR: ${newData.utr_number || 'NA'})`;
           case 'CANCELLED':
             return 'Payment cancelled';
           default:
@@ -185,9 +190,22 @@ export function PaymentDetailDrawer({
                 <span>Locked Post-Approval</span>
               </span>
             )}
+            {payment.status === 'PAID' && (
+              payment.audited_at ? (
+                <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-md">
+                  <ShieldCheck className="w-3 h-3" />
+                  <span>Audited</span>
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-md">
+                  <Clock className="w-3 h-3" />
+                  <span>Unaudited</span>
+                </span>
+              )
+            )}
           </div>
           <SheetTitle className="text-base font-semibold text-slate-900 truncate mt-1">
-            {vendorName}
+            {partyName}
           </SheetTitle>
           <div className="text-xl font-bold text-slate-900 tabular-nums">
             {formatINR(payment.net_payable)}
@@ -201,7 +219,7 @@ export function PaymentDetailDrawer({
             <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-800">
               <div className="font-semibold flex items-center gap-1.5 mb-1 text-rose-900">
                 <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
-                <span>Rejection Reason</span>
+                <span>Rejection / Return Reason</span>
               </div>
               <p className="leading-relaxed pl-5">{payment.rejection_reason}</p>
             </div>
@@ -210,26 +228,34 @@ export function PaymentDetailDrawer({
           {/* KEY-VALUE DETAILS GRID */}
           <div className="rounded-xl border border-slate-200 divide-y divide-slate-100 text-xs shadow-xs overflow-hidden">
             <div className="px-3.5 py-2.5 flex justify-between gap-3">
-              <span className="text-slate-500">Sheet Date</span>
+              <span className="text-slate-500">Beneficiary (Bank A/C)</span>
+              <span className="font-semibold text-slate-900 text-right">{beneficiaryName}</span>
+            </div>
+            {(payment.vendor?.account_number || payment.vendor?.ifsc_code) && (
+              <div className="px-3.5 py-2.5 flex justify-between gap-3">
+                <span className="text-slate-500">A/C & IFSC</span>
+                <span className="font-mono text-slate-800 text-right">
+                  {payment.vendor?.account_number || 'NA'} · {payment.vendor?.ifsc_code || 'NA'}
+                </span>
+              </div>
+            )}
+            <div className="px-3.5 py-2.5 flex justify-between gap-3">
+              <span className="text-slate-500">Sheet Date / Due Date</span>
               <span className="font-medium text-slate-900 tabular-nums">
-                {formatHumanDate(payment.sheet_date)}
+                {formatHumanDate(payment.sheet_date)} / Due {formatHumanDate(payment.due_date)}
               </span>
             </div>
             <div className="px-3.5 py-2.5 flex justify-between gap-3">
               <span className="text-slate-500">Invoice / Ref No</span>
-              <span className="font-medium text-slate-900 tabular-nums">
+              <span className="font-mono font-medium text-slate-900 tabular-nums">
                 {payment.invoice_ref}
               </span>
             </div>
             <div className="px-3.5 py-2.5 flex justify-between gap-3">
-              <span className="text-slate-500">Due Date</span>
-              <span className="font-medium text-slate-900 tabular-nums">
-                {formatHumanDate(payment.due_date)}
+              <span className="text-slate-500">Purpose & Type</span>
+              <span className="font-medium text-slate-900">
+                {payment.purpose} ({payment.payment_type === 'ON_ACCOUNT' ? 'On Account' : 'Against Bill'})
               </span>
-            </div>
-            <div className="px-3.5 py-2.5 flex justify-between gap-3">
-              <span className="text-slate-500">Purpose</span>
-              <span className="font-medium text-slate-900">{payment.purpose}</span>
             </div>
             <div className="px-3.5 py-2.5 flex justify-between gap-3">
               <span className="text-slate-500">Gross Amount</span>
@@ -244,9 +270,9 @@ export function PaymentDetailDrawer({
               </span>
             </div>
             <div className="px-3.5 py-2.5 flex justify-between gap-3 items-center">
-              <span className="text-slate-500">Source Bank</span>
+              <span className="text-slate-500">Source Bank & Mode</span>
               <span className="font-medium text-slate-900">
-                {bankName} ({bankShort})
+                {bankName} ({bankShort}) · {payment.payment_mode === 'CHEQUE' ? 'Cheque' : 'NEFT/RTGS'}
               </span>
             </div>
 
@@ -271,6 +297,15 @@ export function PaymentDetailDrawer({
               </div>
             )}
 
+            {payment.payment_mode === 'CHEQUE' && payment.cheque_number && (
+              <div className="px-3.5 py-2.5 flex justify-between gap-3 items-center bg-blue-50/40">
+                <span className="text-slate-600 font-medium">Cheque Details</span>
+                <span className="font-mono font-bold text-blue-900 text-xs">
+                  #{payment.cheque_number} ({formatHumanDate(payment.cheque_date)})
+                </span>
+              </div>
+            )}
+
             {payment.remarks && (
               <div className="px-3.5 py-2.5 flex justify-between gap-4">
                 <span className="text-slate-500 shrink-0">Remarks</span>
@@ -279,7 +314,47 @@ export function PaymentDetailDrawer({
             )}
           </div>
 
-          {/* DOCUMENTS SECTION (5-MINUTE SIGNED URLS) */}
+          {/* 4-STAGE SIGN-OFF TIMESTAMPS */}
+          <div className="rounded-xl border border-slate-200 p-3.5 bg-slate-50/50 space-y-2 text-xs">
+            <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+              Stage Timestamps
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <div className="p-2 rounded-lg bg-white border border-slate-100">
+                <div className="text-[10px] text-slate-400 font-semibold uppercase">Prepared</div>
+                <div className="font-medium text-slate-900">{payment.creator?.full_name || '—'}</div>
+                <div className="text-[10px] text-slate-500 tabular-nums">
+                  {formatDateTime(payment.submitted_at || payment.created_at)}
+                </div>
+              </div>
+              <div className="p-2 rounded-lg bg-white border border-slate-100">
+                <div className="text-[10px] text-slate-400 font-semibold uppercase">Verified</div>
+                <div className="font-medium text-slate-900">{payment.verifier?.full_name || '—'}</div>
+                <div className="text-[10px] text-slate-500 tabular-nums">
+                  {payment.verified_at ? formatDateTime(payment.verified_at) : '—'}
+                </div>
+              </div>
+              <div className="p-2 rounded-lg bg-white border border-slate-100">
+                <div className="text-[10px] text-slate-400 font-semibold uppercase">Approved</div>
+                <div className="font-medium text-slate-900">{payment.approver?.full_name || '—'}</div>
+                <div className="text-[10px] text-slate-500 tabular-nums">
+                  {payment.approved_at ? formatDateTime(payment.approved_at) : '—'}
+                </div>
+              </div>
+              <div className="p-2 rounded-lg bg-white border border-slate-100">
+                <div className="text-[10px] text-slate-400 font-semibold uppercase">Paid & Audited</div>
+                <div className="font-medium text-slate-900">
+                  {payment.payer?.full_name || '—'}
+                  {payment.auditor?.full_name ? ` / ${payment.auditor.full_name}` : ''}
+                </div>
+                <div className="text-[10px] text-slate-500 tabular-nums">
+                  {payment.paid_at ? formatDateTime(payment.paid_at) : '—'}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* DOCUMENTS SECTION (15-MINUTE SIGNED URLS) */}
           <div className="space-y-3">
             <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
               Documents (Private Signed URLs)
@@ -303,15 +378,14 @@ export function PaymentDetailDrawer({
                 <div className="p-3.5 bg-white text-xs space-y-2">
                   <div className="flex justify-between text-[11px] text-slate-500">
                     <span className="truncate max-w-[200px]">
-                      <strong className="text-slate-800">{vendorName}</strong>
-                      {payment.vendor?.gstin ? ` · ${payment.vendor.gstin}` : ''}
+                      <strong className="text-slate-800">{partyName}</strong>
                     </span>
                     <span className="tabular-nums">Ref: {payment.invoice_ref}</span>
                   </div>
                   <div className="flex justify-between items-center pt-2 border-t border-dashed border-slate-200">
                     <span className="text-[11px] text-slate-400 inline-flex items-center gap-1">
                       <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-                      Signed preview · 5m expiry
+                      Signed preview · 15m expiry
                     </span>
                     <button
                       type="button"
@@ -322,7 +396,7 @@ export function PaymentDetailDrawer({
                         )
                       }
                       disabled={isViewingInvoice}
-                      className="text-xs font-semibold text-blue-600 hover:text-blue-800 hover:underline inline-flex items-center gap-1 cursor-pointer"
+                      className="text-xs font-semibold text-brand hover:underline inline-flex items-center gap-1 cursor-pointer"
                     >
                       {isViewingInvoice ? (
                         <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -347,7 +421,7 @@ export function PaymentDetailDrawer({
                   <div className="flex items-center gap-2 min-w-0">
                     <Receipt className="w-4 h-4 text-emerald-700 shrink-0" />
                     <span className="text-xs font-semibold text-emerald-900 truncate">
-                      {receiptFileName || 'Disbursement Receipt'}
+                      {receiptFileName || 'Bank Acknowledgement PDF'}
                     </span>
                   </div>
                   <span className="text-[10px] font-semibold text-emerald-700 shrink-0">
@@ -360,9 +434,11 @@ export function PaymentDetailDrawer({
                     <span className="font-medium text-slate-800">{bankName}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-slate-500">UTR Reference</span>
+                    <span className="text-slate-500">Settlement Ref</span>
                     <span className="font-semibold text-slate-900 tabular-nums font-mono">
-                      {payment.utr_number}
+                      {payment.payment_mode === 'CHEQUE'
+                        ? `CHQ #${payment.cheque_number || 'NA'}`
+                        : payment.utr_number || '—'}
                     </span>
                   </div>
                   <div className="flex justify-between items-center pt-2 border-t border-dashed border-slate-200">
@@ -382,7 +458,7 @@ export function PaymentDetailDrawer({
                       ) : (
                         <ExternalLink className="w-3.5 h-3.5" />
                       )}
-                      <span>View Receipt</span>
+                      <span>View Bank Proof</span>
                     </button>
                   </div>
                 </div>

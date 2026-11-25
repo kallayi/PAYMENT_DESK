@@ -1,7 +1,6 @@
 'use client';
 
 import * as React from 'react';
-import { useRouter } from 'next/navigation';
 import {
   Search,
   Download,
@@ -9,12 +8,12 @@ import {
   Calendar,
   X,
   Eye,
-  FileSpreadsheet,
   ChevronRight,
   FilterX,
+  ShieldCheck,
+  Clock,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import {
   Dialog,
   DialogContent,
@@ -28,25 +27,26 @@ import { PaymentDetailDrawer } from '@/components/payments/payment-detail-drawer
 import { formatHumanDate, formatINR, formatDDMMYYYY } from '@/lib/format';
 import { generatePaymentsCSV, downloadCSV } from '@/lib/csv';
 import { toast } from 'sonner';
-import type { CompanyBank, PaymentItem, PaymentStatus } from '@/types/database';
+import type { CompanyBank, PaymentItem } from '@/types/database';
 
 interface HistoryViewProps {
   initialPayments: PaymentItem[];
   banks: CompanyBank[];
-  currentRole: 'OWNER' | 'ACCOUNTANT';
+  companyCode?: string;
+  companyName?: string;
 }
 
 export function HistoryView({
   initialPayments,
   banks,
-  currentRole,
+  companyCode = 'INDFURN',
+  companyName = 'INDFURN',
 }: HistoryViewProps) {
-  const router = useRouter();
-
   // Filters state
   const [searchQuery, setSearchQuery] = React.useState<string>('');
   const [statusFilter, setStatusFilter] = React.useState<string>('ALL');
   const [bankFilter, setBankFilter] = React.useState<string>('ALL');
+  const [auditFilter, setAuditFilter] = React.useState<'ALL' | 'AUDITED' | 'UNAUDITED'>('ALL');
   const [dateFrom, setDateFrom] = React.useState<string>('');
   const [dateTo, setDateTo] = React.useState<string>('');
 
@@ -56,21 +56,19 @@ export function HistoryView({
 
   // Print dialog state
   const [isPrintDialogOpen, setIsPrintDialogOpen] = React.useState<boolean>(false);
+  const [printMode, setPrintMode] = React.useState<'FILTERED' | 'DATE'>('FILTERED');
   const [selectedPrintDate, setSelectedPrintDate] = React.useState<string>('ALL');
 
-  // Available unique dates for the print dialog (excluding drafts)
   const availablePrintDates = React.useMemo(() => {
-    const dates = Array.from(
+    return Array.from(
       new Set(
         initialPayments
           .filter((p) => p.status !== 'DRAFT' && p.status !== 'CANCELLED')
           .map((p) => p.sheet_date)
       )
     ).sort((a, b) => b.localeCompare(a));
-    return dates;
   }, [initialPayments]);
 
-  // Set default print date when dialog opens or dates change
   React.useEffect(() => {
     if (availablePrintDates.length > 0 && selectedPrintDate === 'ALL') {
       setSelectedPrintDate(availablePrintDates[0]);
@@ -82,17 +80,20 @@ export function HistoryView({
     const q = searchQuery.trim().toLowerCase();
 
     return initialPayments.filter((p) => {
-      // Status filter
       if (statusFilter !== 'ALL' && p.status !== statusFilter) {
         return false;
       }
 
-      // Bank filter
       if (bankFilter !== 'ALL' && p.source_bank_id !== bankFilter) {
         return false;
       }
 
-      // Date range filter
+      if (auditFilter === 'AUDITED') {
+        if (p.status !== 'PAID' || !p.audited_at) return false;
+      } else if (auditFilter === 'UNAUDITED') {
+        if (p.status !== 'PAID' || Boolean(p.audited_at)) return false;
+      }
+
       if (dateFrom && p.sheet_date < dateFrom) {
         return false;
       }
@@ -100,46 +101,57 @@ export function HistoryView({
         return false;
       }
 
-      // Text search: vendor name, invoice ref, purpose, UTR
       if (!q) return true;
 
-      const vendorName = p.vendor?.name?.toLowerCase() || '';
-      const invoiceRef = p.invoice_ref?.toLowerCase() || '';
-      const purpose = p.purpose?.toLowerCase() || '';
-      const utr = p.utr_number?.toLowerCase() || '';
+      const partyName = (p.vendor?.party_name || p.vendor?.name || '').toLowerCase();
+      const beneficiaryName = (p.vendor?.beneficiary_name || '').toLowerCase();
+      const invoiceRef = (p.invoice_ref || '').toLowerCase();
+      const purpose = (p.purpose || '').toLowerCase();
+      const utr = (p.utr_number || '').toLowerCase();
+      const cheque = (p.cheque_number || '').toLowerCase();
 
       return (
-        vendorName.includes(q) ||
+        partyName.includes(q) ||
+        beneficiaryName.includes(q) ||
         invoiceRef.includes(q) ||
         purpose.includes(q) ||
-        utr.includes(q)
+        utr.includes(q) ||
+        cheque.includes(q)
       );
     });
-  }, [initialPayments, searchQuery, statusFilter, bankFilter, dateFrom, dateTo]);
+  }, [
+    initialPayments,
+    searchQuery,
+    statusFilter,
+    bankFilter,
+    auditFilter,
+    dateFrom,
+    dateTo,
+  ]);
 
-  // Filtered totals
   const totalFilteredAmount = React.useMemo(() => {
     return filteredPayments.reduce((sum, p) => sum + Number(p.net_payable || 0), 0);
   }, [filteredPayments]);
 
-  // Has active filters
   const hasActiveFilters = Boolean(
     searchQuery ||
-      statusFilter !== 'ALL' ||
-      bankFilter !== 'ALL' ||
-      dateFrom ||
-      dateTo
+    statusFilter !== 'ALL' ||
+    bankFilter !== 'ALL' ||
+    auditFilter !== 'ALL' ||
+    dateFrom ||
+    dateTo
   );
 
   const handleClearFilters = () => {
     setSearchQuery('');
     setStatusFilter('ALL');
     setBankFilter('ALL');
+    setAuditFilter('ALL');
     setDateFrom('');
     setDateTo('');
   };
 
-  // CSV Export
+  // Formula-safe CSV Export
   const handleExportCSV = () => {
     if (filteredPayments.length === 0) {
       toast.error('No payment records to export');
@@ -149,18 +161,33 @@ export function HistoryView({
     try {
       const csv = generatePaymentsCSV(filteredPayments);
       const dateTag = new Date().toISOString().split('T')[0];
-      downloadCSV(`INDFURN_Payments_Export_${dateTag}.csv`, csv);
+      downloadCSV(`${companyCode}_Payments_Export_${dateTag}.csv`, csv);
       toast.success(`Exported ${filteredPayments.length} payment records to CSV`);
     } catch (err: unknown) {
-      toast.error('Failed to export CSV: ' + (err instanceof Error ? err.message : 'Unknown error'));
+      toast.error(
+        'Failed to export CSV: ' + (err instanceof Error ? err.message : 'Unknown error')
+      );
     }
   };
 
-  // Open print form in new tab or navigate
+  // Open Printable A4 PDF Voucher with active filters or chosen sheet date
   const handleConfirmPrint = () => {
     setIsPrintDialogOpen(false);
-    const url = `/print?date=${encodeURIComponent(selectedPrintDate)}`;
-    window.open(url, '_blank');
+    const params = new URLSearchParams();
+
+    if (printMode === 'DATE') {
+      params.set('date', selectedPrintDate);
+    } else {
+      if (statusFilter !== 'ALL') params.set('status', statusFilter);
+      if (bankFilter !== 'ALL') params.set('bank', bankFilter);
+      if (auditFilter !== 'ALL') params.set('audit', auditFilter);
+      if (dateFrom) params.set('from', dateFrom);
+      if (dateTo) params.set('to', dateTo);
+      if (searchQuery.trim()) params.set('q', searchQuery.trim());
+    }
+
+    const qs = params.toString();
+    window.open(qs ? `/print?${qs}` : '/print', '_blank');
   };
 
   const handleOpenDetail = (payment: PaymentItem) => {
@@ -174,10 +201,10 @@ export function HistoryView({
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">
-            Payment History & Audit
+            Payment History & Archive — {companyName}
           </h1>
           <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
-            Search past approvals, verified UTR references, and export audit sheets.
+            Search past approvals, UTR/Cheque references, audit status, and export CSV or A4 PDF vouchers.
           </p>
         </div>
 
@@ -197,10 +224,10 @@ export function HistoryView({
           <Button
             type="button"
             onClick={() => setIsPrintDialogOpen(true)}
-            className="min-h-[44px] sm:min-h-[38px] px-3.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-medium shadow-sm"
+            className="min-h-[44px] sm:min-h-[38px] px-3.5 bg-brand hover:bg-brand-hover text-white text-xs font-semibold shadow-sm"
           >
             <Printer className="w-4 h-4 mr-1.5" />
-            Print Form
+            Print / Save PDF Voucher
           </Button>
         </div>
       </div>
@@ -209,14 +236,14 @@ export function HistoryView({
       <div className="bg-white rounded-xl border border-slate-200 p-3.5 shadow-sm space-y-3">
         <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5">
           {/* Search Input */}
-          <div className="sm:col-span-5 relative">
+          <div className="sm:col-span-4 relative">
             <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search vendor, invoice #, purpose, or UTR..."
-              className="w-full min-h-[44px] sm:min-h-[38px] pl-9 pr-8 rounded-lg border border-slate-200 bg-slate-50/70 focus:bg-white text-xs sm:text-sm text-slate-900 placeholder:text-slate-400 outline-none focus:border-slate-900 transition-colors"
+              placeholder="Search party, beneficiary, invoice #, UTR, cheque..."
+              className="w-full min-h-[44px] sm:min-h-[38px] pl-9 pr-8 rounded-lg border border-slate-200 bg-slate-50/70 focus:bg-white text-xs sm:text-sm text-slate-900 placeholder:text-slate-400 outline-none focus:border-brand transition-colors"
             />
             {searchQuery && (
               <button
@@ -234,10 +261,11 @@ export function HistoryView({
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
-              className="w-full min-h-[44px] sm:min-h-[38px] px-3 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-700 outline-none focus:border-slate-900 transition-colors cursor-pointer"
+              className="w-full min-h-[44px] sm:min-h-[38px] px-3 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-700 outline-none focus:border-brand transition-colors cursor-pointer"
             >
               <option value="ALL">All Statuses</option>
               <option value="DRAFT">Draft</option>
+              <option value="PENDING_VERIFICATION">Pending Verification</option>
               <option value="PENDING_APPROVAL">Pending Approval</option>
               <option value="ON_HOLD">On Hold</option>
               <option value="APPROVED">Ready to Pay</option>
@@ -248,18 +276,31 @@ export function HistoryView({
           </div>
 
           {/* Bank Select */}
-          <div className="sm:col-span-4">
+          <div className="sm:col-span-3">
             <select
               value={bankFilter}
               onChange={(e) => setBankFilter(e.target.value)}
-              className="w-full min-h-[44px] sm:min-h-[38px] px-3 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-700 outline-none focus:border-slate-900 transition-colors cursor-pointer"
+              className="w-full min-h-[44px] sm:min-h-[38px] px-3 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-700 outline-none focus:border-brand transition-colors cursor-pointer"
             >
               <option value="ALL">All Banks</option>
               {banks.map((bank) => (
                 <option key={bank.id} value={bank.id}>
-                  {bank.full_name} ({bank.short_name})
+                  {bank.bank_name || bank.full_name} ({bank.short_code || bank.short_name})
                 </option>
               ))}
+            </select>
+          </div>
+
+          {/* Audit Status Select */}
+          <div className="sm:col-span-2">
+            <select
+              value={auditFilter}
+              onChange={(e) => setAuditFilter(e.target.value as 'ALL' | 'AUDITED' | 'UNAUDITED')}
+              className="w-full min-h-[44px] sm:min-h-[38px] px-3 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-700 outline-none focus:border-brand transition-colors cursor-pointer"
+            >
+              <option value="ALL">Audit: All</option>
+              <option value="AUDITED">Audited Only</option>
+              <option value="UNAUDITED">Unaudited Paid</option>
             </select>
           </div>
         </div>
@@ -269,14 +310,14 @@ export function HistoryView({
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-slate-500 font-medium inline-flex items-center gap-1">
               <Calendar className="w-3.5 h-3.5 text-slate-400" />
-              Date Range:
+              Sheet Date Range:
             </span>
             <div className="flex items-center gap-1.5">
               <input
                 type="date"
                 value={dateFrom}
                 onChange={(e) => setDateFrom(e.target.value)}
-                className="min-h-[36px] px-2.5 rounded-lg border border-slate-200 bg-white text-xs text-slate-700 outline-none focus:border-slate-900 tabular-nums"
+                className="min-h-[36px] px-2.5 rounded-lg border border-slate-200 bg-white text-xs text-slate-700 outline-none focus:border-brand tabular-nums"
                 title="From Date"
               />
               <span className="text-slate-400">to</span>
@@ -284,7 +325,7 @@ export function HistoryView({
                 type="date"
                 value={dateTo}
                 onChange={(e) => setDateTo(e.target.value)}
-                className="min-h-[36px] px-2.5 rounded-lg border border-slate-200 bg-white text-xs text-slate-700 outline-none focus:border-slate-900 tabular-nums"
+                className="min-h-[36px] px-2.5 rounded-lg border border-slate-200 bg-white text-xs text-slate-700 outline-none focus:border-brand tabular-nums"
                 title="To Date"
               />
             </div>
@@ -308,7 +349,11 @@ export function HistoryView({
       {/* Summary Banner */}
       <div className="flex items-center justify-between px-3.5 py-2.5 bg-slate-100/70 border border-slate-200/80 rounded-xl text-xs sm:text-sm">
         <div className="font-medium text-slate-700">
-          Showing <span className="tabular-nums font-semibold text-slate-900">{filteredPayments.length}</span> transaction{filteredPayments.length === 1 ? '' : 's'}
+          Showing{' '}
+          <span className="tabular-nums font-semibold text-slate-900">
+            {filteredPayments.length}
+          </span>{' '}
+          transaction{filteredPayments.length === 1 ? '' : 's'}
         </div>
         <div className="text-slate-600">
           Filtered Net Total:{' '}
@@ -349,18 +394,25 @@ export function HistoryView({
                 <thead>
                   <tr className="bg-slate-50/80 border-b border-slate-200 text-slate-600 font-semibold uppercase tracking-wider text-[11px]">
                     <th className="py-3 px-3.5">Date</th>
-                    <th className="py-3 px-3.5">Vendor</th>
+                    <th className="py-3 px-3.5">Party & Beneficiary</th>
                     <th className="py-3 px-3.5">Invoice / Ref</th>
                     <th className="py-3 px-3.5">Purpose</th>
                     <th className="py-3 px-3.5 text-right">Net Amount</th>
                     <th className="py-3 px-3.5 text-center">Bank</th>
-                    <th className="py-3 px-3.5 text-center">Status</th>
-                    <th className="py-3 px-3.5 text-center">UTR / Ref</th>
-                    <th className="py-3 px-3.5 text-center w-16">Action</th>
+                    <th className="py-3 px-3.5 text-center">Status & Audit</th>
+                    <th className="py-3 px-3.5 text-center">UTR / Cheque</th>
+                    <th className="py-3 px-3.5 text-center w-16">View</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {filteredPayments.map((p) => {
+                    const partyName = p.vendor?.party_name || p.vendor?.name || 'Unknown Party';
+                    const beneficiary = p.vendor?.beneficiary_name || partyName;
+                    const refLabel =
+                      p.payment_mode === 'CHEQUE' && p.cheque_number
+                        ? `CHQ #${p.cheque_number}`
+                        : p.utr_number || '';
+
                     return (
                       <tr
                         key={p.id}
@@ -370,8 +422,13 @@ export function HistoryView({
                         <td className="py-3 px-3.5 tabular-nums text-slate-600 whitespace-nowrap">
                           {formatHumanDate(p.sheet_date)}
                         </td>
-                        <td className="py-3 px-3.5 font-medium text-slate-900 max-w-[180px] truncate">
-                          {p.vendor?.name || 'Unknown Vendor'}
+                        <td className="py-3 px-3.5 max-w-[200px]">
+                          <div className="font-semibold text-slate-900 truncate">{partyName}</div>
+                          {beneficiary !== partyName && (
+                            <div className="text-[10px] text-slate-400 truncate">
+                              A/C: {beneficiary}
+                            </div>
+                          )}
                         </td>
                         <td className="py-3 px-3.5 font-mono text-slate-600 tabular-nums whitespace-nowrap">
                           {p.invoice_ref}
@@ -380,20 +437,38 @@ export function HistoryView({
                           {p.purpose}
                         </td>
                         <td className="py-3 px-3.5 text-right font-semibold tabular-nums text-slate-900 whitespace-nowrap">
-                          {formatINR(p.net_payable)}
+                          <div>{formatINR(p.net_payable)}</div>
+                          <div className="text-[10px] text-slate-400 font-normal">
+                            TDS: {p.tds > 0 ? formatINR(p.tds) : 'NA'}
+                          </div>
                         </td>
                         <td className="py-3 px-3.5 text-center">
                           <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-slate-100 text-slate-700 border border-slate-200">
-                            {p.source_bank?.short_name || 'Bank'}
+                            {p.source_bank?.short_code || p.source_bank?.short_name || 'Bank'}
                           </span>
                         </td>
                         <td className="py-3 px-3.5 text-center">
-                          <PaymentStatusBadge status={p.status} />
+                          <div className="flex flex-col items-center gap-1">
+                            <PaymentStatusBadge status={p.status} />
+                            {p.status === 'PAID' && (
+                              p.audited_at ? (
+                                <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-emerald-700">
+                                  <ShieldCheck className="w-3 h-3" />
+                                  <span>Audited</span>
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-0.5 text-[10px] font-medium text-amber-700">
+                                  <Clock className="w-3 h-3" />
+                                  <span>Unaudited</span>
+                                </span>
+                              )
+                            )}
+                          </div>
                         </td>
                         <td className="py-3 px-3.5 text-center whitespace-nowrap">
-                          {p.utr_number ? (
+                          {refLabel ? (
                             <span className="font-mono text-[11px] font-medium text-slate-800 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
-                              {p.utr_number}
+                              {refLabel}
                             </span>
                           ) : (
                             <span className="text-slate-300 font-mono">—</span>
@@ -420,7 +495,10 @@ export function HistoryView({
                 </tbody>
                 <tfoot>
                   <tr className="bg-slate-50 border-t-2 border-slate-200 font-bold text-slate-900 text-xs">
-                    <td colSpan={4} className="py-3 px-3.5 text-right uppercase tracking-wider text-[11px] text-slate-600">
+                    <td
+                      colSpan={4}
+                      className="py-3 px-3.5 text-right uppercase tracking-wider text-[11px] text-slate-600"
+                    >
                       Filtered Total
                     </td>
                     <td className="py-3 px-3.5 text-right tabular-nums text-slate-900 font-bold">
@@ -438,6 +516,14 @@ export function HistoryView({
           {/* Mobile Stacked Cards (< md) */}
           <div className="md:hidden space-y-2.5">
             {filteredPayments.map((p) => {
+              const partyName = p.vendor?.party_name || p.vendor?.name || 'Unknown Party';
+              const refLabel =
+                p.payment_mode === 'CHEQUE' && p.cheque_number
+                  ? `CHQ #${p.cheque_number}`
+                  : p.utr_number
+                    ? `UTR: ${p.utr_number}`
+                    : null;
+
               return (
                 <div
                   key={p.id}
@@ -447,7 +533,7 @@ export function HistoryView({
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
                       <div className="font-semibold text-sm text-slate-900 truncate">
-                        {p.vendor?.name || 'Unknown Vendor'}
+                        {partyName}
                       </div>
                       <div className="flex items-center gap-2 mt-0.5 text-xs text-slate-500 font-mono">
                         <span>{formatHumanDate(p.sheet_date)}</span>
@@ -459,7 +545,7 @@ export function HistoryView({
                       <div className="font-bold text-sm text-slate-900 tabular-nums">
                         {formatINR(p.net_payable)}
                       </div>
-                      <div className="mt-0.5">
+                      <div className="mt-0.5 flex items-center justify-end gap-1">
                         <PaymentStatusBadge status={p.status} />
                       </div>
                     </div>
@@ -471,13 +557,23 @@ export function HistoryView({
                   </div>
 
                   <div className="flex items-center justify-between pt-1 border-t border-slate-100 text-xs">
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex items-center gap-1.5 flex-wrap">
                       <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-700 border border-slate-200">
-                        {p.source_bank?.short_name || 'Bank'}
+                        {p.source_bank?.short_code || p.source_bank?.short_name || 'Bank'}
                       </span>
-                      {p.utr_number && (
+                      {refLabel && (
                         <span className="font-mono text-[10px] text-slate-700 bg-slate-50 border border-slate-200 px-1.5 py-0.5 rounded truncate max-w-[150px]">
-                          UTR: {p.utr_number}
+                          {refLabel}
+                        </span>
+                      )}
+                      {p.status === 'PAID' && (
+                        <span
+                          className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${p.audited_at
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : 'bg-amber-100 text-amber-800'
+                            }`}
+                        >
+                          {p.audited_at ? 'Audited' : 'Unaudited'}
                         </span>
                       )}
                     </div>
@@ -493,47 +589,72 @@ export function HistoryView({
         </>
       )}
 
-      {/* Detail Drawer (Shared Component) */}
+      {/* Detail Drawer */}
       <PaymentDetailDrawer
         open={isDetailOpen}
         onOpenChange={setIsDetailOpen}
         payment={selectedPayment}
       />
 
-      {/* Print Form Selection Dialog */}
+      {/* Print Voucher Options Dialog */}
       <Dialog open={isPrintDialogOpen} onOpenChange={setIsPrintDialogOpen}>
         <DialogContent className="sm:max-w-md bg-white">
           <DialogHeader>
             <DialogTitle className="text-base font-semibold text-slate-900 flex items-center gap-2">
-              <Printer className="w-5 h-5 text-slate-700" />
-              Print Payment Approval Form
+              <Printer className="w-5 h-5 text-brand" />
+              Print A4 Payment Voucher ({companyName})
             </DialogTitle>
             <DialogDescription className="text-xs text-slate-500">
-              Select which sheet date you want to render in the physical A4 Payment Approval Form layout.
+              Generate an archive-ready A4 Payment Approval & Disbursement Voucher.
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-3 py-3">
-            <div>
-              <label className="block text-xs font-medium text-slate-700 mb-1.5">
-                Sheet Date
-              </label>
-              <select
-                value={selectedPrintDate}
-                onChange={(e) => setSelectedPrintDate(e.target.value)}
-                className="w-full min-h-[44px] px-3 rounded-lg border border-slate-200 bg-white text-sm text-slate-900 outline-none focus:border-slate-900 transition-colors"
+          <div className="space-y-3 py-2">
+            <div className="flex rounded-lg bg-slate-100 p-1">
+              <button
+                type="button"
+                onClick={() => setPrintMode('FILTERED')}
+                className={`flex-1 py-1.5 rounded-md text-xs font-semibold transition-colors ${printMode === 'FILTERED'
+                    ? 'bg-white text-slate-900 shadow-xs'
+                    : 'text-slate-600'
+                  }`}
               >
-                <option value="ALL">All Available Dates (Combined Sheet)</option>
-                {availablePrintDates.map((date) => (
-                  <option key={date} value={date}>
-                    {formatDDMMYYYY(date)}
-                  </option>
-                ))}
-              </select>
+                Current Filtered View ({filteredPayments.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setPrintMode('DATE')}
+                className={`flex-1 py-1.5 rounded-md text-xs font-semibold transition-colors ${printMode === 'DATE'
+                    ? 'bg-white text-slate-900 shadow-xs'
+                    : 'text-slate-600'
+                  }`}
+              >
+                By Specific Sheet Date
+              </button>
             </div>
 
+            {printMode === 'DATE' && (
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1.5">
+                  Select Sheet Date
+                </label>
+                <select
+                  value={selectedPrintDate}
+                  onChange={(e) => setSelectedPrintDate(e.target.value)}
+                  className="w-full min-h-[40px] px-3 rounded-lg border border-slate-200 bg-white text-sm text-slate-900 outline-none focus:border-brand"
+                >
+                  <option value="ALL">All Available Dates</option>
+                  {availablePrintDates.map((date) => (
+                    <option key={date} value={date}>
+                      {formatDDMMYYYY(date)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
             <p className="text-[11px] text-slate-500 leading-relaxed bg-slate-50 p-2.5 rounded-lg border border-slate-200">
-              This will generate the exact printable INDFURN paper sheet with SL No, Party Name, Invoice Ref, Gross, TDS, Net Amount, and sign-off blocks ready for A4 printing or PDF export.
+              Includes {companyName} header, Party & Beneficiary details, Gross/TDS/Net Payable, Bank-wise breakup, UTR/Cheque references, and 4-stage timestamped digital sign-offs.
             </p>
           </div>
 
@@ -542,17 +663,17 @@ export function HistoryView({
               type="button"
               variant="outline"
               onClick={() => setIsPrintDialogOpen(false)}
-              className="text-xs min-h-[40px]"
+              className="text-xs min-h-[38px]"
             >
               Cancel
             </Button>
             <Button
               type="button"
               onClick={handleConfirmPrint}
-              className="text-xs min-h-[40px] bg-slate-900 hover:bg-slate-800 text-white"
+              className="text-xs min-h-[38px] bg-brand hover:bg-brand-hover text-white font-semibold"
             >
               <Printer className="w-4 h-4 mr-1.5" />
-              Open Printable Sheet
+              Open Printable Voucher
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -16,6 +16,10 @@ import {
   X,
   Upload,
   ExternalLink,
+  Search,
+  CheckCircle2,
+  Building2,
+  CreditCard,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -35,6 +39,12 @@ interface PaymentFormSheetProps {
   vendors: Vendor[];
   banks: CompanyBank[];
   editPayment?: PaymentItem | null;
+  initialFromReminder?: {
+    id: string;
+    title: string;
+    estimated_amount: number | null;
+    vendor_id: string | null;
+  } | null;
   onSuccess: (payment: PaymentItem) => void;
   onVendorCreated?: (vendor: Vendor) => void;
 }
@@ -44,6 +54,8 @@ const PURPOSE_PRESETS = [
   'Against PI',
   'Transfer',
   'Electricity Charge',
+  'Office Rent',
+  'Staff Salary',
   'Advance',
 ];
 
@@ -70,6 +82,7 @@ export function PaymentFormSheet({
   vendors: initialVendors,
   banks,
   editPayment,
+  initialFromReminder,
   onSuccess,
   onVendorCreated,
 }: PaymentFormSheetProps) {
@@ -84,6 +97,14 @@ export function PaymentFormSheet({
   const [sheetDate, setSheetDate] = React.useState<string>(getTodayString());
   const [dueDate, setDueDate] = React.useState<string>(getThreeDaysLaterString());
   const [vendorId, setVendorId] = React.useState<string>('');
+  const [vendorSearch, setVendorSearch] = React.useState<string>('');
+  const [isVendorDropdownOpen, setIsVendorDropdownOpen] = React.useState<boolean>(false);
+
+  const [paymentType, setPaymentType] = React.useState<'AGAINST_BILL' | 'ON_ACCOUNT'>('AGAINST_BILL');
+  const [paymentMode, setPaymentMode] = React.useState<'NEFT_RTGS' | 'CHEQUE'>('NEFT_RTGS');
+  const [chequeNumber, setChequeNumber] = React.useState<string>('');
+  const [chequeDate, setChequeDate] = React.useState<string>('');
+
   const [invoiceRef, setInvoiceRef] = React.useState<string>('');
   const [purpose, setPurpose] = React.useState<string>('Against Bill');
   const [amount, setAmount] = React.useState<string>('');
@@ -114,18 +135,41 @@ export function PaymentFormSheet({
 
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
 
-  // Initialize form whenever sheet opens or target payment/bill changes
+  // Selected vendor details for read-only verification strip
+  const selectedVendor = React.useMemo(() => {
+    return vendorsList.find((v) => v.id === vendorId) || null;
+  }, [vendorsList, vendorId]);
+
+  // Filtered vendors for searchable select
+  const filteredVendors = React.useMemo(() => {
+    if (!vendorSearch.trim()) return vendorsList;
+    const q = vendorSearch.toLowerCase();
+    return vendorsList.filter(
+      (v) =>
+        (v.party_name || v.name || '').toLowerCase().includes(q) ||
+        (v.beneficiary_name || '').toLowerCase().includes(q) ||
+        (v.ifsc_code || '').toLowerCase().includes(q)
+    );
+  }, [vendorsList, vendorSearch]);
+
+  // Initialize form whenever sheet opens
   React.useEffect(() => {
     if (!open) return;
 
     setShowQuickAddVendor(false);
     setQuickVendorName('');
     setDuplicateWarning(null);
+    setVendorSearch('');
+    setIsVendorDropdownOpen(false);
 
     if (editPayment) {
       setSheetDate(editPayment.sheet_date || getTodayString());
       setDueDate(editPayment.due_date || getThreeDaysLaterString());
       setVendorId(editPayment.vendor_id);
+      setPaymentType(editPayment.payment_type || 'AGAINST_BILL');
+      setPaymentMode(editPayment.payment_mode || 'NEFT_RTGS');
+      setChequeNumber(editPayment.cheque_number || '');
+      setChequeDate(editPayment.cheque_date || '');
       setInvoiceRef(editPayment.invoice_ref);
       setPurpose(editPayment.purpose || 'Against Bill');
       setAmount(String(editPayment.amount));
@@ -138,10 +182,31 @@ export function PaymentFormSheet({
           ? editPayment.invoice_file_path.split('/').pop() || 'Attached Invoice'
           : null
       );
+    } else if (initialFromReminder) {
+      // Pre-fill from Recurring Reminder
+      setSheetDate(getTodayString());
+      setDueDate(getThreeDaysLaterString());
+      setVendorId(initialFromReminder.vendor_id || (vendorsList[0]?.id ?? ''));
+      setPaymentType('AGAINST_BILL');
+      setPaymentMode('NEFT_RTGS');
+      setChequeNumber('');
+      setChequeDate('');
+      setInvoiceRef('');
+      setPurpose(initialFromReminder.title || 'Against Bill');
+      setAmount(initialFromReminder.estimated_amount ? String(initialFromReminder.estimated_amount) : '');
+      setTds('0');
+      setSourceBankId(banks[0] ? banks[0].id : '');
+      setRemarks('');
+      setInvoiceFilePath(null);
+      setUploadedFileName(null);
     } else {
       setSheetDate(getTodayString());
       setDueDate(getThreeDaysLaterString());
       setVendorId(vendorsList.length > 0 ? vendorsList[0].id : '');
+      setPaymentType('AGAINST_BILL');
+      setPaymentMode('NEFT_RTGS');
+      setChequeNumber('');
+      setChequeDate('');
       setInvoiceRef('');
       setPurpose('Against Bill');
       setAmount('');
@@ -151,11 +216,11 @@ export function PaymentFormSheet({
       setInvoiceFilePath(null);
       setUploadedFileName(null);
     }
-  }, [open, editPayment, vendorsList, banks]);
+  }, [open, editPayment, initialFromReminder, vendorsList, banks]);
 
   // Live duplicate invoice detection with debounce
   React.useEffect(() => {
-    if (!vendorId || !invoiceRef.trim()) {
+    if (!vendorId || !invoiceRef.trim() || paymentType === 'ON_ACCOUNT') {
       setDuplicateWarning(null);
       return;
     }
@@ -174,7 +239,7 @@ export function PaymentFormSheet({
     }, 350);
 
     return () => clearTimeout(timer);
-  }, [vendorId, invoiceRef, editPayment?.id]);
+  }, [vendorId, invoiceRef, paymentType, editPayment?.id]);
 
   // Live computed Net Payable
   const numAmount = parseFloat(amount) || 0;
@@ -189,7 +254,13 @@ export function PaymentFormSheet({
 
     setIsAddingVendor(true);
     try {
-      const res = await createVendor({ name: quickVendorName.trim() });
+      const res = await createVendor({
+        name: quickVendorName.trim(),
+        party_name: quickVendorName.trim(),
+        beneficiary_name: quickVendorName.trim(),
+        account_number: 'PENDING',
+        ifsc_code: 'UTIB0000000',
+      });
       if (!res.success) {
         toast.error(res.error);
         return;
@@ -201,7 +272,7 @@ export function PaymentFormSheet({
       setQuickVendorName('');
       setShowQuickAddVendor(false);
       onVendorCreated?.(newVendor);
-      toast.success(`Vendor "${newVendor.name}" created and selected`);
+      toast.success(`Vendor "${newVendor.party_name || newVendor.name}" created and selected`);
     } catch {
       toast.error('Failed to create new vendor.');
     } finally {
@@ -233,7 +304,7 @@ export function PaymentFormSheet({
 
       setInvoiceFilePath(res.data.filePath);
       setUploadedFileName(res.data.fileName);
-      toast.success('Invoice file attached');
+      toast.success('Invoice file attached.');
     } catch {
       toast.error('Failed to upload file.');
     } finally {
@@ -260,13 +331,14 @@ export function PaymentFormSheet({
   };
 
   // Save / Submit Form Handler
-  const handleSave = async (targetStatus: 'DRAFT' | 'PENDING_APPROVAL') => {
+  const handleSave = async (targetStatus: 'DRAFT' | 'PENDING_VERIFICATION') => {
     if (!vendorId) {
       toast.error('Please select a vendor.');
       return;
     }
 
-    if (!invoiceRef.trim()) {
+    const cleanRef = invoiceRef.trim() || (paymentType === 'ON_ACCOUNT' ? 'On Account' : '');
+    if (!cleanRef) {
       toast.error('Please enter the Invoice / Ref No.');
       return;
     }
@@ -302,8 +374,10 @@ export function PaymentFormSheet({
         sheet_date: sheetDate,
         due_date: dueDate,
         vendor_id: vendorId,
-        invoice_ref: invoiceRef.trim(),
+        invoice_ref: cleanRef,
         purpose: purpose.trim(),
+        payment_type: paymentType,
+        payment_mode: paymentMode,
         amount: numAmount,
         tds: numTds,
         source_bank_id: sourceBankId,
@@ -328,8 +402,8 @@ export function PaymentFormSheet({
 
       toast.success(
         targetStatus === 'DRAFT'
-          ? 'Payment entry saved as Draft'
-          : 'Payment entry submitted for Owner approval'
+          ? 'Payment entry saved as Draft.'
+          : 'Payment submitted for Senior Accountant verification.'
       );
 
       onSuccess(result.data);
@@ -342,7 +416,11 @@ export function PaymentFormSheet({
     }
   };
 
-  const sheetTitle = editPayment ? 'Edit Draft Entry' : 'New Payment Entry';
+  const sheetTitle = editPayment
+    ? 'Edit Draft Entry'
+    : initialFromReminder
+    ? `New Payment Entry (from Reminder)`
+    : 'New Payment Entry';
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -356,12 +434,107 @@ export function PaymentFormSheet({
             {sheetTitle}
           </SheetTitle>
           <SheetDescription className="text-xs text-slate-500">
-            Save as draft or submit directly for Owner approval.
+            Save as draft or submit to Senior Accountant for verification.
           </SheetDescription>
         </SheetHeader>
 
         {/* SCROLLABLE FORM BODY */}
         <div className="flex-1 overflow-y-auto p-5 space-y-4">
+          {/* PAYMENT TYPE & PAYMENT MODE TOGGLES */}
+          <div className="grid grid-cols-2 gap-3 p-2 rounded-lg bg-slate-50 border border-slate-200">
+            <div>
+              <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                Payment Type
+              </label>
+              <div className="flex rounded-md bg-white p-0.5 border border-slate-200">
+                <button
+                  type="button"
+                  onClick={() => setPaymentType('AGAINST_BILL')}
+                  className={`flex-1 py-1 rounded text-xs font-semibold transition-colors ${
+                    paymentType === 'AGAINST_BILL'
+                      ? 'bg-brand text-white shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  Against Bill
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPaymentType('ON_ACCOUNT');
+                    if (!invoiceRef.trim()) setInvoiceRef('On Account');
+                  }}
+                  className={`flex-1 py-1 rounded text-xs font-semibold transition-colors ${
+                    paymentType === 'ON_ACCOUNT'
+                      ? 'bg-brand text-white shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  On Account
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                Disbursement Mode
+              </label>
+              <div className="flex rounded-md bg-white p-0.5 border border-slate-200">
+                <button
+                  type="button"
+                  onClick={() => setPaymentMode('NEFT_RTGS')}
+                  className={`flex-1 py-1 rounded text-xs font-semibold transition-colors ${
+                    paymentMode === 'NEFT_RTGS'
+                      ? 'bg-slate-900 text-white shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  NEFT / RTGS
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPaymentMode('CHEQUE')}
+                  className={`flex-1 py-1 rounded text-xs font-semibold transition-colors ${
+                    paymentMode === 'CHEQUE'
+                      ? 'bg-slate-900 text-white shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  Cheque
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* CHEQUE SPECIFIC FIELDS */}
+          {paymentMode === 'CHEQUE' && (
+            <div className="grid grid-cols-2 gap-3 p-3 rounded-lg bg-amber-50/50 border border-amber-200 animate-in fade-in-50">
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">
+                  Cheque Number
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. 004821"
+                  value={chequeNumber}
+                  onChange={(e) => setChequeNumber(e.target.value)}
+                  className="w-full px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-mono tabular-nums outline-none focus:border-brand"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">
+                  Cheque Date
+                </label>
+                <input
+                  type="date"
+                  value={chequeDate}
+                  onChange={(e) => setChequeDate(e.target.value)}
+                  className="w-full px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs tabular-nums outline-none focus:border-brand"
+                />
+              </div>
+            </div>
+          )}
+
           {/* SHEET DATE & DUE DATE */}
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -377,7 +550,7 @@ export function PaymentFormSheet({
                 required
                 value={sheetDate}
                 onChange={(e) => setSheetDate(e.target.value)}
-                className="w-full min-h-[44px] sm:min-h-[38px] px-3 rounded-lg border border-slate-200 bg-white text-xs sm:text-sm tabular-nums outline-none focus:border-slate-900 focus:ring-1 focus:ring-slate-900 transition-colors"
+                className="w-full min-h-[44px] sm:min-h-[38px] px-3 rounded-lg border border-slate-200 bg-white text-xs sm:text-sm tabular-nums outline-none focus:border-brand focus:ring-1 focus:ring-brand transition-colors"
               />
             </div>
             <div>
@@ -393,41 +566,55 @@ export function PaymentFormSheet({
                 required
                 value={dueDate}
                 onChange={(e) => setDueDate(e.target.value)}
-                className="w-full min-h-[44px] sm:min-h-[38px] px-3 rounded-lg border border-slate-200 bg-white text-xs sm:text-sm tabular-nums outline-none focus:border-slate-900 focus:ring-1 focus:ring-slate-900 transition-colors"
+                className="w-full min-h-[44px] sm:min-h-[38px] px-3 rounded-lg border border-slate-200 bg-white text-xs sm:text-sm tabular-nums outline-none focus:border-brand focus:ring-1 focus:ring-brand transition-colors"
               />
             </div>
           </div>
 
-          {/* VENDOR SELECT + INLINE QUICK ADD */}
+          {/* SEARCHABLE VENDOR SELECT + INLINE VERIFICATION STRIP */}
           <div>
             <div className="flex items-center justify-between mb-1">
-              <label
-                htmlFor="payment-vendor"
-                className="text-xs font-medium text-slate-700"
-              >
-                Vendor / Supplier <span className="text-rose-600">*</span>
+              <label className="text-xs font-medium text-slate-700">
+                Vendor / Party Name <span className="text-rose-600">*</span>
               </label>
               <button
                 type="button"
                 onClick={() => setShowQuickAddVendor(!showQuickAddVendor)}
-                className="text-[11px] font-medium text-blue-600 hover:text-blue-800 hover:underline cursor-pointer"
+                className="text-[11px] font-medium text-brand hover:underline cursor-pointer"
               >
                 + Quick Add Vendor
               </button>
             </div>
 
-            <select
-              id="payment-vendor"
-              value={vendorId}
-              onChange={(e) => setVendorId(e.target.value)}
-              className="w-full min-h-[44px] sm:min-h-[38px] px-3 rounded-lg border border-slate-200 bg-white text-sm text-slate-900 outline-none focus:border-slate-900 focus:ring-1 focus:ring-slate-900 transition-colors"
-            >
-              {vendorsList.map((v) => (
-                <option key={v.id} value={v.id}>
-                  {v.name}
-                </option>
-              ))}
-            </select>
+            <div className="relative">
+              <select
+                id="payment-vendor"
+                value={vendorId}
+                onChange={(e) => setVendorId(e.target.value)}
+                className="w-full min-h-[44px] sm:min-h-[38px] px-3 rounded-lg border border-slate-200 bg-white text-sm text-slate-900 outline-none focus:border-brand focus:ring-1 focus:ring-brand transition-colors"
+              >
+                {vendorsList.map((v) => (
+                  <option key={v.id} value={v.id}>
+                    {v.party_name || v.name} {v.ifsc_code ? `(${v.ifsc_code})` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* READ-ONLY BENEFICIARY VERIFICATION STRIP */}
+            {selectedVendor && (
+              <div className="mt-1.5 p-2 rounded-lg bg-slate-50 border border-slate-200 text-[11px] text-slate-600 flex items-center justify-between gap-2 flex-wrap">
+                <div className="flex items-center gap-1.5 font-medium text-slate-800">
+                  <CreditCard className="w-3.5 h-3.5 text-slate-400" />
+                  <span>Beneficiary: {selectedVendor.beneficiary_name || selectedVendor.party_name || selectedVendor.name}</span>
+                </div>
+                <div className="flex items-center gap-2 font-mono text-slate-500 text-[10px]">
+                  <span>A/C: {selectedVendor.account_number || 'NA'}</span>
+                  <span>•</span>
+                  <span>IFSC: {selectedVendor.ifsc_code || 'NA'}</span>
+                </div>
+              </div>
+            )}
 
             {/* INLINE QUICK ADD VENDOR BOX */}
             {showQuickAddVendor && (
@@ -439,15 +626,15 @@ export function PaymentFormSheet({
                   type="text"
                   autoFocus
                   required
-                  placeholder="New vendor name"
+                  placeholder="New vendor party name"
                   value={quickVendorName}
                   onChange={(e) => setQuickVendorName(e.target.value)}
-                  className="flex-1 h-9 px-2.5 rounded-md border border-slate-200 bg-white text-xs outline-none focus:border-slate-900"
+                  className="flex-1 h-9 px-2.5 rounded-md border border-slate-200 bg-white text-xs outline-none focus:border-brand"
                 />
                 <button
                   type="submit"
                   disabled={isAddingVendor}
-                  className="h-9 px-3 rounded-md bg-slate-900 text-white text-xs font-medium shrink-0 hover:bg-slate-800 transition-colors disabled:opacity-50 flex items-center gap-1.5"
+                  className="h-9 px-3 rounded-md bg-brand text-white text-xs font-medium shrink-0 hover:bg-brand-hover transition-colors disabled:opacity-50 flex items-center gap-1.5"
                 >
                   {isAddingVendor ? (
                     <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -477,21 +664,18 @@ export function PaymentFormSheet({
               id="payment-ref"
               type="text"
               required
-              placeholder="e.g., 0282, INV-8841, On Account, NA"
+              placeholder={paymentType === 'ON_ACCOUNT' ? 'On Account' : 'e.g., 0282, INV-8841'}
               value={invoiceRef}
               onChange={(e) => setInvoiceRef(e.target.value)}
-              className="w-full min-h-[44px] sm:min-h-[38px] px-3 rounded-lg border border-slate-200 bg-white text-sm tabular-nums outline-none focus:border-slate-900 focus:ring-1 focus:ring-slate-900 transition-colors"
+              className="w-full min-h-[44px] sm:min-h-[38px] px-3 rounded-lg border border-slate-200 bg-white text-sm tabular-nums outline-none focus:border-brand focus:ring-1 focus:ring-brand transition-colors"
             />
 
-            {/* LIVE DUPLICATE BANNER */}
+            {/* LIVE DUPLICATE BANNER (NON-BLOCKING) */}
             {duplicateWarning?.isDuplicate && (
               <div className="mt-2 p-2.5 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-800 flex items-start gap-2 animate-in fade-in-50">
                 <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
                 <span>
-                  <strong>Duplicate invoice warning:</strong> This vendor already has an
-                  active entry with the same Invoice / Ref No (
-                  {duplicateWarning.existingPayment?.sheet_date},{' '}
-                  {duplicateWarning.existingPayment?.status}).
+                  <strong>Duplicate invoice detected:</strong> {selectedVendor?.party_name || 'This vendor'} already has an active entry with Invoice / Ref No &ldquo;{duplicateWarning.existingPayment?.invoice_ref}&rdquo; dated {duplicateWarning.existingPayment?.sheet_date} ({duplicateWarning.existingPayment?.status}).
                 </span>
               </div>
             )}
@@ -513,7 +697,7 @@ export function PaymentFormSheet({
                   onClick={() => setPurpose(p)}
                   className={`px-2.5 py-1 rounded-md border text-[11px] font-medium transition-colors cursor-pointer ${
                     purpose === p
-                      ? 'border-slate-900 bg-slate-900 text-white'
+                      ? 'border-brand bg-brand text-white'
                       : 'border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700'
                   }`}
                 >
@@ -528,7 +712,7 @@ export function PaymentFormSheet({
               value={purpose}
               onChange={(e) => setPurpose(e.target.value)}
               placeholder="Specify payment purpose"
-              className="w-full min-h-[44px] sm:min-h-[38px] px-3 rounded-lg border border-slate-200 bg-white text-sm outline-none focus:border-slate-900 focus:ring-1 focus:ring-slate-900 transition-colors"
+              className="w-full min-h-[44px] sm:min-h-[38px] px-3 rounded-lg border border-slate-200 bg-white text-sm outline-none focus:border-brand focus:ring-1 focus:ring-brand transition-colors"
             />
           </div>
 
@@ -539,7 +723,7 @@ export function PaymentFormSheet({
                 htmlFor="payment-amount"
                 className="block text-xs font-medium text-slate-700 mb-1"
               >
-                Amount (₹) <span className="text-rose-600">*</span>
+                Gross Amount (₹) <span className="text-rose-600">*</span>
               </label>
               <input
                 id="payment-amount"
@@ -550,7 +734,7 @@ export function PaymentFormSheet({
                 placeholder="0.00"
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
-                className="w-full min-h-[44px] sm:min-h-[38px] px-3 rounded-lg border border-slate-200 bg-white text-sm font-medium tabular-nums outline-none focus:border-slate-900 focus:ring-1 focus:ring-slate-900 transition-colors"
+                className="w-full min-h-[44px] sm:min-h-[38px] px-3 rounded-lg border border-slate-200 bg-white text-sm font-medium tabular-nums outline-none focus:border-brand focus:ring-1 focus:ring-brand transition-colors"
               />
             </div>
             <div>
@@ -558,7 +742,7 @@ export function PaymentFormSheet({
                 htmlFor="payment-tds"
                 className="block text-xs font-medium text-slate-700 mb-1"
               >
-                TDS (₹)
+                TDS Deduction (₹)
               </label>
               <input
                 id="payment-tds"
@@ -571,7 +755,7 @@ export function PaymentFormSheet({
                 className={`w-full min-h-[44px] sm:min-h-[38px] px-3 rounded-lg border bg-white text-sm tabular-nums outline-none focus:ring-1 transition-colors ${
                   isTdsInvalid
                     ? 'border-rose-400 focus:border-rose-600 focus:ring-rose-500'
-                    : 'border-slate-200 focus:border-slate-900 focus:ring-slate-900'
+                    : 'border-slate-200 focus:border-brand focus:ring-brand'
                 }`}
               />
             </div>
@@ -579,7 +763,7 @@ export function PaymentFormSheet({
 
           {/* LIVE NET PAYABLE BOX */}
           <div className="px-3.5 py-2.5 rounded-lg bg-slate-50 border border-slate-200 flex items-center justify-between text-xs">
-            <span className="text-slate-500 font-medium">Net Payable</span>
+            <span className="text-slate-500 font-medium">Net Payable to Beneficiary</span>
             <span
               className={`text-sm font-bold tabular-nums ${
                 isTdsInvalid ? 'text-rose-600' : 'text-slate-900'
@@ -601,20 +785,24 @@ export function PaymentFormSheet({
               id="payment-bank"
               value={sourceBankId}
               onChange={(e) => setSourceBankId(e.target.value)}
-              className="w-full min-h-[44px] sm:min-h-[38px] px-3 rounded-lg border border-slate-200 bg-white text-sm text-slate-900 outline-none focus:border-slate-900 focus:ring-1 focus:ring-slate-900 transition-colors"
+              className="w-full min-h-[44px] sm:min-h-[38px] px-3 rounded-lg border border-slate-200 bg-white text-sm text-slate-900 outline-none focus:border-brand focus:ring-1 focus:ring-brand transition-colors"
             >
-              {banks.map((b) => (
-                <option key={b.id} value={b.id}>
-                  {b.full_name} ({b.short_name})
-                </option>
-              ))}
+              {banks.map((b) => {
+                const shortCode = b.short_code || b.short_name;
+                const bankName = b.bank_name || b.full_name;
+                return (
+                  <option key={b.id} value={b.id}>
+                    {bankName} ({shortCode}) — Bal: {formatINR(b.available_balance ?? 0)}
+                  </option>
+                );
+              })}
             </select>
           </div>
 
           {/* INVOICE ATTACHMENT */}
           <div>
             <label className="block text-xs font-medium text-slate-700 mb-1">
-              Invoice File (PDF / Image)
+              Invoice Attachment (PDF or Image, max 5 MB)
             </label>
             <input
               ref={fileInputRef}
@@ -637,10 +825,10 @@ export function PaymentFormSheet({
                     type="button"
                     onClick={handleViewAttachedFile}
                     disabled={isViewingFile}
-                    className="text-xs font-medium text-blue-600 hover:text-blue-800 hover:underline flex items-center gap-1 cursor-pointer"
+                    className="text-xs font-medium text-brand hover:underline flex items-center gap-1 cursor-pointer"
                   >
                     {isViewingFile ? (
-                      <Loader2 className="w-3 h-3 animate-spin text-blue-600" />
+                      <Loader2 className="w-3 h-3 animate-spin text-brand" />
                     ) : (
                       <ExternalLink className="w-3 h-3" />
                     )}
@@ -664,7 +852,7 @@ export function PaymentFormSheet({
                 <div className="flex items-center gap-2 text-xs text-slate-500">
                   <Paperclip className="w-4 h-4 text-slate-400" />
                   <span>
-                    {isUploadingFile ? 'Uploading file...' : 'No file selected (optional)'}
+                    {isUploadingFile ? 'Uploading file...' : 'No bill file attached (optional)'}
                   </span>
                 </div>
                 <button
@@ -678,7 +866,7 @@ export function PaymentFormSheet({
                   ) : (
                     <Upload className="w-3 h-3 text-slate-500" />
                   )}
-                  <span>Choose File</span>
+                  <span>Choose Bill</span>
                 </button>
               </div>
             )}
@@ -697,8 +885,8 @@ export function PaymentFormSheet({
               type="text"
               value={remarks}
               onChange={(e) => setRemarks(e.target.value)}
-              placeholder="Optional notes for Owner or audit"
-              className="w-full min-h-[44px] sm:min-h-[38px] px-3 rounded-lg border border-slate-200 bg-white text-sm outline-none focus:border-slate-900 focus:ring-1 focus:ring-slate-900 transition-colors"
+              placeholder="Optional notes for verification or audit"
+              className="w-full min-h-[44px] sm:min-h-[38px] px-3 rounded-lg border border-slate-200 bg-white text-sm outline-none focus:border-brand focus:ring-1 focus:ring-brand transition-colors"
             />
           </div>
         </div>
@@ -719,13 +907,13 @@ export function PaymentFormSheet({
           <button
             type="button"
             disabled={isSavingDraft || isSubmitting}
-            onClick={() => handleSave('PENDING_APPROVAL')}
-            className="flex-1 min-h-[44px] sm:min-h-[40px] px-3 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-medium transition-colors shadow-xs flex items-center justify-center gap-1.5 disabled:opacity-50 cursor-pointer"
+            onClick={() => handleSave('PENDING_VERIFICATION')}
+            className="flex-1 min-h-[44px] sm:min-h-[40px] px-3 rounded-lg bg-brand hover:bg-brand-hover text-white text-xs font-semibold transition-colors shadow-xs flex items-center justify-center gap-1.5 disabled:opacity-50 cursor-pointer"
           >
             {isSubmitting ? (
               <Loader2 className="w-3.5 h-3.5 animate-spin text-white" />
             ) : null}
-            <span>Submit for Approval</span>
+            <span>Save & Submit for Verification</span>
           </button>
         </div>
       </SheetContent>

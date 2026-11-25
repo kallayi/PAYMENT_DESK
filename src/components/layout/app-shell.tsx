@@ -11,13 +11,23 @@ import {
   Building2,
   LogOut,
   Loader2,
+  Bell,
+  CalendarClock,
+  ShieldCheck,
 } from 'lucide-react';
 import { logout } from '@/actions/auth';
-import type { Profile, UserRole } from '@/types/database';
+import type { Company, Notification, Profile, UserRole } from '@/types/database';
+import { PaymentDeskLogo } from '@/components/layout/payment-desk-logo';
+import { CompanySwitcher } from '@/components/layout/company-switcher';
+import { NotificationBell } from '@/components/layout/notification-bell';
 
 interface AppShellProps {
   profile: Profile;
   pendingCount?: number;
+  allowedCompanies?: Company[];
+  activeCompany?: Company | null;
+  initialNotifications?: Notification[];
+  initialUnreadCount?: number;
   children: React.ReactNode;
 }
 
@@ -29,41 +39,90 @@ interface NavItem {
   badge?: number;
 }
 
-function getRoleLabel(role: UserRole): string {
+function getRoleDisplay(role: UserRole) {
   switch (role) {
-    case 'OWNER':
-      return 'Owner / Admin';
-    case 'ACCOUNTANT':
-      return 'Accountant';
+    case 'APPROVER':
+      return { label: 'Approver', color: 'bg-[#7F1D1D] text-white' };
+    case 'VERIFIER':
+      return { label: 'Verifier', color: 'bg-amber-100 text-amber-900 border border-amber-200' };
+    case 'PREPARER':
+      return { label: 'Preparer', color: 'bg-blue-50 text-blue-700 border border-blue-200' };
+    case 'AUDITOR':
+      return { label: 'Auditor', color: 'bg-purple-100 text-purple-900 border border-purple-200' };
     default:
-      return role;
+      return { label: role, color: 'bg-slate-100 text-slate-800' };
   }
 }
 
-function getNavItems(role: UserRole, pendingCount: number = 0): NavItem[] {
-  if (role === 'OWNER') {
-    return [
+function getNavItems(
+  role: UserRole,
+  pendingCount: number = 0,
+  isAdmin: boolean = false
+): NavItem[] {
+  // 1. PREPARER: Payments, Vendors, Reminders, History
+  if (role === 'PREPARER') {
+    const items: NavItem[] = [
+      { id: 'payments', label: 'Payments', href: '/payments', icon: Receipt, badge: pendingCount },
+      { id: 'vendors', label: 'Vendors', href: '/vendors', icon: Building2 },
+      { id: 'reminders', label: 'Reminders', href: '/reminders', icon: CalendarClock },
+      { id: 'history', label: 'History', href: '/history', icon: Clock },
+    ];
+    if (isAdmin) {
+      items.push({ id: 'settings', label: 'Settings', href: '/settings', icon: Settings });
+    }
+    return items;
+  }
+
+  // 2. VERIFIER: Verify Queue, History
+  if (role === 'VERIFIER') {
+    const items: NavItem[] = [
+      { id: 'verify', label: 'Verify Queue', href: '/verify', icon: ShieldCheck, badge: pendingCount },
+      { id: 'history', label: 'History', href: '/history', icon: Clock },
+    ];
+    if (isAdmin) {
+      items.push({ id: 'settings', label: 'Settings', href: '/settings', icon: Settings });
+    }
+    return items;
+  }
+
+  // 3. APPROVER: Approvals, History
+  if (role === 'APPROVER') {
+    const items: NavItem[] = [
       { id: 'approvals', label: 'Approvals', href: '/approvals', icon: CheckCircle2, badge: pendingCount },
       { id: 'history', label: 'History', href: '/history', icon: Clock },
-      { id: 'vendors', label: 'Vendors', href: '/vendors', icon: Building2 },
-      { id: 'settings', label: 'Settings', href: '/settings', icon: Settings },
     ];
+    if (isAdmin) {
+      items.push({ id: 'settings', label: 'Settings', href: '/settings', icon: Settings });
+    }
+    return items;
   }
-  // ACCOUNTANT
-  return [
-    { id: 'payments', label: 'Payments', href: '/payments', icon: Receipt, badge: pendingCount },
-    { id: 'history', label: 'History', href: '/history', icon: Clock },
-    { id: 'vendors', label: 'Vendors', href: '/vendors', icon: Building2 },
-  ];
+
+  // 4. AUDITOR: Audit Queue, History
+  if (role === 'AUDITOR') {
+    const items: NavItem[] = [
+      { id: 'audit', label: 'Audit Queue', href: '/audit', icon: Clock, badge: pendingCount },
+      { id: 'history', label: 'History', href: '/history', icon: Clock },
+    ];
+    if (isAdmin) {
+      items.push({ id: 'settings', label: 'Settings', href: '/settings', icon: Settings });
+    }
+    return items;
+  }
+
+  return [];
 }
 
-function getPageTitle(pathname: string): string {
-  if (pathname.startsWith('/approvals')) return 'Approvals';
-  if (pathname.startsWith('/payments')) return 'Payments';
-  if (pathname.startsWith('/history')) return 'History';
-  if (pathname.startsWith('/vendors')) return 'Vendors';
-  if (pathname.startsWith('/settings')) return 'Settings';
-  return 'INDFURN';
+function getPageTitle(pathname: string, activeCompanyName?: string): string {
+  const companyPrefix = activeCompanyName ? `${activeCompanyName} · ` : '';
+  if (pathname.startsWith('/approvals')) return `${companyPrefix}Approvals`;
+  if (pathname.startsWith('/verify')) return `${companyPrefix}Verify Queue`;
+  if (pathname.startsWith('/audit')) return `${companyPrefix}Audit Queue`;
+  if (pathname.startsWith('/reminders')) return `${companyPrefix}Reminders`;
+  if (pathname.startsWith('/payments')) return `${companyPrefix}Payments`;
+  if (pathname.startsWith('/history')) return `${companyPrefix}History`;
+  if (pathname.startsWith('/vendors')) return `${companyPrefix}Vendors`;
+  if (pathname.startsWith('/settings')) return 'Admin Settings';
+  return activeCompanyName || 'Payment Desk';
 }
 
 function isItemActive(item: NavItem, pathname: string): boolean {
@@ -74,7 +133,7 @@ function DesktopNavLinks({ navItems }: { navItems: NavItem[] }) {
   const pathname = usePathname();
 
   return (
-    <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
+    <nav className="flex-1 px-3 py-3 space-y-1 overflow-y-auto">
       {navItems.map((item) => {
         const Icon = item.icon;
         const active = isItemActive(item, pathname);
@@ -84,20 +143,20 @@ function DesktopNavLinks({ navItems }: { navItems: NavItem[] }) {
             key={item.id}
             href={item.href}
             prefetch={true}
-            className={`w-full h-10 px-3 rounded-lg text-sm font-medium flex items-center justify-between transition-colors ${
+            className={`w-full h-10 px-3 rounded-lg text-xs font-medium flex items-center justify-between transition-colors ${
               active
-                ? 'bg-slate-100 text-slate-900'
+                ? 'bg-rose-50 text-[#7F1D1D] font-bold border-l-2 border-[#7F1D1D]'
                 : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
             }`}
           >
             <span className="flex items-center gap-2.5">
-              <Icon className={`w-4 h-4 ${active ? 'text-slate-900' : 'text-slate-400'}`} />
+              <Icon className={`w-4 h-4 ${active ? 'text-[#7F1D1D]' : 'text-slate-400'}`} />
               <span>{item.label}</span>
             </span>
             {item.badge !== undefined && item.badge > 0 && (
               <span
-                className={`tabular-nums text-[11px] font-semibold px-1.5 py-0.5 rounded-full ${
-                  active ? 'bg-slate-900 text-white' : 'bg-amber-100 text-amber-800'
+                className={`tabular-nums text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
+                  active ? 'bg-[#7F1D1D] text-white' : 'bg-amber-100 text-amber-900 border border-amber-200'
                 }`}
               >
                 {item.badge}
@@ -131,13 +190,13 @@ function MobileBottomNavLinks({
             href={item.href}
             prefetch={true}
             className={`flex flex-col items-center justify-center gap-1 text-[11px] font-medium transition-colors ${
-              active ? 'text-slate-900 font-semibold' : 'text-slate-400 hover:text-slate-700'
+              active ? 'text-[#7F1D1D] font-bold' : 'text-slate-400 hover:text-slate-700'
             }`}
           >
             <div className="relative">
-              <Icon className="w-5 h-5" />
+              <Icon className={`w-5 h-5 ${active ? 'text-[#7F1D1D]' : 'text-slate-400'}`} />
               {item.badge !== undefined && item.badge > 0 && (
-                <span className="absolute -top-1.5 -right-2.5 min-w-[16px] h-4 px-1 rounded-full bg-amber-600 text-white text-[10px] font-semibold tabular-nums flex items-center justify-center">
+                <span className="absolute -top-1.5 -right-2.5 min-w-[16px] h-4 px-1 rounded-full bg-[#7F1D1D] text-white text-[10px] font-bold tabular-nums flex items-center justify-center">
                   {item.badge}
                 </span>
               )}
@@ -150,20 +209,30 @@ function MobileBottomNavLinks({
   );
 }
 
-export function AppShell({ profile, pendingCount = 0, children }: AppShellProps) {
+export function AppShell({
+  profile,
+  pendingCount = 0,
+  allowedCompanies = [],
+  activeCompany = null,
+  initialNotifications = [],
+  initialUnreadCount = 0,
+  children,
+}: AppShellProps) {
   const pathname = usePathname();
   const [isLoggingOut, startLogoutTransition] = React.useTransition();
 
-  const navItems = getNavItems(profile.role, pendingCount);
-  const roleLabel = getRoleLabel(profile.role);
-  const pageTitle = getPageTitle(pathname);
+  const navItems = getNavItems(profile.role, pendingCount, profile.is_admin);
+  const roleDisplay = getRoleDisplay(profile.role);
+  const pageTitle = getPageTitle(pathname, activeCompany?.name);
 
   const bottomGridCols =
-    navItems.length === 2
+    navItems.length <= 2
       ? 'grid-cols-2'
       : navItems.length === 3
         ? 'grid-cols-3'
-        : 'grid-cols-4';
+        : navItems.length === 4
+          ? 'grid-cols-4'
+          : 'grid-cols-5';
 
   function handleLogout() {
     startLogoutTransition(async () => {
@@ -173,34 +242,60 @@ export function AppShell({ profile, pendingCount = 0, children }: AppShellProps)
 
   return (
     <div className="min-h-screen flex bg-[#F8FAFC]">
-      {/* DESKTOP SLIM LEFT SIDEBAR (w-56, lg+) */}
-      <aside className="hidden lg:flex lg:flex-col lg:w-56 lg:fixed lg:inset-y-0 bg-white border-r border-slate-200 z-30">
-        {/* Brand Wordmark */}
-        <div className="h-14 px-5 flex items-center border-b border-slate-200/80">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src="/logo.png"
-            alt="INDFURN Logo"
-            className="h-8 max-h-[34px] w-auto object-contain"
-          />
+      {/* DESKTOP SLIM LEFT SIDEBAR (w-60, lg+) */}
+      <aside className="hidden lg:flex lg:flex-col lg:w-60 lg:fixed lg:inset-y-0 bg-white border-r border-slate-200 z-30">
+        {/* Brand Wordmark & Active Company Switcher */}
+        <div className="h-16 px-4 flex flex-col justify-center border-b border-slate-200/80">
+          <div className="flex items-center justify-between gap-2">
+            <PaymentDeskLogo size="sm" showWordmark={true} />
+            <CompanySwitcher
+              allowedCompanies={allowedCompanies}
+              activeCompany={activeCompany}
+              compact={true}
+            />
+          </div>
         </div>
 
-        {/* Role Navigation Links with Suspense Boundary */}
-        <React.Suspense fallback={<nav className="flex-1 px-3 py-4 space-y-1" />}>
+        {/* Role-Appropriate Navigation Links */}
+        <React.Suspense fallback={<nav className="flex-1 px-3 py-3 space-y-1" />}>
           <DesktopNavLinks navItems={navItems} />
         </React.Suspense>
 
-        {/* User Profile & Sign Out */}
-        <div className="p-3 border-t border-slate-200/80">
-          <div className="px-2.5 py-2 mb-1">
-            <div className="text-xs font-semibold text-slate-900 truncate">{profile.full_name}</div>
-            <div className="text-[11px] text-slate-500">{roleLabel}</div>
+        {/* User Profile & Sign Out Footer */}
+        <div className="p-3 border-t border-slate-200/80 bg-slate-50/50">
+          <div className="px-2.5 py-1.5 mb-1.5">
+            <div className="flex items-center justify-between gap-1.5 mb-0.5">
+              <span className="text-xs font-bold text-slate-900 truncate">
+                {profile.full_name}
+              </span>
+              <div className="flex items-center gap-1 shrink-0">
+                {profile.is_admin && (
+                  <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-slate-900 text-white">
+                    Admin
+                  </span>
+                )}
+                <span
+                  className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${roleDisplay.color}`}
+                >
+                  {roleDisplay.label}
+                </span>
+              </div>
+            </div>
+            <div className="text-[11px] text-slate-500 truncate">
+              {profile.role === 'APPROVER'
+                ? 'Owner Review & Approval'
+                : profile.role === 'PREPARER'
+                  ? 'Accounts Preparation & Execution'
+                  : profile.role === 'VERIFIER'
+                    ? 'Senior Accountant Verification'
+                    : 'Read-Only Financial Auditor'}
+            </div>
           </div>
           <button
             type="button"
             onClick={handleLogout}
             disabled={isLoggingOut}
-            className="w-full h-9 px-2.5 rounded-lg text-xs font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900 flex items-center gap-2 transition-colors disabled:opacity-50"
+            className="w-full h-8 px-2.5 rounded-lg text-xs font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900 flex items-center gap-2 transition-colors disabled:opacity-50 cursor-pointer"
           >
             {isLoggingOut ? (
               <Loader2 className="w-3.5 h-3.5 text-slate-400 animate-spin" />
@@ -213,34 +308,58 @@ export function AppShell({ profile, pendingCount = 0, children }: AppShellProps)
       </aside>
 
       {/* MAIN COLUMN */}
-      <div className="flex-1 lg:pl-56 flex flex-col min-w-0 pb-20 lg:pb-8">
-        {/* MOBILE MINIMAL TOP BAR (h-14, < lg) */}
-        <header className="lg:hidden sticky top-0 z-20 h-14 bg-white/95 backdrop-blur border-b border-slate-200 px-4 flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src="/logo.png"
-              alt="INDFURN"
-              className="h-7 w-auto object-contain"
-            />
-            <span className="text-slate-200">|</span>
-            <span className="text-sm font-semibold text-slate-900">{pageTitle}</span>
+      <div className="flex-1 lg:pl-60 flex flex-col min-w-0 pb-20 lg:pb-8">
+        {/* TOP HEADER BAR (Desktop & Mobile) */}
+        <header className="sticky top-0 z-20 h-14 bg-white/95 backdrop-blur-xs border-b border-slate-200 px-4 sm:px-6 flex items-center justify-between">
+          {/* Left: Mobile Logo & Title */}
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="lg:hidden">
+              <PaymentDeskLogo size="sm" showWordmark={false} />
+            </div>
+            <span className="text-sm font-bold text-slate-900 truncate">
+              {pageTitle}
+            </span>
           </div>
+
+          {/* Right: Company Switcher + Notification Bell + User Role + Sign Out */}
           <div className="flex items-center gap-2">
-            <span className="text-xs text-slate-500 hidden sm:inline">{profile.full_name}</span>
+            <CompanySwitcher
+              allowedCompanies={allowedCompanies}
+              activeCompany={activeCompany}
+            />
+
+            <NotificationBell
+              userId={profile.id}
+              initialNotifications={initialNotifications}
+              initialUnreadCount={initialUnreadCount}
+            />
+
+            <div className="hidden sm:flex items-center gap-1.5">
+              {profile.is_admin && (
+                <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-slate-900 text-white">
+                  Admin
+                </span>
+              )}
+              <span
+                className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${roleDisplay.color}`}
+              >
+                {roleDisplay.label}
+              </span>
+            </div>
+
             <button
               type="button"
               onClick={handleLogout}
               disabled={isLoggingOut}
               title="Sign Out"
-              className="min-h-[44px] px-2.5 rounded-lg text-xs font-medium text-slate-600 hover:text-slate-900 flex items-center gap-1.5 transition-colors disabled:opacity-50"
+              className="min-h-[38px] px-2.5 rounded-lg text-xs font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 flex items-center gap-1.5 transition-colors disabled:opacity-50 cursor-pointer"
             >
               {isLoggingOut ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
               ) : (
-                <LogOut className="w-4 h-4" />
+                <LogOut className="w-3.5 h-3.5" />
               )}
-              <span className="text-xs">Sign Out</span>
+              <span className="hidden sm:inline text-xs">Sign Out</span>
             </button>
           </div>
         </header>
