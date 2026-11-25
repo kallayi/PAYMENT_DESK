@@ -11,7 +11,7 @@ import {
 const exportRequestSchema = z.object({
   paymentIds: z.array(z.string().uuid()).min(1, 'At least one approved payment must be selected.'),
   bankId: z.string().uuid('A valid source bank ID is required.'),
-  batchType: z.enum(['same_bank', 'other_bank']),
+  batchType: z.enum(['same_bank', 'other_bank', 'combined']),
 });
 
 export async function POST(req: NextRequest) {
@@ -52,10 +52,12 @@ export async function POST(req: NextRequest) {
     const { paymentIds, bankId, batchType } = parsed.data;
     const supabase = await createClient();
 
-    // Verify source bank belongs to activeCompany
+    // Verify source bank belongs to activeCompany (explicitly select full_debit_account_number for PREPARER/is_admin)
     const { data: bank, error: bankError } = await supabase
       .from('company_banks')
-      .select('id, company_id, short_code, short_name, ifsc_prefix, bank_name, full_name')
+      .select(
+        'id, company_id, short_code, short_name, ifsc_prefix, bank_name, full_name, full_debit_account_number'
+      )
       .eq('id', bankId)
       .eq('company_id', activeCompany.id)
       .single();
@@ -69,12 +71,13 @@ export async function POST(req: NextRequest) {
 
     const bankShortCode = (bank.short_code || bank.short_name || 'BANK').trim().toUpperCase();
     const bankIfscPrefix = (bank.ifsc_prefix || '').trim().toUpperCase();
+    const fullDebitAccount = (bank.full_debit_account_number || '').trim();
 
     // Query APPROVED, NEFT_RTGS items scoped strictly to activeCompany and selected bank
     const { data: items, error: itemsError } = await supabase
       .from('payment_items')
       .select(
-        'id, invoice_ref, purpose, sheet_date, net_payable, payment_mode, vendor:vendors(id, name, party_name, beneficiary_name, account_number, ifsc_code)'
+        'id, invoice_ref, purpose, sheet_date, net_payable, payment_mode, vendor:vendors(id, name, party_name, beneficiary_name, account_number, ifsc_code, whatsapp_number)'
       )
       .eq('company_id', activeCompany.id)
       .eq('status', 'APPROVED')
@@ -118,13 +121,20 @@ export async function POST(req: NextRequest) {
         sheetDate: item.sheet_date || new Date().toISOString().split('T')[0],
         sourceBankShortCode: bankShortCode,
         sourceBankIfscPrefix: bankIfscPrefix,
+        sourceBankDebitAccount: fullDebitAccount,
+        whatsappNumber: v.whatsapp_number || null,
         companyCode,
         paymentMode: item.payment_mode,
       };
     });
 
     const split = splitRowsByIfsc(exportRows, bankIfscPrefix);
-    const targetRows = batchType === 'same_bank' ? split.sameBankRows : split.otherBankRows;
+    const targetRows =
+      batchType === 'combined'
+        ? exportRows
+        : batchType === 'same_bank'
+          ? split.sameBankRows
+          : split.otherBankRows;
 
     if (targetRows.length === 0) {
       return NextResponse.json(
@@ -132,7 +142,9 @@ export async function POST(req: NextRequest) {
           error:
             batchType === 'same_bank'
               ? `No Same-Bank (${bankIfscPrefix}) entries found in this selection.`
-              : `No Other-Bank (NEFT/RTGS) entries found in this selection.`,
+              : batchType === 'other_bank'
+                ? `No Other-Bank (NEFT/RTGS) entries found in this selection.`
+                : `No eligible NEFT/RTGS entries found in this selection.`,
         },
         { status: 400 }
       );
@@ -140,13 +152,20 @@ export async function POST(req: NextRequest) {
 
     const adapter = getBankTemplateAdapter(bankShortCode, bankIfscPrefix);
     const workbookBuffer =
-      batchType === 'same_bank'
-        ? await adapter.buildSameBankWorkbook(targetRows)
-        : await adapter.buildOtherBankWorkbook(targetRows);
+      batchType === 'combined'
+        ? await adapter.buildCombinedWorkbook(targetRows)
+        : batchType === 'same_bank'
+          ? await adapter.buildSameBankWorkbook(targetRows)
+          : await adapter.buildOtherBankWorkbook(targetRows);
 
     const todayStr = new Date().toISOString().split('T')[0];
-    const batchLabel = batchType === 'same_bank' ? 'SAME' : 'OTHER';
-    const filename = `${companyCode}_${bankShortCode}_${batchLabel}_BANK_${todayStr}.xlsx`;
+    const batchLabel =
+      batchType === 'combined'
+        ? 'ALL_BANKS'
+        : batchType === 'same_bank'
+          ? 'SAME_BANK'
+          : 'OTHER_BANK';
+    const filename = `${companyCode}_${bankShortCode}_${batchLabel}_${todayStr}.xlsx`;
 
     return new NextResponse(new Uint8Array(workbookBuffer), {
       status: 200,

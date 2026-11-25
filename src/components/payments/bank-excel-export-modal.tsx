@@ -96,7 +96,11 @@ export function BankExcelExportModal({
 
   const handleDownload = async (batchType: BankBatchType) => {
     const targetRows =
-      batchType === 'same_bank' ? splitResult.sameBankRows : splitResult.otherBankRows;
+      batchType === 'combined'
+        ? [...splitResult.sameBankRows, ...splitResult.otherBankRows]
+        : batchType === 'same_bank'
+          ? splitResult.sameBankRows
+          : splitResult.otherBankRows;
 
     if (targetRows.length === 0 || !selectedBankId) return;
 
@@ -143,7 +147,7 @@ export function BankExcelExportModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl max-h-[90vh] flex flex-col">
+      <DialogContent className="max-w-3xl max-h-[90dvh] flex flex-col">
         <DialogHeader>
           <div className="flex items-center gap-2">
             <div className="p-2 rounded-lg bg-brand/10 text-brand">
@@ -193,10 +197,58 @@ export function BankExcelExportModal({
             </div>
           )}
 
+          {/* COMBINED ALL-BANKS DOWNLOAD BANNER */}
+          {(() => {
+            const combinedCount =
+              splitResult.sameBankRows.length + splitResult.otherBankRows.length;
+            const combinedTotal =
+              splitResult.sameBankTotal + splitResult.otherBankTotal;
+            const hasDebitAccount = Boolean(selectedBank?.full_debit_account_number?.trim());
+
+            return (
+              <div className="p-4 rounded-xl border border-brand/25 bg-brand/5 space-y-2.5">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold text-slate-900">
+                        Combined Bulk Upload (All Banks · {bankShortCode} Neo 31-Col Format)
+                      </span>
+                      <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-white border border-brand/20 text-brand tabular-nums">
+                        {combinedCount} item{combinedCount === 1 ? '' : 's'}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-600 mt-0.5">
+                      Downloads IFT (Mode &lsquo;I&rsquo;) + NEFT + RTGS rows together in the official &ldquo;Default - Across All Banks&rdquo; template — {formatINR(combinedTotal)}
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled={combinedCount === 0 || downloadingType !== null}
+                    onClick={() => handleDownload('combined')}
+                    className="bg-brand hover:bg-brand-hover text-white text-xs font-semibold shrink-0"
+                  >
+                    {downloadingType === 'combined' ? (
+                      <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                    ) : (
+                      <Download className="w-3.5 h-3.5 mr-1.5" />
+                    )}
+                    <span>Download Combined (All Banks)</span>
+                  </Button>
+                </div>
+                {!hasDebitAccount && (
+                  <p className="text-[11px] text-amber-700 bg-amber-50/90 border border-amber-200 rounded-md px-2.5 py-1.5">
+                    Note: Full Corporate Debit A/C is not set for {bankShortCode} in Settings; column 1 will be left blank so you can fill it or set it once in Settings → Company Banks.
+                  </p>
+                )}
+              </div>
+            );
+          })()}
+
           {/* SPLIT BATCH SUMMARY & DOWNLOAD CARDS */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {/* Same-Bank Card */}
-            <div className="p-4 rounded-xl border border-slate-200 bg-white space-y-3 shadow-xs flex flex-col justify-between">
+            <div className="p-4 rounded-xl border border-slate-200 bg-white space-y-3 shadow-sm flex flex-col justify-between">
               <div>
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold text-slate-900">
@@ -231,7 +283,7 @@ export function BankExcelExportModal({
             </div>
 
             {/* Other-Bank Card */}
-            <div className="p-4 rounded-xl border border-slate-200 bg-white space-y-3 shadow-xs flex flex-col justify-between">
+            <div className="p-4 rounded-xl border border-slate-200 bg-white space-y-3 shadow-sm flex flex-col justify-between">
               <div>
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold text-slate-900">

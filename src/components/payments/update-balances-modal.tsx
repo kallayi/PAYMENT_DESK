@@ -106,7 +106,7 @@ export function UpdateBalancesModal({
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4 py-2">
-          <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
+          <div className="space-y-3 max-h-[55dvh] overflow-y-auto pr-1">
             {activeBanks.map((b) => {
               const currentInputVal = parseFloat(balanceInputs[b.id] || '0') || 0;
               const shortCode = b.short_code || b.short_name || 'BANK';
@@ -119,28 +119,28 @@ export function UpdateBalancesModal({
                   key={b.id}
                   className="p-3 rounded-lg border border-slate-200 bg-slate-50/50 space-y-2 hover:border-slate-300 transition-colors"
                 >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <span className="px-2 py-0.5 rounded text-xs font-bold tracking-wide bg-slate-200 text-slate-800">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0 flex-1 flex-wrap">
+                      <span className="px-2 py-0.5 rounded text-xs font-bold tracking-wide bg-slate-200 text-slate-800 shrink-0">
                         {shortCode}
                       </span>
-                      <span className="text-xs font-semibold text-slate-800 truncate max-w-[180px]">
+                      <span className="text-xs font-semibold text-slate-800 truncate">
                         {bankName}
                       </span>
                       {accountMask && (
-                        <span className="text-[11px] text-slate-400 font-mono">
+                        <span className="text-[11px] text-slate-400 font-mono shrink-0">
                           ({accountMask})
                         </span>
                       )}
                     </div>
                     {b.is_primary && (
-                      <span className="text-[10px] font-semibold text-brand bg-brand/10 px-1.5 py-0.5 rounded">
+                      <span className="text-[10px] font-semibold text-brand bg-brand/10 px-1.5 py-0.5 rounded shrink-0">
                         Primary
                       </span>
                     )}
                   </div>
 
-                  <div className="flex items-center gap-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-3">
                     <div className="relative flex-1">
                       <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-semibold text-slate-400">
                         ₹
@@ -152,11 +152,11 @@ export function UpdateBalancesModal({
                         value={balanceInputs[b.id] ?? ''}
                         onChange={(e) => handleInputChange(b.id, e.target.value)}
                         placeholder="0.00"
-                        className="w-full pl-7 pr-3 py-1.5 text-sm font-semibold tabular-nums text-slate-900 bg-white border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-1 focus:ring-brand focus:border-brand"
+                        className="w-full min-h-[42px] sm:min-h-[38px] pl-7 pr-3 py-1.5 text-sm font-semibold tabular-nums text-slate-900 bg-white border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-1 focus:ring-brand focus:border-brand"
                         required
                       />
                     </div>
-                    <div className="text-right min-w-[100px]">
+                    <div className="text-right sm:min-w-[100px]">
                       <span className="text-xs font-bold text-slate-900 tabular-nums">
                         {formatINR(currentInputVal)}
                       </span>
@@ -195,6 +195,7 @@ export function UpdateBalancesModal({
               size="sm"
               onClick={() => onOpenChange(false)}
               disabled={isSubmitting}
+              className="min-h-[40px]"
             >
               Cancel
             </Button>
@@ -202,7 +203,7 @@ export function UpdateBalancesModal({
               type="submit"
               size="sm"
               disabled={isSubmitting}
-              className="bg-brand hover:bg-brand-hover text-white font-medium"
+              className="min-h-[40px] bg-brand hover:bg-brand-hover text-white font-medium"
             >
               {isSubmitting ? (
                 <>

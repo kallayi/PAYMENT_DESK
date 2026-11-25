@@ -46,6 +46,7 @@ export async function createVendor(
   const beneficiaryName = (vendorData.beneficiary_name || partyName).trim();
   const accountNumber = (vendorData.account_number || vendorData.bank_account_no || '000000000000').trim();
   const ifscCode = (vendorData.ifsc_code || 'UTIB0000000').trim().toUpperCase();
+  const whatsappNumber = vendorData.whatsapp_number?.replace(/[\s-]/g, '').trim() || null;
   const remarks = vendorData.remarks?.trim() || vendorData.notes?.trim() || null;
 
   // Check for duplicate party_name within the active company
@@ -71,6 +72,7 @@ export async function createVendor(
       beneficiary_name: beneficiaryName,
       account_number: accountNumber,
       ifsc_code: ifscCode,
+      whatsapp_number: whatsappNumber,
       remarks: remarks,
       // Backward compatibility columns
       name: partyName,
@@ -143,6 +145,7 @@ export async function updateVendor(
   const beneficiaryName = (vendorData.beneficiary_name || partyName).trim();
   const accountNumber = (vendorData.account_number || vendorData.bank_account_no || '000000000000').trim();
   const ifscCode = (vendorData.ifsc_code || 'UTIB0000000').trim().toUpperCase();
+  const whatsappNumber = vendorData.whatsapp_number?.replace(/[\s-]/g, '').trim() || null;
   const remarks = vendorData.remarks?.trim() || vendorData.notes?.trim() || null;
 
   const companyId = currentVendor.company_id || activeCompany?.id;
@@ -174,6 +177,7 @@ export async function updateVendor(
       beneficiary_name: beneficiaryName,
       account_number: accountNumber,
       ifsc_code: ifscCode,
+      whatsapp_number: whatsappNumber,
       remarks: remarks,
       // Backward compatibility columns
       name: partyName,

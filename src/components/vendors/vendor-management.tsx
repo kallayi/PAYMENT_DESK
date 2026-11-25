@@ -199,7 +199,7 @@ export function VendorManagement({
           <Button
             type="button"
             onClick={openCreateModal}
-            className="min-h-[40px] px-4 rounded-lg bg-[#7F1D1D] hover:bg-[#991B1B] text-white text-xs font-semibold inline-flex items-center justify-center gap-1.5 shadow-xs transition-colors cursor-pointer"
+            className="w-full sm:w-auto min-h-[42px] sm:min-h-[40px] px-4 rounded-lg bg-[#7F1D1D] hover:bg-[#991B1B] text-white text-xs font-semibold inline-flex items-center justify-center gap-1.5 shadow-sm transition-colors cursor-pointer shrink-0"
           >
             <Plus className="w-4 h-4" />
             <span>Add Vendor</span>
@@ -208,14 +208,14 @@ export function VendorManagement({
       </div>
 
       {/* Search Bar */}
-      <div className="mb-4 max-w-sm relative">
+      <div className="mb-4 max-w-full sm:max-w-sm relative">
         <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
         <Input
           type="text"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search by trade name, beneficiary, or IFSC..."
-          className="w-full min-h-[40px] pl-9 pr-3 rounded-lg border border-slate-200 bg-white text-xs text-slate-900 placeholder:text-slate-400 outline-hidden focus:border-[#7F1D1D]"
+          className="w-full min-h-[40px] pl-9 pr-3 rounded-lg border border-slate-200 bg-white text-xs text-slate-900 placeholder:text-slate-400 outline-none focus:border-[#7F1D1D]"
         />
       </div>
 
@@ -279,14 +279,12 @@ export function VendorManagement({
                     </td>
                     <td className="py-3.5 px-3">
                       <span
-                        className={`inline-flex items-center gap-1.5 text-xs font-semibold ${
-                          v.is_active ? 'text-emerald-700' : 'text-slate-400'
-                        }`}
+                        className={`inline-flex items-center gap-1.5 text-xs font-semibold ${v.is_active ? 'text-emerald-700' : 'text-slate-400'
+                          }`}
                       >
                         <span
-                          className={`w-1.5 h-1.5 rounded-full ${
-                            v.is_active ? 'bg-emerald-600' : 'bg-slate-300'
-                          }`}
+                          className={`w-1.5 h-1.5 rounded-full ${v.is_active ? 'bg-emerald-600' : 'bg-slate-300'
+                            }`}
                         />
                         {v.is_active ? 'Active' : 'Inactive'}
                       </span>
@@ -306,11 +304,10 @@ export function VendorManagement({
                             type="button"
                             onClick={() => handleToggleActive(v.id)}
                             disabled={isPending}
-                            className={`px-2.5 py-1.5 rounded-lg border text-xs font-medium transition-colors cursor-pointer ${
-                              v.is_active
+                            className={`px-2.5 py-1.5 rounded-lg border text-xs font-medium transition-colors cursor-pointer ${v.is_active
                                 ? 'border-slate-200 text-slate-600 hover:bg-slate-100'
                                 : 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
-                            }`}
+                              }`}
                           >
                             {v.is_active ? 'Disable' : 'Enable'}
                           </button>
@@ -341,39 +338,37 @@ export function VendorManagement({
             return (
               <div
                 key={v.id}
-                className="bg-white rounded-xl border border-slate-200 p-4 space-y-2.5 shadow-xs"
+                className="bg-white rounded-xl border border-slate-200 p-4 space-y-2.5 shadow-sm"
               >
                 <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <div className="text-sm font-bold text-slate-900">{partyName}</div>
-                    <div className="text-xs text-slate-600 mt-0.5">
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-bold text-slate-900 break-words">{partyName}</div>
+                    <div className="text-xs text-slate-600 mt-0.5 break-words">
                       Beneficiary: <span className="font-semibold text-slate-800">{benName}</span>
                     </div>
                   </div>
                   <span
-                    className={`inline-flex items-center gap-1 text-[11px] font-semibold shrink-0 ${
-                      v.is_active ? 'text-emerald-700' : 'text-slate-400'
-                    }`}
+                    className={`inline-flex items-center gap-1 text-[11px] font-semibold shrink-0 ${v.is_active ? 'text-emerald-700' : 'text-slate-400'
+                      }`}
                   >
                     <span
-                      className={`w-1.5 h-1.5 rounded-full ${
-                        v.is_active ? 'bg-emerald-600' : 'bg-slate-300'
-                      }`}
+                      className={`w-1.5 h-1.5 rounded-full ${v.is_active ? 'bg-emerald-600' : 'bg-slate-300'
+                        }`}
                     />
                     {v.is_active ? 'Active' : 'Inactive'}
                   </span>
                 </div>
 
-                <div className="text-xs text-slate-600 font-mono">
+                <div className="text-xs text-slate-600 font-mono break-all">
                   A/C: <span className="font-bold text-slate-800">{accNo || '—'}</span>
                 </div>
 
-                <div className="flex items-center gap-1.5 text-xs">
+                <div className="flex items-center gap-1.5 flex-wrap text-xs">
                   <span className="text-slate-500">IFSC:</span>
                   <span className="font-mono font-bold text-slate-800">{v.ifsc_code || '—'}</span>
                   {bankChip && (
                     <span
-                      className={`text-[10px] font-bold px-1.5 py-0.2 rounded border ${bankChip.color}`}
+                      className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${bankChip.color}`}
                     >
                       {bankChip.label}
                     </span>
@@ -381,7 +376,7 @@ export function VendorManagement({
                 </div>
 
                 {v.remarks && (
-                  <div className="text-xs text-slate-500 italic bg-slate-50 p-2 rounded-md">
+                  <div className="text-xs text-slate-500 italic bg-slate-50 p-2 rounded-md break-words">
                     {v.remarks}
                   </div>
                 )}
@@ -391,7 +386,7 @@ export function VendorManagement({
                     <button
                       type="button"
                       onClick={() => openEditModal(v)}
-                      className="min-h-[34px] px-3 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-semibold inline-flex items-center gap-1"
+                      className="min-h-[40px] px-3.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-semibold inline-flex items-center gap-1 cursor-pointer"
                     >
                       <Edit2 className="w-3.5 h-3.5" />
                       <span>Edit</span>
@@ -400,11 +395,10 @@ export function VendorManagement({
                       type="button"
                       onClick={() => handleToggleActive(v.id)}
                       disabled={isPending}
-                      className={`min-h-[34px] px-3 rounded-lg border text-xs font-semibold ${
-                        v.is_active
+                      className={`min-h-[40px] px-3.5 rounded-lg border text-xs font-semibold cursor-pointer ${v.is_active
                           ? 'border-slate-200 text-slate-600 hover:bg-slate-50'
                           : 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                      }`}
+                        }`}
                     >
                       {v.is_active ? 'Disable' : 'Enable'}
                     </button>

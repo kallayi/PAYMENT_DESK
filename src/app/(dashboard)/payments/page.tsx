@@ -65,7 +65,7 @@ export default async function PaymentsPage({ searchParams }: PaymentsPageProps) 
   let paymentsQuery = supabase
     .from('payment_items')
     .select(
-      '*, vendor:vendors(*), source_bank:company_banks(*)'
+      '*, vendor:vendors(*), source_bank:company_banks(*), payer:profiles!paid_by(id, full_name, role)'
     )
     .order('created_at', { ascending: false });
 
@@ -104,6 +104,8 @@ export default async function PaymentsPage({ searchParams }: PaymentsPageProps) 
         vendors={vendors}
         banks={banks}
         companyCode={activeCompany?.code || 'INDFURN'}
+        activeCompany={activeCompany}
+        currentUserName={profile.full_name || 'Accounts Team'}
         initialFromReminder={
           initialReminder
             ? {

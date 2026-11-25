@@ -10,13 +10,18 @@ function createGenericBankAdapter(bankShortCode: string): BankTemplateAdapter {
 
   const buildWorkbook = async (
     rows: BulkExportRow[],
-    isSameBank: boolean
+    mode: 'same_bank' | 'other_bank' | 'combined'
   ): Promise<Buffer> => {
     const workbook = new ExcelJS.Workbook();
     workbook.creator = 'Payment Desk';
     workbook.created = new Date();
 
-    const sheetName = isSameBank ? `${code}_Same_Bank` : `${code}_NEFT_RTGS`;
+    const sheetName =
+      mode === 'same_bank'
+        ? `${code}_Same_Bank`
+        : mode === 'other_bank'
+          ? `${code}_NEFT_RTGS`
+          : `${code}_All_Banks`;
     const sheet = workbook.addWorksheet(sheetName);
 
     sheet.columns = [
@@ -41,6 +46,11 @@ function createGenericBankAdapter(bankShortCode: string): BankTemplateAdapter {
 
     rows.forEach((item, index) => {
       const amount = Math.round((Number(item.netPayable) || 0) * 100) / 100;
+      const ifsc = (item.ifscCode || '').trim().toUpperCase();
+      const sourcePrefix = (item.sourceBankIfscPrefix || '').trim().toUpperCase();
+      const isSameBank =
+        mode === 'same_bank' ||
+        (mode === 'combined' && Boolean(sourcePrefix) && ifsc.startsWith(sourcePrefix));
       const transferType = isSameBank ? 'IFT' : amount >= 200000 ? 'RTGS' : 'NEFT';
       const narration = `${item.companyCode} ${item.invoiceRef} ${item.partyName}`
         .replace(/\s+/g, ' ')
@@ -52,7 +62,7 @@ function createGenericBankAdapter(bankShortCode: string): BankTemplateAdapter {
         transferType,
         beneficiaryName: item.beneficiaryName.trim(),
         accountNumber: String(item.accountNumber || '').trim(),
-        ifscCode: (item.ifscCode || '').trim().toUpperCase(),
+        ifscCode: ifsc,
         amount,
         narration,
         sheetDate: item.sheetDate,
@@ -69,8 +79,9 @@ function createGenericBankAdapter(bankShortCode: string): BankTemplateAdapter {
 
   return {
     bankShortCode: code,
-    buildSameBankWorkbook: (rows) => buildWorkbook(rows, true),
-    buildOtherBankWorkbook: (rows) => buildWorkbook(rows, false),
+    buildSameBankWorkbook: (rows) => buildWorkbook(rows, 'same_bank'),
+    buildOtherBankWorkbook: (rows) => buildWorkbook(rows, 'other_bank'),
+    buildCombinedWorkbook: (rows) => buildWorkbook(rows, 'combined'),
   };
 }
 

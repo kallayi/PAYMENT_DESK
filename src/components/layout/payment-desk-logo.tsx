@@ -27,7 +27,7 @@ export function PaymentDeskLogo({
     <div className={`inline-flex items-center gap-2.5 ${className}`}>
       {/* Standalone Maroon Emblem */}
       <div
-        className={`${iconSizes[size]} rounded-lg bg-[#7F1D1D] text-white flex items-center justify-center font-bold tracking-tight shadow-xs shrink-0 select-none`}
+        className={`${iconSizes[size]} rounded-lg bg-[#7F1D1D] text-white flex items-center justify-center font-bold tracking-tight shadow-sm shrink-0 select-none`}
         aria-hidden="true"
       >
         <svg

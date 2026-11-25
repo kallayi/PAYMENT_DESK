@@ -19,28 +19,35 @@ import {
   Loader2,
   AlertCircle,
   Clock,
+  MessageCircle,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { PaymentStatusBadge } from '@/components/payments/payment-status-badge';
+import { PaymentAcknowledgementModal } from '@/components/payments/payment-acknowledgement-modal';
 import { getSignedFileUrl } from '@/actions/storage';
 import { getPaymentAuditLogs } from '@/actions/payments';
 import { formatHumanDate, formatINR, formatDateTime } from '@/lib/format';
-import type { AuditLog, PaymentItem } from '@/types/database';
+import type { AuditLog, Company, PaymentItem } from '@/types/database';
 
 interface PaymentDetailDrawerProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   payment: PaymentItem | null;
+  activeCompany?: Company | null;
+  fallbackUserName?: string;
 }
 
 export function PaymentDetailDrawer({
   open,
   onOpenChange,
   payment,
+  activeCompany,
+  fallbackUserName,
 }: PaymentDetailDrawerProps) {
   const [copiedUtr, setCopiedUtr] = React.useState<boolean>(false);
   const [isViewingInvoice, setIsViewingInvoice] = React.useState<boolean>(false);
   const [isViewingReceipt, setIsViewingReceipt] = React.useState<boolean>(false);
+  const [isAdviceOpen, setIsAdviceOpen] = React.useState<boolean>(false);
 
   // Audit Logs State
   const [auditLogs, setAuditLogs] = React.useState<AuditLog[]>([]);
@@ -49,6 +56,7 @@ export function PaymentDetailDrawer({
   React.useEffect(() => {
     if (!open || !payment) {
       setAuditLogs([]);
+      setIsAdviceOpen(false);
       return;
     }
 
@@ -226,7 +234,7 @@ export function PaymentDetailDrawer({
           )}
 
           {/* KEY-VALUE DETAILS GRID */}
-          <div className="rounded-xl border border-slate-200 divide-y divide-slate-100 text-xs shadow-xs overflow-hidden">
+          <div className="rounded-xl border border-slate-200 divide-y divide-slate-100 text-xs shadow-sm overflow-hidden">
             <div className="px-3.5 py-2.5 flex justify-between gap-3">
               <span className="text-slate-500">Beneficiary (Bank A/C)</span>
               <span className="font-semibold text-slate-900 text-right">{beneficiaryName}</span>
@@ -361,7 +369,7 @@ export function PaymentDetailDrawer({
             </div>
 
             {/* SUPPLIER INVOICE CARD */}
-            <div className="rounded-xl border border-slate-200 overflow-hidden shadow-xs">
+            <div className="rounded-xl border border-slate-200 overflow-hidden shadow-sm">
               <div className="px-3.5 py-2.5 bg-slate-50 border-b border-slate-200 flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2 min-w-0">
                   <FileText className="w-4 h-4 text-slate-500 shrink-0" />
@@ -416,7 +424,7 @@ export function PaymentDetailDrawer({
 
             {/* BANK RECEIPT CARD (WHEN PAID) */}
             {payment.receipt_file_path && (
-              <div className="rounded-xl border border-emerald-200 overflow-hidden shadow-xs">
+              <div className="rounded-xl border border-emerald-200 overflow-hidden shadow-sm">
                 <div className="px-3.5 py-2.5 bg-emerald-50/70 border-b border-emerald-200 flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2 min-w-0">
                     <Receipt className="w-4 h-4 text-emerald-700 shrink-0" />
@@ -464,12 +472,34 @@ export function PaymentDetailDrawer({
                 </div>
               </div>
             )}
+
+            {/* OFFICIAL PAYMENT ADVICE / WHATSAPP SHARE (WHEN PAID) */}
+            {payment.status === 'PAID' && (
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50/40 p-3.5 flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-xs font-semibold text-slate-900">
+                    Official Payment Advice
+                  </div>
+                  <div className="text-[11px] text-slate-500 mt-0.5">
+                    Share branded Payment Acknowledgement image on WhatsApp or download PDF/PNG.
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsAdviceOpen(true)}
+                  className="min-h-[36px] px-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold inline-flex items-center gap-1.5 shrink-0 transition-colors shadow-sm cursor-pointer"
+                >
+                  <MessageCircle className="w-3.5 h-3.5" />
+                  <span>View / Share Payment Advice</span>
+                </button>
+              </div>
+            )}
           </div>
 
           {/* COLLAPSIBLE ACTIVITY & AUDIT LOG TIMELINE */}
           <details
             open
-            className="rounded-xl border border-slate-200 bg-white overflow-hidden shadow-xs"
+            className="rounded-xl border border-slate-200 bg-white overflow-hidden shadow-sm"
           >
             <summary className="px-3.5 py-2.5 cursor-pointer text-xs font-semibold text-slate-700 flex items-center justify-between select-none hover:bg-slate-50 transition-colors">
               <span className="flex items-center gap-1.5">
@@ -519,7 +549,19 @@ export function PaymentDetailDrawer({
         </div>
 
         {/* FOOTER */}
-        <div className="px-5 py-3.5 border-t border-slate-200 bg-slate-50 flex justify-end">
+        <div className="px-4 sm:px-5 py-3.5 border-t border-slate-200 bg-slate-50 flex flex-wrap items-center justify-between gap-2 shrink-0 pb-safe">
+          {payment.status === 'PAID' ? (
+            <button
+              type="button"
+              onClick={() => setIsAdviceOpen(true)}
+              className="min-h-[40px] px-3.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors shadow-sm cursor-pointer"
+            >
+              <MessageCircle className="w-3.5 h-3.5" />
+              <span>View / Share Payment Advice</span>
+            </button>
+          ) : (
+            <div />
+          )}
           <button
             type="button"
             onClick={() => onOpenChange(false)}
@@ -529,6 +571,14 @@ export function PaymentDetailDrawer({
           </button>
         </div>
       </SheetContent>
+
+      <PaymentAcknowledgementModal
+        open={isAdviceOpen}
+        onOpenChange={setIsAdviceOpen}
+        payment={payment}
+        activeCompany={activeCompany}
+        fallbackUserName={fallbackUserName}
+      />
     </Sheet>
   );
 }

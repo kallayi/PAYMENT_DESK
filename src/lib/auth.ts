@@ -117,7 +117,7 @@ export const getCurrentUserContext = cache(async (): Promise<CurrentUserContext>
     // Admin users have full access to both INDFURN and VINMORE
     const { data: allCompanies } = await supabase
       .from('companies')
-      .select('id, code, name, is_active, created_at')
+      .select('*')
       .eq('is_active', true)
       .order('code', { ascending: true });
 
@@ -126,7 +126,7 @@ export const getCurrentUserContext = cache(async (): Promise<CurrentUserContext>
     // Regular users have access based on public.user_company_access
     const { data: accessRows } = await supabase
       .from('user_company_access')
-      .select('company:companies(id, code, name, is_active, created_at)')
+      .select('company:companies(*)')
       .eq('user_id', user.id);
 
     if (accessRows && accessRows.length > 0) {
@@ -140,7 +140,7 @@ export const getCurrentUserContext = cache(async (): Promise<CurrentUserContext>
   if (allowedCompanies.length === 0) {
     const { data: defaultCompany } = await supabase
       .from('companies')
-      .select('id, code, name, is_active, created_at')
+      .select('*')
       .eq('code', 'INDFURN')
       .maybeSingle();
 

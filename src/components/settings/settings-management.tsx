@@ -103,6 +103,7 @@ export function SettingsManagement({
       short_code: '',
       ifsc_prefix: '',
       account_number_masked: '',
+      full_debit_account_number: '',
       is_primary: false,
       is_active: true,
     },
@@ -116,6 +117,7 @@ export function SettingsManagement({
       short_code: '',
       ifsc_prefix: '',
       account_number_masked: '',
+      full_debit_account_number: '',
       is_primary: false,
       is_active: true,
     },
@@ -152,6 +154,7 @@ export function SettingsManagement({
       short_code: '',
       ifsc_prefix: '',
       account_number_masked: '',
+      full_debit_account_number: '',
       is_primary: false,
       is_active: true,
     });
@@ -165,6 +168,7 @@ export function SettingsManagement({
       short_code: bank.short_code || bank.short_name,
       ifsc_prefix: bank.ifsc_prefix || (bank.short_code || bank.short_name).slice(0, 4),
       account_number_masked: bank.account_number_masked || bank.account_mask || '',
+      full_debit_account_number: bank.full_debit_account_number || '',
       is_primary: Boolean(bank.is_primary),
       is_active: Boolean(bank.is_active),
     });
@@ -278,9 +282,9 @@ export function SettingsManagement({
   return (
     <div>
       {/* Top Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
-        <div>
-          <h1 className="text-xl font-bold tracking-tight text-slate-900">Admin Settings</h1>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5 sm:mb-6">
+        <div className="min-w-0">
+          <h1 className="text-lg sm:text-xl font-bold tracking-tight text-slate-900">Admin Settings</h1>
           <p className="text-xs text-slate-500 mt-0.5">
             Manage team accounts, multi-company access, and company disbursement banks.
           </p>
@@ -289,7 +293,7 @@ export function SettingsManagement({
           <Button
             type="button"
             onClick={openAddUser}
-            className="min-h-[40px] px-4 rounded-lg bg-[#7F1D1D] hover:bg-[#991B1B] text-white text-xs font-semibold inline-flex items-center justify-center gap-1.5 shadow-xs transition-colors cursor-pointer"
+            className="w-full sm:w-auto min-h-[42px] px-4 rounded-lg bg-[#7F1D1D] hover:bg-[#991B1B] text-white text-xs font-semibold inline-flex items-center justify-center gap-1.5 shadow-sm transition-colors cursor-pointer shrink-0"
           >
             <UserPlus className="w-4 h-4" />
             <span>Add Team Member</span>
@@ -298,7 +302,7 @@ export function SettingsManagement({
           <Button
             type="button"
             onClick={openAddBank}
-            className="min-h-[40px] px-4 rounded-lg bg-[#7F1D1D] hover:bg-[#991B1B] text-white text-xs font-semibold inline-flex items-center justify-center gap-1.5 shadow-xs transition-colors cursor-pointer"
+            className="w-full sm:w-auto min-h-[42px] px-4 rounded-lg bg-[#7F1D1D] hover:bg-[#991B1B] text-white text-xs font-semibold inline-flex items-center justify-center gap-1.5 shadow-sm transition-colors cursor-pointer shrink-0"
           >
             <Plus className="w-4 h-4" />
             <span>Add Bank</span>
@@ -307,26 +311,24 @@ export function SettingsManagement({
       </div>
 
       {/* 2-Tab Pill Switcher */}
-      <div className="inline-flex items-center p-1 rounded-lg bg-slate-100 border border-slate-200/80 mb-6 select-none">
+      <div className="grid grid-cols-2 sm:inline-flex items-center p-1 rounded-lg bg-slate-100 border border-slate-200/80 mb-5 sm:mb-6 select-none w-full sm:w-auto">
         <button
           type="button"
           onClick={() => setActiveTab('users')}
-          className={`min-h-[36px] px-4 rounded-md text-xs font-semibold transition-all cursor-pointer ${
-            activeTab === 'users'
-              ? 'bg-white text-slate-900 shadow-xs'
-              : 'text-slate-600 hover:text-slate-900'
-          }`}
+          className={`min-h-[38px] px-3 sm:px-4 rounded-md text-xs font-semibold transition-all cursor-pointer truncate ${activeTab === 'users'
+            ? 'bg-white text-slate-900 shadow-sm'
+            : 'text-slate-600 hover:text-slate-900'
+            }`}
         >
           Team & Access ({users.length})
         </button>
         <button
           type="button"
           onClick={() => setActiveTab('banks')}
-          className={`min-h-[36px] px-4 rounded-md text-xs font-semibold transition-all cursor-pointer ${
-            activeTab === 'banks'
-              ? 'bg-white text-slate-900 shadow-xs'
-              : 'text-slate-600 hover:text-slate-900'
-          }`}
+          className={`min-h-[38px] px-3 sm:px-4 rounded-md text-xs font-semibold transition-all cursor-pointer truncate ${activeTab === 'banks'
+            ? 'bg-white text-slate-900 shadow-sm'
+            : 'text-slate-600 hover:text-slate-900'
+            }`}
         >
           Company Banks ({banks.length})
         </button>
@@ -406,14 +408,12 @@ export function SettingsManagement({
                       </td>
                       <td className="py-3.5 px-3">
                         <span
-                          className={`inline-flex items-center gap-1.5 text-xs font-semibold ${
-                            u.is_active ? 'text-emerald-700' : 'text-slate-400'
-                          }`}
+                          className={`inline-flex items-center gap-1.5 text-xs font-semibold ${u.is_active ? 'text-emerald-700' : 'text-slate-400'
+                            }`}
                         >
                           <span
-                            className={`w-1.5 h-1.5 rounded-full ${
-                              u.is_active ? 'bg-emerald-600' : 'bg-slate-300'
-                            }`}
+                            className={`w-1.5 h-1.5 rounded-full ${u.is_active ? 'bg-emerald-600' : 'bg-slate-300'
+                              }`}
                           />
                           {u.is_active ? 'Active' : 'Disabled'}
                         </span>
@@ -435,11 +435,10 @@ export function SettingsManagement({
                               type="button"
                               onClick={() => handleToggleUserActive(u.id)}
                               disabled={isPending}
-                              className={`px-2.5 py-1.5 rounded-lg border text-xs font-medium transition-colors cursor-pointer ${
-                                u.is_active
-                                  ? 'border-slate-200 text-slate-600 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200'
-                                  : 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
-                              }`}
+                              className={`px-2.5 py-1.5 rounded-lg border text-xs font-medium transition-colors cursor-pointer ${u.is_active
+                                ? 'border-slate-200 text-slate-600 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200'
+                                : 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                                }`}
                             >
                               {u.is_active ? 'Disable' : 'Enable'}
                             </button>
@@ -460,42 +459,46 @@ export function SettingsManagement({
               return (
                 <div
                   key={u.id}
-                  className="bg-white rounded-xl border border-slate-200 p-4 space-y-2.5 shadow-xs"
+                  className="bg-white rounded-xl border border-slate-200 p-4 space-y-2.5 shadow-sm"
                 >
                   <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <div className="flex items-center gap-1.5 font-bold text-slate-900 text-sm">
-                        <span>{u.full_name}</span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5 flex-wrap font-bold text-slate-900 text-sm">
+                        <span className="break-words">{u.full_name}</span>
                         {u.is_admin && (
-                          <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-slate-900 text-white">
+                          <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-slate-900 text-white shrink-0">
                             Admin
                           </span>
                         )}
+                        {isSelf && (
+                          <span className="text-[10px] font-medium text-slate-400 bg-slate-100 px-1 rounded shrink-0">
+                            You
+                          </span>
+                        )}
                       </div>
-                      {u.email && <div className="text-xs text-slate-500 mt-0.5">{u.email}</div>}
+                      {u.email && <div className="text-xs text-slate-500 mt-0.5 break-all">{u.email}</div>}
                     </div>
                     <span
-                      className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${
-                        u.role === 'APPROVER'
-                          ? 'bg-[#7F1D1D] text-white'
-                          : u.role === 'VERIFIER'
-                            ? 'bg-amber-100 text-amber-900 border border-amber-200'
-                            : u.role === 'AUDITOR'
-                              ? 'bg-purple-100 text-purple-900 border border-purple-200'
-                              : 'bg-blue-50 text-blue-700 border border-blue-200'
-                      }`}
+                      className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded shrink-0 ${u.role === 'APPROVER'
+                        ? 'bg-[#7F1D1D] text-white'
+                        : u.role === 'VERIFIER'
+                          ? 'bg-amber-100 text-amber-900 border border-amber-200'
+                          : u.role === 'AUDITOR'
+                            ? 'bg-purple-100 text-purple-900 border border-purple-200'
+                            : 'bg-blue-50 text-blue-700 border border-blue-200'
+                        }`}
                     >
                       {u.role}
                     </span>
                   </div>
 
-                  <div className="flex items-center gap-1 text-xs text-slate-600">
+                  <div className="flex items-center flex-wrap gap-1.5 text-xs text-slate-600">
                     <span className="text-slate-400">Companies:</span>
                     {u.is_admin ? (
-                      <span className="font-semibold text-slate-700">Both</span>
+                      <span className="px-2 py-0.5 rounded bg-slate-100 border border-slate-200 font-semibold text-slate-700 text-[11px]">Both (INDFURN & VINMORE)</span>
                     ) : (u.assignedCompanies || []).length > 0 ? (
                       u.assignedCompanies!.map((c) => (
-                        <span key={c.id} className="font-bold text-slate-800">
+                        <span key={c.id} className="px-2 py-0.5 rounded bg-slate-100 border border-slate-200 font-bold text-slate-800 text-[11px]">
                           {c.code}
                         </span>
                       ))
@@ -504,11 +507,10 @@ export function SettingsManagement({
                     )}
                   </div>
 
-                  <div className="flex items-center justify-between pt-2 border-t border-slate-100">
+                  <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-100">
                     <span
-                      className={`text-xs font-semibold ${
-                        u.is_active ? 'text-emerald-700' : 'text-slate-400'
-                      }`}
+                      className={`text-xs font-semibold shrink-0 ${u.is_active ? 'text-emerald-700' : 'text-slate-400'
+                        }`}
                     >
                       {u.is_active ? 'Active' : 'Disabled'}
                     </span>
@@ -516,20 +518,20 @@ export function SettingsManagement({
                       <button
                         type="button"
                         onClick={() => openEditUser(u)}
-                        className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                        className="min-h-[40px] px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-medium text-slate-700 hover:bg-slate-50 inline-flex items-center gap-1 cursor-pointer"
                       >
-                        Edit
+                        <Edit2 className="w-3.5 h-3.5" />
+                        <span>Edit</span>
                       </button>
                       {!isSelf && (
                         <button
                           type="button"
                           onClick={() => handleToggleUserActive(u.id)}
                           disabled={isPending}
-                          className={`px-2.5 py-1.5 rounded-lg border text-xs font-medium ${
-                            u.is_active
-                              ? 'border-slate-200 text-slate-600 hover:bg-rose-50 hover:text-rose-700'
-                              : 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                          }`}
+                          className={`min-h-[40px] px-3 py-1.5 rounded-lg border text-xs font-medium cursor-pointer ${u.is_active
+                            ? 'border-slate-200 text-slate-600 hover:bg-rose-50 hover:text-rose-700'
+                            : 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                            }`}
                         >
                           {u.is_active ? 'Disable' : 'Enable'}
                         </button>
@@ -547,14 +549,14 @@ export function SettingsManagement({
       {activeTab === 'banks' && (
         <div className="space-y-4">
           {activeCompany && (
-            <div className="p-3 rounded-lg bg-slate-50 border border-slate-200/80 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Building2 className="w-4 h-4 text-[#7F1D1D]" />
-                <span className="text-xs font-semibold text-slate-800">
+            <div className="p-3 rounded-lg bg-slate-50 border border-slate-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
+              <div className="flex items-center gap-2 min-w-0">
+                <Building2 className="w-4 h-4 text-[#7F1D1D] shrink-0" />
+                <span className="text-xs font-semibold text-slate-800 truncate">
                   Disbursement Banks for <span className="font-bold text-[#7F1D1D]">{activeCompany.name}</span>
                 </span>
               </div>
-              <span className="text-[11px] text-slate-500 font-medium">
+              <span className="text-[11px] text-slate-500 font-medium shrink-0">
                 {banks.length} bank accounts configured
               </span>
             </div>
@@ -564,34 +566,33 @@ export function SettingsManagement({
             {banks.map((b) => (
               <div
                 key={b.id}
-                className="bg-white rounded-xl border border-slate-200 p-4 sm:p-5 flex flex-col justify-between gap-3 shadow-[0_1px_2px_rgba(15,23,42,0.04)]"
+                className="bg-white rounded-xl border border-slate-200 p-4 sm:p-5 flex flex-col justify-between gap-3 shadow-sm min-w-0"
               >
                 <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-bold text-slate-900">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-sm font-bold text-slate-900 break-words">
                         {b.bank_name || b.full_name}
                       </span>
-                      <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-800 text-[11px] font-bold">
+                      <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-800 text-[11px] font-bold shrink-0">
                         {b.short_code || b.short_name}
                       </span>
                       {b.is_primary && (
-                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-amber-50 text-amber-800 border border-amber-200 text-[10px] font-bold">
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-amber-50 text-amber-800 border border-amber-200 text-[10px] font-bold shrink-0">
                           <Star className="w-3 h-3 fill-amber-500 text-amber-500" />
                           <span>Primary</span>
                         </span>
                       )}
                     </div>
-                    <div className="text-xs text-slate-500 mt-1">
+                    <div className="text-xs text-slate-500 mt-1 break-words">
                       IFSC Prefix: <span className="font-mono font-bold text-slate-800">{b.ifsc_prefix || '—'}</span> · A/C: <span className="tabular-nums font-medium text-slate-700">{b.account_number_masked || b.account_mask || 'Not set'}</span>
                     </div>
                   </div>
                   <span
-                    className={`text-[11px] font-semibold px-2 py-0.5 rounded-md ${
-                      b.is_active
-                        ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                        : 'bg-slate-100 text-slate-500 border border-slate-200'
-                    }`}
+                    className={`text-[11px] font-semibold px-2 py-0.5 rounded-md shrink-0 ${b.is_active
+                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                      : 'bg-slate-100 text-slate-500 border border-slate-200'
+                      }`}
                   >
                     {b.is_active ? 'Active' : 'Inactive'}
                   </span>
@@ -601,7 +602,7 @@ export function SettingsManagement({
                   <button
                     type="button"
                     onClick={() => openEditBank(b)}
-                    className="min-h-[34px] px-3 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-semibold inline-flex items-center gap-1 transition-colors cursor-pointer"
+                    className="min-h-[40px] px-3.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-semibold inline-flex items-center gap-1 transition-colors cursor-pointer"
                   >
                     <Edit2 className="w-3.5 h-3.5" />
                     <span>Edit</span>
@@ -610,11 +611,10 @@ export function SettingsManagement({
                     type="button"
                     onClick={() => handleToggleBankActive(b.id)}
                     disabled={isPending}
-                    className={`min-h-[34px] px-3 rounded-lg border text-xs font-semibold transition-colors cursor-pointer ${
-                      b.is_active
-                        ? 'border-slate-200 bg-white text-slate-600 hover:bg-slate-100'
-                        : 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
-                    }`}
+                    className={`min-h-[40px] px-3.5 rounded-lg border text-xs font-semibold transition-colors cursor-pointer ${b.is_active
+                      ? 'border-slate-200 bg-white text-slate-600 hover:bg-slate-100'
+                      : 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                      }`}
                   >
                     {b.is_active ? 'Disable' : 'Enable'}
                   </button>
@@ -700,7 +700,7 @@ export function SettingsManagement({
                 id="au-role"
                 {...addUserForm.register('role')}
                 disabled={isPending}
-                className="w-full min-h-[42px] px-3 rounded-lg border border-slate-200 bg-white text-sm outline-hidden focus:border-[#7F1D1D] cursor-pointer"
+                className="w-full min-h-[42px] px-3 rounded-lg border border-slate-200 bg-white text-sm outline-none focus:border-[#7F1D1D] cursor-pointer"
               >
                 <option value="PREPARER">Preparer (Accounts Executive — Prepares & Executes)</option>
                 <option value="VERIFIER">Verifier (Senior Accountant — First Review)</option>
@@ -726,7 +726,7 @@ export function SettingsManagement({
               <Label className="block text-xs font-semibold text-slate-700 mb-1.5">
                 Assigned Company Workspaces <span className="text-rose-600">*</span>
               </Label>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {allCompanies.map((c) => {
                   const currentIds = addUserForm.watch('company_ids') || [];
                   const isChecked = currentIds.includes(c.id);
@@ -734,11 +734,10 @@ export function SettingsManagement({
                   return (
                     <label
                       key={c.id}
-                      className={`flex items-center gap-2 p-2.5 rounded-lg border text-xs font-medium cursor-pointer transition-colors ${
-                        isChecked
-                          ? 'border-[#7F1D1D] bg-rose-50/50 text-slate-900 font-bold'
-                          : 'border-slate-200 hover:bg-slate-50 text-slate-600'
-                      }`}
+                      className={`min-h-[42px] flex items-center gap-2 p-2.5 rounded-lg border text-xs font-medium cursor-pointer transition-colors ${isChecked
+                        ? 'border-[#7F1D1D] bg-rose-50/50 text-slate-900 font-bold'
+                        : 'border-slate-200 hover:bg-slate-50 text-slate-600'
+                        }`}
                     >
                       <input
                         type="checkbox"
@@ -837,7 +836,7 @@ export function SettingsManagement({
                 id="eu-role"
                 {...editUserForm.register('role')}
                 disabled={isPending}
-                className="w-full min-h-[42px] px-3 rounded-lg border border-slate-200 bg-white text-sm outline-hidden focus:border-[#7F1D1D] cursor-pointer"
+                className="w-full min-h-[42px] px-3 rounded-lg border border-slate-200 bg-white text-sm outline-none focus:border-[#7F1D1D] cursor-pointer"
               >
                 <option value="PREPARER">Preparer (Accounts Executive)</option>
                 <option value="VERIFIER">Verifier (Senior Accountant)</option>
@@ -884,7 +883,7 @@ export function SettingsManagement({
               <Label className="block text-xs font-semibold text-slate-700 mb-1.5">
                 Assigned Company Workspaces <span className="text-rose-600">*</span>
               </Label>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {allCompanies.map((c) => {
                   const currentIds = editUserForm.watch('company_ids') || [];
                   const isChecked = currentIds.includes(c.id);
@@ -892,11 +891,10 @@ export function SettingsManagement({
                   return (
                     <label
                       key={c.id}
-                      className={`flex items-center gap-2 p-2.5 rounded-lg border text-xs font-medium cursor-pointer transition-colors ${
-                        isChecked
-                          ? 'border-[#7F1D1D] bg-rose-50/50 text-slate-900 font-bold'
-                          : 'border-slate-200 hover:bg-slate-50 text-slate-600'
-                      }`}
+                      className={`min-h-[42px] flex items-center gap-2 p-2.5 rounded-lg border text-xs font-medium cursor-pointer transition-colors ${isChecked
+                        ? 'border-[#7F1D1D] bg-rose-50/50 text-slate-900 font-bold'
+                        : 'border-slate-200 hover:bg-slate-50 text-slate-600'
+                        }`}
                     >
                       <input
                         type="checkbox"
@@ -983,7 +981,7 @@ export function SettingsManagement({
               )}
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <Label htmlFor="ab-short" className="block text-xs font-semibold text-slate-700 mb-1">
                   Short Code <span className="text-rose-600">*</span>
@@ -1023,14 +1021,27 @@ export function SettingsManagement({
 
             <div>
               <Label htmlFor="ab-mask" className="block text-xs font-semibold text-slate-700 mb-1">
-                Masked Account Number
+                Masked Account Number (Displayed on Advice &amp; UI)
               </Label>
               <Input
                 id="ab-mask"
                 {...addBankForm.register('account_number_masked')}
-                placeholder="e.g. XXXX4821"
+                placeholder="e.g. XXXX XXXX XXX 5074"
                 disabled={isPending}
                 className="w-full min-h-[42px] tabular-nums"
+              />
+            </div>
+
+            <div>
+              <Label htmlFor="ab-full" className="block text-xs font-semibold text-slate-700 mb-1">
+                Full Debit Account Number (Optional — for Bank Bulk Excel)
+              </Label>
+              <Input
+                id="ab-full"
+                {...addBankForm.register('full_debit_account_number')}
+                placeholder="e.g. 921020012345074 (Preparer/Admin only)"
+                disabled={isPending}
+                className="w-full min-h-[42px] font-mono tabular-nums"
               />
             </div>
 
@@ -1108,7 +1119,7 @@ export function SettingsManagement({
               )}
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <Label htmlFor="eb-short" className="block text-xs font-semibold text-slate-700 mb-1">
                   Short Code <span className="text-rose-600">*</span>
@@ -1146,13 +1157,26 @@ export function SettingsManagement({
 
             <div>
               <Label htmlFor="eb-mask" className="block text-xs font-semibold text-slate-700 mb-1">
-                Masked Account Number
+                Masked Account Number (Displayed on Advice &amp; UI)
               </Label>
               <Input
                 id="eb-mask"
                 {...editBankForm.register('account_number_masked')}
                 disabled={isPending}
                 className="w-full min-h-[42px] tabular-nums"
+              />
+            </div>
+
+            <div>
+              <Label htmlFor="eb-full" className="block text-xs font-semibold text-slate-700 mb-1">
+                Full Debit Account Number (Optional — for Bank Bulk Excel)
+              </Label>
+              <Input
+                id="eb-full"
+                {...editBankForm.register('full_debit_account_number')}
+                placeholder="e.g. 921020012345074 (Preparer/Admin only)"
+                disabled={isPending}
+                className="w-full min-h-[42px] font-mono tabular-nums"
               />
             </div>
 

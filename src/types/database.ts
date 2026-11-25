@@ -30,6 +30,8 @@ export type Company = {
   id: string;
   code: 'INDFURN' | 'VINMORE' | string;
   name: string;
+  contact_email?: string | null;
+  contact_phone?: string | null;
   is_active: boolean;
   created_at: string;
 };
@@ -64,6 +66,7 @@ export type CompanyBank = {
   ifsc_prefix?: string;
   account_number_masked?: string | null;
   account_mask?: string | null;
+  full_debit_account_number?: string | null;
   available_balance?: number;
   balance_updated_at?: string | null;
   balance_updated_by?: string | null;
@@ -82,6 +85,7 @@ export type Vendor = {
   beneficiary_name?: string;
   account_number?: string;
   ifsc_code?: string | null;
+  whatsapp_number?: string | null;
   remarks?: string | null;
   notes?: string | null;
   gstin?: string | null;
@@ -233,6 +237,7 @@ export type Database = {
           beneficiary_name?: string;
           account_number?: string;
           ifsc_code?: string | null;
+          whatsapp_number?: string | null;
           remarks?: string | null;
           notes?: string | null;
           gstin?: string | null;
@@ -257,6 +262,7 @@ export type Database = {
           ifsc_prefix?: string;
           account_number_masked?: string | null;
           account_mask?: string | null;
+          full_debit_account_number?: string | null;
           available_balance?: number;
           balance_updated_at?: string | null;
           balance_updated_by?: string | null;

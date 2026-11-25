@@ -99,7 +99,18 @@ export default async function PrintPage({ searchParams }: PrintPageProps) {
     console.error('Error fetching print items:', error);
   }
 
-  let payments = (paymentsData || []) as PaymentItem[];
+  const canSeeFullDebitAc = profile.role === 'PREPARER' || profile.is_admin;
+  let payments = ((paymentsData || []) as PaymentItem[]).map((p) =>
+    canSeeFullDebitAc || !p.source_bank
+      ? p
+      : {
+        ...p,
+        source_bank: {
+          ...p.source_bank,
+          full_debit_account_number: null,
+        },
+      }
+  );
 
   if (searchQuery) {
     payments = payments.filter((p) => {

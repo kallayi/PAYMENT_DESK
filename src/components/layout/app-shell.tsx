@@ -143,11 +143,10 @@ function DesktopNavLinks({ navItems }: { navItems: NavItem[] }) {
             key={item.id}
             href={item.href}
             prefetch={true}
-            className={`w-full h-10 px-3 rounded-lg text-xs font-medium flex items-center justify-between transition-colors ${
-              active
-                ? 'bg-rose-50 text-[#7F1D1D] font-bold border-l-2 border-[#7F1D1D]'
-                : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
-            }`}
+            className={`w-full h-10 px-3 rounded-lg text-xs font-medium flex items-center justify-between transition-colors ${active
+              ? 'bg-rose-50 text-[#7F1D1D] font-bold border-l-2 border-[#7F1D1D]'
+              : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+              }`}
           >
             <span className="flex items-center gap-2.5">
               <Icon className={`w-4 h-4 ${active ? 'text-[#7F1D1D]' : 'text-slate-400'}`} />
@@ -155,9 +154,8 @@ function DesktopNavLinks({ navItems }: { navItems: NavItem[] }) {
             </span>
             {item.badge !== undefined && item.badge > 0 && (
               <span
-                className={`tabular-nums text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
-                  active ? 'bg-[#7F1D1D] text-white' : 'bg-amber-100 text-amber-900 border border-amber-200'
-                }`}
+                className={`tabular-nums text-[10px] font-bold px-1.5 py-0.5 rounded-full ${active ? 'bg-[#7F1D1D] text-white' : 'bg-amber-100 text-amber-900 border border-amber-200'
+                  }`}
               >
                 {item.badge}
               </span>
@@ -189,9 +187,8 @@ function MobileBottomNavLinks({
             key={item.id}
             href={item.href}
             prefetch={true}
-            className={`flex flex-col items-center justify-center gap-1 text-[11px] font-medium transition-colors ${
-              active ? 'text-[#7F1D1D] font-bold' : 'text-slate-400 hover:text-slate-700'
-            }`}
+            className={`flex flex-col items-center justify-center gap-0.5 min-w-0 px-0.5 text-[10px] leading-tight font-medium transition-colors ${active ? 'text-[#7F1D1D] font-bold' : 'text-slate-400 hover:text-slate-700'
+              }`}
           >
             <div className="relative">
               <Icon className={`w-5 h-5 ${active ? 'text-[#7F1D1D]' : 'text-slate-400'}`} />
@@ -201,7 +198,7 @@ function MobileBottomNavLinks({
                 </span>
               )}
             </div>
-            <span>{item.label}</span>
+            <span className="truncate max-w-full px-0.5">{item.label}</span>
           </Link>
         );
       })}
@@ -308,12 +305,12 @@ export function AppShell({
       </aside>
 
       {/* MAIN COLUMN */}
-      <div className="flex-1 lg:pl-60 flex flex-col min-w-0 pb-20 lg:pb-8">
+      <div className="flex-1 lg:pl-60 flex flex-col min-w-0 pb-24 lg:pb-8">
         {/* TOP HEADER BAR (Desktop & Mobile) */}
-        <header className="sticky top-0 z-20 h-14 bg-white/95 backdrop-blur-xs border-b border-slate-200 px-4 sm:px-6 flex items-center justify-between">
+        <header className="sticky top-0 z-20 h-14 bg-white/95 backdrop-blur-sm border-b border-slate-200 px-3 sm:px-6 gap-2 flex items-center justify-between">
           {/* Left: Mobile Logo & Title */}
-          <div className="flex items-center gap-2.5 min-w-0">
-            <div className="lg:hidden">
+          <div className="flex items-center gap-2 min-w-0 flex-1">
+            <div className="lg:hidden shrink-0">
               <PaymentDeskLogo size="sm" showWordmark={false} />
             </div>
             <span className="text-sm font-bold text-slate-900 truncate">
@@ -322,7 +319,7 @@ export function AppShell({
           </div>
 
           {/* Right: Company Switcher + Notification Bell + User Role + Sign Out */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1 sm:gap-2 shrink-0">
             <CompanySwitcher
               allowedCompanies={allowedCompanies}
               activeCompany={activeCompany}
@@ -352,12 +349,12 @@ export function AppShell({
               onClick={handleLogout}
               disabled={isLoggingOut}
               title="Sign Out"
-              className="min-h-[38px] px-2.5 rounded-lg text-xs font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 flex items-center gap-1.5 transition-colors disabled:opacity-50 cursor-pointer"
+              className="min-h-[40px] min-w-[40px] sm:min-w-0 px-2 sm:px-2.5 rounded-lg text-xs font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50 cursor-pointer"
             >
               {isLoggingOut ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                <Loader2 className="w-4 h-4 sm:w-3.5 sm:h-3.5 animate-spin" />
               ) : (
-                <LogOut className="w-3.5 h-3.5" />
+                <LogOut className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
               )}
               <span className="hidden sm:inline text-xs">Sign Out</span>
             </button>
@@ -365,7 +362,7 @@ export function AppShell({
         </header>
 
         {/* MAIN WORKSPACE CONTENT */}
-        <main className="flex-1 w-full max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-5 sm:py-7">
+        <main className="flex-1 w-full max-w-6xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-7 min-w-0">
           {children}
         </main>
       </div>

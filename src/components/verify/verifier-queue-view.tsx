@@ -227,27 +227,25 @@ export function VerifierQueueView({
       </div>
 
       {/* Filters & Search */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-3">
+        <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
             onClick={() => setShowOverdueOnly(false)}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-              !showOverdueOnly
+            className={`min-h-[38px] px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${!showOverdueOnly
                 ? 'bg-slate-900 text-white shadow-sm'
                 : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
-            }`}
+              }`}
           >
             All Pending ({totalItems})
           </button>
           <button
             type="button"
             onClick={() => setShowOverdueOnly(true)}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 ${
-              showOverdueOnly
+            className={`min-h-[38px] px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer ${showOverdueOnly
                 ? 'bg-rose-600 text-white shadow-sm'
                 : 'bg-white border border-slate-200 text-rose-700 hover:bg-rose-50'
-            }`}
+              }`}
           >
             <AlertTriangle className="w-3.5 h-3.5" />
             <span>Overdue Only ({overdueCount})</span>
@@ -261,7 +259,7 @@ export function VerifierQueueView({
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search party, invoice ref, or account..."
-            className="w-full pl-8 pr-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg text-slate-900 focus:outline-none focus:ring-1 focus:ring-brand focus:border-brand"
+            className="w-full min-h-[38px] pl-8 pr-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg text-slate-900 focus:outline-none focus:ring-1 focus:ring-brand focus:border-brand"
           />
         </div>
       </div>
@@ -284,7 +282,7 @@ export function VerifierQueueView({
       ) : (
         <div className="space-y-3">
           {/* Desktop Table View */}
-          <div className="hidden lg:block bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
+          <div className="hidden lg:block bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
             <table className="w-full border-collapse text-left text-xs">
               <thead>
                 <tr className="bg-slate-50/80 border-b border-slate-200 text-slate-600 font-semibold uppercase tracking-wider text-[11px]">
@@ -420,7 +418,7 @@ export function VerifierQueueView({
                             type="button"
                             onClick={() => handleVerify(item)}
                             disabled={isVerifying}
-                            className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold inline-flex items-center gap-1.5 shadow-xs transition-colors disabled:opacity-50"
+                            className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold inline-flex items-center gap-1.5 shadow-sm transition-colors disabled:opacity-50"
                             title="Verify and forward to Owner for approval"
                           >
                             {isVerifying ? (
@@ -495,8 +493,8 @@ export function VerifierQueueView({
 
                   {/* Beneficiary Details Box */}
                   <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200 text-xs text-slate-700 space-y-1">
-                    <div className="flex items-center justify-between">
-                      <span className="font-semibold text-slate-800 truncate">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-semibold text-slate-800 truncate min-w-0">
                         Beneficiary: {beneficiary}
                       </span>
                       <BankBadge
@@ -504,20 +502,20 @@ export function VerifierQueueView({
                         fullName={item.source_bank?.bank_name || item.source_bank?.full_name}
                       />
                     </div>
-                    <div className="text-[11px] font-mono text-slate-500 flex items-center justify-between">
-                      <span>A/C: {vendor?.account_number || 'NA'}</span>
+                    <div className="text-[11px] font-mono text-slate-500 flex flex-wrap items-center justify-between gap-1">
+                      <span className="break-all">A/C: {vendor?.account_number || 'NA'}</span>
                       <span>IFSC: {vendor?.ifsc_code || 'NA'}</span>
                     </div>
                   </div>
 
                   {/* Actions & Bill Link */}
-                  <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-100">
+                  <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-100">
                     {item.invoice_file_path ? (
                       <button
                         type="button"
                         onClick={() => handleViewBill(item.id, item.invoice_file_path!)}
                         disabled={isViewing}
-                        className="text-xs text-brand font-semibold hover:underline inline-flex items-center gap-1"
+                        className="min-h-[38px] text-xs text-brand font-semibold hover:underline inline-flex items-center gap-1 cursor-pointer"
                       >
                         {isViewing ? <Loader2 className="w-3 h-3 animate-spin" /> : <ExternalLink className="w-3 h-3" />}
                         <span>View Bill</span>
@@ -526,14 +524,14 @@ export function VerifierQueueView({
                       <span className="text-[11px] text-slate-400">No bill attached</span>
                     )}
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 ml-auto">
                       <button
                         type="button"
                         onClick={() => {
                           setRejectingItem(item);
                           setRejectionReason('');
                         }}
-                        className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-700 hover:text-rose-600 hover:border-rose-200"
+                        className="min-h-[42px] px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-700 hover:text-rose-600 hover:border-rose-200 cursor-pointer"
                       >
                         Return
                       </button>
@@ -541,7 +539,7 @@ export function VerifierQueueView({
                         type="button"
                         onClick={() => handleVerify(item)}
                         disabled={isVerifying}
-                        className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-semibold inline-flex items-center gap-1"
+                        className="min-h-[42px] px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold inline-flex items-center gap-1 shadow-sm cursor-pointer disabled:opacity-50"
                       >
                         {isVerifying ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
                         <span>Verify & Forward</span>

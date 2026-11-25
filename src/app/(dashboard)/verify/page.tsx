@@ -52,10 +52,23 @@ export default async function VerifyPage() {
     console.error('Error fetching verification queue:', error);
   }
 
+  const canSeeFullDebitAc = profile.is_admin;
+  const sanitizedPayments = ((payments || []) as PaymentItem[]).map((p) =>
+    canSeeFullDebitAc || !p.source_bank
+      ? p
+      : {
+        ...p,
+        source_bank: {
+          ...p.source_bank,
+          full_debit_account_number: null,
+        },
+      }
+  );
+
   return (
     <React.Suspense fallback={<VerifyLoadingSkeleton />}>
       <VerifierQueueView
-        initialPayments={(payments || []) as PaymentItem[]}
+        initialPayments={sanitizedPayments}
         companyName={activeCompany?.name || 'INDFURN'}
       />
     </React.Suspense>

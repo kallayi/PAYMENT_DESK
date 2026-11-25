@@ -19,11 +19,13 @@ import {
   ArrowRight,
   Info,
   FileSpreadsheet,
+  MessageCircle,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { PaymentFormSheet } from '@/components/payments/payment-form-sheet';
 import { PaymentDetailDrawer } from '@/components/payments/payment-detail-drawer';
 import { MarkPaidModal } from '@/components/payments/mark-paid-modal';
+import { PaymentAcknowledgementModal } from '@/components/payments/payment-acknowledgement-modal';
 import { UpdateBalancesModal } from '@/components/payments/update-balances-modal';
 import { BankExcelExportModal } from '@/components/payments/bank-excel-export-modal';
 import { PaymentStatusBadge, BankBadge } from '@/components/payments/payment-status-badge';
@@ -31,6 +33,7 @@ import { deleteDraftPayment, submitPayment } from '@/actions/payments';
 import { getSignedFileUrl } from '@/actions/storage';
 import { formatHumanDate, formatShortDate, formatINR } from '@/lib/format';
 import type {
+  Company,
   CompanyBank,
   PaymentItem,
   PaymentStatus,
@@ -42,6 +45,8 @@ interface PaymentsWorkspaceProps {
   vendors: Vendor[];
   banks: CompanyBank[];
   companyCode?: string;
+  activeCompany?: Company | null;
+  currentUserName?: string;
   initialFromReminder?: {
     id: string;
     title: string;
@@ -70,6 +75,8 @@ export function PaymentsWorkspace({
   vendors: initialVendors,
   banks: initialBanks,
   companyCode = 'INDFURN',
+  activeCompany,
+  currentUserName = 'Accounts Team',
   initialFromReminder,
 }: PaymentsWorkspaceProps) {
   const [payments, setPayments] = React.useState<PaymentItem[]>(initialPayments);
@@ -89,6 +96,7 @@ export function PaymentsWorkspace({
   const [selectedEditPayment, setSelectedEditPayment] = React.useState<PaymentItem | null>(null);
   const [detailPayment, setDetailPayment] = React.useState<PaymentItem | null>(null);
   const [utrPayment, setUtrPayment] = React.useState<PaymentItem | null>(null);
+  const [advicePayment, setAdvicePayment] = React.useState<PaymentItem | null>(null);
 
   // Action loading states
   const [submittingPaymentId, setSubmittingPaymentId] = React.useState<string | null>(null);
@@ -300,12 +308,12 @@ export function PaymentsWorkspace({
   const activeBanks = banks.filter((b) => b.is_active);
 
   return (
-    <div className="w-full max-w-7xl mx-auto space-y-5 pb-12">
+    <div className="w-full max-w-7xl mx-auto space-y-4 sm:space-y-5 pb-12">
       {/* TOP BANK BALANCE STRIP & ACTION HEADER */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 p-4 rounded-xl border border-slate-200 bg-white shadow-sm">
-        <div className="space-y-2">
-          <div className="flex items-center gap-2">
-            <h1 className="text-xl font-bold tracking-tight text-slate-900">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 sm:gap-4 p-3.5 sm:p-4 rounded-xl border border-slate-200 bg-white shadow-sm">
+        <div className="space-y-2 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <h1 className="text-lg sm:text-xl font-bold tracking-tight text-slate-900">
               Payments Ledger
             </h1>
             <span className="text-xs text-slate-400 font-medium hidden sm:inline">
@@ -314,18 +322,18 @@ export function PaymentsWorkspace({
           </div>
 
           {/* Live Bank Balance Pills */}
-          <div className="flex items-center gap-2 flex-wrap">
+          <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2">
             {activeBanks.map((b) => {
               const code = b.short_code || b.short_name || 'BANK';
               const bal = b.available_balance ?? 0;
               return (
                 <div
                   key={b.id}
-                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-50 border border-slate-200 text-xs hover:border-slate-300 transition-colors"
+                  className="inline-flex items-center justify-between sm:justify-start gap-1.5 px-2.5 py-1.5 sm:py-1 rounded-lg bg-slate-50 border border-slate-200 text-xs hover:border-slate-300 transition-colors min-w-0"
                   title={`Last updated: ${b.balance_updated_at ? formatHumanDate(b.balance_updated_at) : 'Not updated yet'}`}
                 >
-                  <span className="font-bold text-slate-700">{code}:</span>
-                  <span className="font-bold text-slate-900 tabular-nums">
+                  <span className="font-bold text-slate-700 shrink-0">{code}:</span>
+                  <span className="font-bold text-slate-900 tabular-nums truncate">
                     {formatINR(bal)}
                   </span>
                 </div>
@@ -339,18 +347,18 @@ export function PaymentsWorkspace({
           <button
             type="button"
             onClick={() => setIsBalancesModalOpen(true)}
-            className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 inline-flex items-center gap-1.5 transition-colors shadow-xs"
+            className="min-h-[40px] sm:min-h-[36px] flex-1 sm:flex-initial px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 inline-flex items-center justify-center gap-1.5 transition-colors shadow-sm cursor-pointer"
           >
-            <Landmark className="w-4 h-4 text-brand" />
+            <Landmark className="w-4 h-4 text-brand shrink-0" />
             <span>Update Balances</span>
           </button>
 
-          <Link href="/print">
+          <Link href="/print" className="flex-1 sm:flex-initial">
             <button
               type="button"
-              className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs font-medium text-slate-700 inline-flex items-center gap-1.5 transition-colors shadow-xs"
+              className="w-full min-h-[40px] sm:min-h-[36px] px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs font-medium text-slate-700 inline-flex items-center justify-center gap-1.5 transition-colors shadow-sm cursor-pointer"
             >
-              <Printer className="w-4 h-4 text-slate-500" />
+              <Printer className="w-4 h-4 text-slate-500 shrink-0" />
               <span>Print Voucher</span>
             </button>
           </Link>
@@ -358,16 +366,16 @@ export function PaymentsWorkspace({
           <button
             type="button"
             onClick={handleOpenNewEntry}
-            className="px-4 py-1.5 rounded-lg bg-brand hover:bg-brand-hover text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors shadow-xs"
+            className="w-full sm:w-auto min-h-[42px] sm:min-h-[36px] px-4 py-1.5 rounded-lg bg-brand hover:bg-brand-hover text-white text-xs font-semibold inline-flex items-center justify-center gap-1.5 transition-colors shadow-sm cursor-pointer"
           >
-            <Plus className="w-4 h-4" />
+            <Plus className="w-4 h-4 shrink-0" />
             <span>New Entry</span>
           </button>
         </div>
       </div>
 
       {/* SINGLE-ROW STATUS TABS */}
-      <div className="flex items-center gap-1.5 overflow-x-auto pb-1 border-b border-slate-200/80 scrollbar-none">
+      <div className="flex items-center gap-1.5 overflow-x-auto -mx-3 px-3 sm:mx-0 sm:px-0 pb-1.5 border-b border-slate-200/80 scrollbar-none">
         {tabs.map((tab) => {
           const isActive = activeTab === tab.id;
           return (
@@ -375,16 +383,16 @@ export function PaymentsWorkspace({
               key={tab.id}
               type="button"
               onClick={() => setActiveTab(tab.id)}
-              className={`min-h-[38px] px-3.5 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap inline-flex items-center gap-2 transition-colors cursor-pointer ${isActive
-                  ? 'bg-brand text-white shadow-xs'
-                  : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+              className={`min-h-[38px] px-3.5 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap inline-flex items-center gap-2 transition-colors cursor-pointer shrink-0 ${isActive
+                ? 'bg-brand text-white shadow-sm'
+                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
                 }`}
             >
               <span>{tab.label}</span>
               <span
                 className={`tabular-nums text-[11px] px-1.5 py-0.2 rounded-full ${isActive
-                    ? 'bg-white/20 text-white'
-                    : 'bg-slate-200/80 text-slate-600'
+                  ? 'bg-white/20 text-white'
+                  : 'bg-slate-200/80 text-slate-600'
                   }`}
               >
                 {tab.count}
@@ -420,7 +428,7 @@ export function PaymentsWorkspace({
           <div className="space-y-3">
             {/* READY TO PAY: BANK BULK EXCEL EXPORT TOOLBAR */}
             {activeTab === 'APPROVED' && (
-              <div className="p-3.5 rounded-xl bg-white border border-slate-200 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="p-3.5 rounded-xl bg-white border border-slate-200 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div className="flex items-center gap-3 flex-wrap">
                   <label className="inline-flex items-center gap-2 text-xs font-semibold text-slate-700 cursor-pointer">
                     <input
@@ -456,7 +464,7 @@ export function PaymentsWorkspace({
                 <button
                   type="button"
                   onClick={() => setIsExcelModalOpen(true)}
-                  className="min-h-[38px] px-3.5 py-1.5 rounded-lg bg-brand hover:bg-brand-hover text-white text-xs font-semibold inline-flex items-center justify-center gap-1.5 shadow-xs transition-colors cursor-pointer"
+                  className="min-h-[40px] sm:min-h-[38px] px-3.5 py-1.5 rounded-lg bg-brand hover:bg-brand-hover text-white text-xs font-semibold inline-flex items-center justify-center gap-1.5 shadow-sm transition-colors cursor-pointer"
                 >
                   <FileSpreadsheet className="w-4 h-4" />
                   <span>
@@ -468,7 +476,7 @@ export function PaymentsWorkspace({
             )}
 
             {/* DESKTOP 7-COLUMN TABLE VIEW (>= 768px) */}
-            <div className="hidden md:block bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
+            <div className="hidden md:block bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
               <table className="w-full border-collapse text-left text-xs">
                 <thead>
                   <tr className="bg-slate-50/80 border-b border-slate-200 text-slate-600 font-semibold uppercase tracking-wider text-[11px]">
@@ -509,8 +517,8 @@ export function PaymentsWorkspace({
                         key={item.id}
                         onClick={() => setDetailPayment(item)}
                         className={`hover:bg-slate-50/60 transition-colors cursor-pointer group ${activeTab === 'APPROVED' && selectedApprovedIds.has(item.id)
-                            ? 'bg-brand/5'
-                            : ''
+                          ? 'bg-brand/5'
+                          : ''
                           }`}
                       >
                         {activeTab === 'APPROVED' && (
@@ -684,7 +692,7 @@ export function PaymentsWorkspace({
                               <button
                                 type="button"
                                 onClick={() => setUtrPayment(item)}
-                                className="h-8 px-3 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors shadow-xs cursor-pointer"
+                                className="h-8 px-3 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors shadow-sm cursor-pointer"
                               >
                                 <CheckCircle2 className="w-3.5 h-3.5" />
                                 <span>Mark Paid</span>
@@ -702,15 +710,30 @@ export function PaymentsWorkspace({
                               </div>
                             )}
 
-                            {/* PAID Action: View UTR info */}
+                            {/* PAID Action: View UTR/Cheque info + Payment Advice / WhatsApp */}
                             {item.status === 'PAID' && (
-                              <button
-                                type="button"
-                                onClick={() => setDetailPayment(item)}
-                                className="h-8 px-2.5 rounded-md border border-slate-200 bg-white hover:bg-slate-50 text-xs font-mono text-slate-700 inline-flex items-center gap-1 transition-colors cursor-pointer"
-                              >
-                                <span>UTR: {item.utr_number || 'View'}</span>
-                              </button>
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => setDetailPayment(item)}
+                                  className="h-8 px-2.5 rounded-md border border-slate-200 bg-white hover:bg-slate-50 text-xs font-mono text-slate-700 inline-flex items-center gap-1 transition-colors cursor-pointer"
+                                >
+                                  <span>
+                                    {item.payment_mode === 'CHEQUE' && item.cheque_number
+                                      ? `CHQ #${item.cheque_number}`
+                                      : `UTR: ${item.utr_number || 'View'}`}
+                                  </span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setAdvicePayment(item)}
+                                  className="h-8 px-2.5 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold inline-flex items-center gap-1 shadow-sm transition-colors cursor-pointer"
+                                  title="Open Payment Advice & Share on WhatsApp"
+                                >
+                                  <MessageCircle className="w-3.5 h-3.5" />
+                                  <span>Advice / WhatsApp</span>
+                                </button>
+                              </>
                             )}
 
                             {/* PENDING_VERIFICATION & PENDING_APPROVAL: View Details */}
@@ -764,7 +787,7 @@ export function PaymentsWorkspace({
                   <div
                     key={item.id}
                     onClick={() => setDetailPayment(item)}
-                    className="bg-white rounded-xl border border-slate-200 p-4 shadow-xs space-y-3 cursor-pointer active:scale-[0.99] transition-transform"
+                    className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm space-y-3 cursor-pointer active:scale-[0.99] transition-transform"
                   >
                     {/* Header Row: Vendor Name + Net Amount */}
                     <div className="flex items-start justify-between gap-2">
@@ -811,8 +834,8 @@ export function PaymentsWorkspace({
                     </div>
 
                     {/* Purpose and Bank */}
-                    <div className="flex items-center justify-between text-xs text-slate-600 bg-slate-50/70 p-2 rounded-lg border border-slate-100">
-                      <span className="truncate max-w-[200px]">{item.purpose}</span>
+                    <div className="flex items-center justify-between gap-2 text-xs text-slate-600 bg-slate-50/70 p-2 rounded-lg border border-slate-100">
+                      <span className="truncate min-w-0 flex-1">{item.purpose}</span>
                       <BankBadge
                         shortName={item.source_bank?.short_code || item.source_bank?.short_name}
                         fullName={item.source_bank?.bank_name || item.source_bank?.full_name}
@@ -821,7 +844,7 @@ export function PaymentsWorkspace({
 
                     {/* Mobile Action Buttons */}
                     <div
-                      className="flex items-center justify-end gap-2 pt-1 border-t border-slate-100"
+                      className="flex flex-wrap items-center justify-end gap-2 pt-2 border-t border-slate-100"
                       onClick={(e) => e.stopPropagation()}
                     >
                       {item.status === 'DRAFT' && (
@@ -863,16 +886,30 @@ export function PaymentsWorkspace({
                         <button
                           type="button"
                           onClick={() => setUtrPayment(item)}
-                          className="w-full min-h-[44px] px-4 rounded-lg bg-emerald-600 text-white text-xs font-semibold inline-flex items-center justify-center gap-1.5 shadow-xs cursor-pointer"
+                          className="w-full min-h-[44px] px-4 rounded-lg bg-emerald-600 text-white text-xs font-semibold inline-flex items-center justify-center gap-1.5 shadow-sm cursor-pointer"
                         >
                           <CheckCircle2 className="w-4 h-4" />
                           <span>Mark Paid & Enter UTR</span>
                         </button>
                       )}
 
-                      {item.status === 'PAID' && item.utr_number && (
-                        <div className="w-full text-right text-xs font-mono text-slate-600">
-                          UTR: <span className="font-semibold text-slate-900">{item.utr_number}</span>
+                      {item.status === 'PAID' && (
+                        <div className="w-full flex flex-wrap items-center justify-between gap-2">
+                          <span className="text-xs font-mono text-slate-600 truncate">
+                            {item.payment_mode === 'CHEQUE' && item.cheque_number ? (
+                              <>CHQ: <span className="font-semibold text-slate-900">#{item.cheque_number}</span></>
+                            ) : (
+                              <>UTR: <span className="font-semibold text-slate-900">{item.utr_number || 'Recorded'}</span></>
+                            )}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setAdvicePayment(item)}
+                            className="min-h-[40px] px-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold inline-flex items-center gap-1.5 shrink-0 shadow-sm cursor-pointer"
+                          >
+                            <MessageCircle className="w-3.5 h-3.5" />
+                            <span>Advice / WhatsApp</span>
+                          </button>
                         </div>
                       )}
                     </div>
@@ -913,6 +950,8 @@ export function PaymentsWorkspace({
           if (!open) setDetailPayment(null);
         }}
         payment={detailPayment}
+        activeCompany={activeCompany}
+        fallbackUserName={currentUserName}
       />
 
       {/* MARK PAID / ENTER UTR MODAL */}
@@ -922,6 +961,8 @@ export function PaymentsWorkspace({
           if (!open) setUtrPayment(null);
         }}
         payment={utrPayment}
+        activeCompany={activeCompany}
+        fallbackUserName={currentUserName}
         onSuccess={(paidItem) => {
           setPayments((prev) =>
             prev.map((p) => (p.id === paidItem.id ? paidItem : p))
@@ -932,6 +973,17 @@ export function PaymentsWorkspace({
             return next;
           });
         }}
+      />
+
+      {/* PAYMENT ACKNOWLEDGEMENT / WHATSAPP MODAL */}
+      <PaymentAcknowledgementModal
+        open={Boolean(advicePayment)}
+        onOpenChange={(open) => {
+          if (!open) setAdvicePayment(null);
+        }}
+        payment={advicePayment}
+        activeCompany={activeCompany}
+        fallbackUserName={currentUserName}
       />
 
       {/* BANK BULK UPLOAD EXCEL EXPORT MODAL */}

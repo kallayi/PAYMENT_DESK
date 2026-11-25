@@ -419,8 +419,8 @@ export function PaymentFormSheet({
   const sheetTitle = editPayment
     ? 'Edit Draft Entry'
     : initialFromReminder
-    ? `New Payment Entry (from Reminder)`
-    : 'New Payment Entry';
+      ? `New Payment Entry (from Reminder)`
+      : 'New Payment Entry';
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -429,7 +429,7 @@ export function PaymentFormSheet({
         className="w-full sm:max-w-xl p-0 flex flex-col bg-white overflow-hidden shadow-2xl"
       >
         {/* DRAWER HEADER */}
-        <SheetHeader className="px-5 py-4 border-b border-slate-200">
+        <SheetHeader className="px-4 sm:px-5 py-3.5 sm:py-4 pr-10 border-b border-slate-200 shrink-0">
           <SheetTitle className="text-base font-semibold text-slate-900">
             {sheetTitle}
           </SheetTitle>
@@ -439,9 +439,9 @@ export function PaymentFormSheet({
         </SheetHeader>
 
         {/* SCROLLABLE FORM BODY */}
-        <div className="flex-1 overflow-y-auto p-5 space-y-4">
+        <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-4">
           {/* PAYMENT TYPE & PAYMENT MODE TOGGLES */}
-          <div className="grid grid-cols-2 gap-3 p-2 rounded-lg bg-slate-50 border border-slate-200">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-2.5 rounded-lg bg-slate-50 border border-slate-200">
             <div>
               <label className="block text-[11px] font-semibold text-slate-600 mb-1">
                 Payment Type
@@ -450,11 +450,10 @@ export function PaymentFormSheet({
                 <button
                   type="button"
                   onClick={() => setPaymentType('AGAINST_BILL')}
-                  className={`flex-1 py-1 rounded text-xs font-semibold transition-colors ${
-                    paymentType === 'AGAINST_BILL'
-                      ? 'bg-brand text-white shadow-xs'
+                  className={`flex-1 min-h-[34px] py-1 rounded text-xs font-semibold transition-colors ${paymentType === 'AGAINST_BILL'
+                      ? 'bg-brand text-white shadow-sm'
                       : 'text-slate-600 hover:text-slate-900'
-                  }`}
+                    }`}
                 >
                   Against Bill
                 </button>
@@ -464,11 +463,10 @@ export function PaymentFormSheet({
                     setPaymentType('ON_ACCOUNT');
                     if (!invoiceRef.trim()) setInvoiceRef('On Account');
                   }}
-                  className={`flex-1 py-1 rounded text-xs font-semibold transition-colors ${
-                    paymentType === 'ON_ACCOUNT'
-                      ? 'bg-brand text-white shadow-xs'
+                  className={`flex-1 min-h-[34px] py-1 rounded text-xs font-semibold transition-colors ${paymentType === 'ON_ACCOUNT'
+                      ? 'bg-brand text-white shadow-sm'
                       : 'text-slate-600 hover:text-slate-900'
-                  }`}
+                    }`}
                 >
                   On Account
                 </button>
@@ -483,22 +481,20 @@ export function PaymentFormSheet({
                 <button
                   type="button"
                   onClick={() => setPaymentMode('NEFT_RTGS')}
-                  className={`flex-1 py-1 rounded text-xs font-semibold transition-colors ${
-                    paymentMode === 'NEFT_RTGS'
-                      ? 'bg-slate-900 text-white shadow-xs'
+                  className={`flex-1 min-h-[34px] py-1 rounded text-xs font-semibold transition-colors ${paymentMode === 'NEFT_RTGS'
+                      ? 'bg-slate-900 text-white shadow-sm'
                       : 'text-slate-600 hover:text-slate-900'
-                  }`}
+                    }`}
                 >
                   NEFT / RTGS
                 </button>
                 <button
                   type="button"
                   onClick={() => setPaymentMode('CHEQUE')}
-                  className={`flex-1 py-1 rounded text-xs font-semibold transition-colors ${
-                    paymentMode === 'CHEQUE'
-                      ? 'bg-slate-900 text-white shadow-xs'
+                  className={`flex-1 min-h-[34px] py-1 rounded text-xs font-semibold transition-colors ${paymentMode === 'CHEQUE'
+                      ? 'bg-slate-900 text-white shadow-sm'
                       : 'text-slate-600 hover:text-slate-900'
-                  }`}
+                    }`}
                 >
                   Cheque
                 </button>
@@ -508,7 +504,7 @@ export function PaymentFormSheet({
 
           {/* CHEQUE SPECIFIC FIELDS */}
           {paymentMode === 'CHEQUE' && (
-            <div className="grid grid-cols-2 gap-3 p-3 rounded-lg bg-amber-50/50 border border-amber-200 animate-in fade-in-50">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 rounded-lg bg-amber-50/50 border border-amber-200 animate-in fade-in-50">
               <div>
                 <label className="block text-xs font-medium text-slate-700 mb-1">
                   Cheque Number
@@ -518,7 +514,7 @@ export function PaymentFormSheet({
                   placeholder="e.g. 004821"
                   value={chequeNumber}
                   onChange={(e) => setChequeNumber(e.target.value)}
-                  className="w-full px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-mono tabular-nums outline-none focus:border-brand"
+                  className="w-full min-h-[40px] px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-mono tabular-nums outline-none focus:border-brand"
                 />
               </div>
               <div>
@@ -529,14 +525,14 @@ export function PaymentFormSheet({
                   type="date"
                   value={chequeDate}
                   onChange={(e) => setChequeDate(e.target.value)}
-                  className="w-full px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs tabular-nums outline-none focus:border-brand"
+                  className="w-full min-h-[40px] px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs tabular-nums outline-none focus:border-brand"
                 />
               </div>
             </div>
           )}
 
           {/* SHEET DATE & DUE DATE */}
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label
                 htmlFor="sheet-date"
@@ -620,7 +616,7 @@ export function PaymentFormSheet({
             {showQuickAddVendor && (
               <form
                 onSubmit={handleQuickAddVendor}
-                className="mt-2 p-3 rounded-lg bg-slate-50 border border-slate-200 flex items-center gap-2"
+                className="mt-2 p-3 rounded-lg bg-slate-50 border border-slate-200 flex flex-wrap sm:flex-nowrap items-center gap-2"
               >
                 <input
                   type="text"
@@ -629,7 +625,7 @@ export function PaymentFormSheet({
                   placeholder="New vendor party name"
                   value={quickVendorName}
                   onChange={(e) => setQuickVendorName(e.target.value)}
-                  className="flex-1 h-9 px-2.5 rounded-md border border-slate-200 bg-white text-xs outline-none focus:border-brand"
+                  className="flex-1 min-w-[160px] min-h-[38px] px-2.5 rounded-md border border-slate-200 bg-white text-xs outline-none focus:border-brand"
                 />
                 <button
                   type="submit"
@@ -695,11 +691,10 @@ export function PaymentFormSheet({
                   key={p}
                   type="button"
                   onClick={() => setPurpose(p)}
-                  className={`px-2.5 py-1 rounded-md border text-[11px] font-medium transition-colors cursor-pointer ${
-                    purpose === p
+                  className={`px-2.5 py-1 rounded-md border text-[11px] font-medium transition-colors cursor-pointer ${purpose === p
                       ? 'border-brand bg-brand text-white'
                       : 'border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700'
-                  }`}
+                    }`}
                 >
                   {p}
                 </button>
@@ -717,7 +712,7 @@ export function PaymentFormSheet({
           </div>
 
           {/* AMOUNT & TDS + LIVE NET PAYABLE */}
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label
                 htmlFor="payment-amount"
@@ -752,11 +747,10 @@ export function PaymentFormSheet({
                 placeholder="0.00"
                 value={tds}
                 onChange={(e) => setTds(e.target.value)}
-                className={`w-full min-h-[44px] sm:min-h-[38px] px-3 rounded-lg border bg-white text-sm tabular-nums outline-none focus:ring-1 transition-colors ${
-                  isTdsInvalid
+                className={`w-full min-h-[44px] sm:min-h-[38px] px-3 rounded-lg border bg-white text-sm tabular-nums outline-none focus:ring-1 transition-colors ${isTdsInvalid
                     ? 'border-rose-400 focus:border-rose-600 focus:ring-rose-500'
                     : 'border-slate-200 focus:border-brand focus:ring-brand'
-                }`}
+                  }`}
               />
             </div>
           </div>
@@ -765,9 +759,8 @@ export function PaymentFormSheet({
           <div className="px-3.5 py-2.5 rounded-lg bg-slate-50 border border-slate-200 flex items-center justify-between text-xs">
             <span className="text-slate-500 font-medium">Net Payable to Beneficiary</span>
             <span
-              className={`text-sm font-bold tabular-nums ${
-                isTdsInvalid ? 'text-rose-600' : 'text-slate-900'
-              }`}
+              className={`text-sm font-bold tabular-nums ${isTdsInvalid ? 'text-rose-600' : 'text-slate-900'
+                }`}
             >
               {isTdsInvalid ? 'TDS exceeds Gross' : formatINR(netPayable)}
             </span>
@@ -892,12 +885,12 @@ export function PaymentFormSheet({
         </div>
 
         {/* DRAWER FOOTER BUTTONS */}
-        <div className="px-5 py-3.5 border-t border-slate-200 bg-slate-50 flex items-center gap-2.5">
+        <div className="px-4 sm:px-5 py-3.5 border-t border-slate-200 bg-slate-50 flex flex-col-reverse sm:flex-row items-stretch sm:items-center gap-2.5 shrink-0 pb-safe">
           <button
             type="button"
             disabled={isSavingDraft || isSubmitting}
             onClick={() => handleSave('DRAFT')}
-            className="flex-1 min-h-[44px] sm:min-h-[40px] px-3 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 text-xs font-medium text-slate-700 transition-colors shadow-xs flex items-center justify-center gap-1.5 disabled:opacity-50 cursor-pointer"
+            className="sm:flex-1 min-h-[44px] sm:min-h-[40px] px-3 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 text-xs font-medium text-slate-700 transition-colors shadow-sm flex items-center justify-center gap-1.5 disabled:opacity-50 cursor-pointer"
           >
             {isSavingDraft ? (
               <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-500" />
@@ -908,7 +901,7 @@ export function PaymentFormSheet({
             type="button"
             disabled={isSavingDraft || isSubmitting}
             onClick={() => handleSave('PENDING_VERIFICATION')}
-            className="flex-1 min-h-[44px] sm:min-h-[40px] px-3 rounded-lg bg-brand hover:bg-brand-hover text-white text-xs font-semibold transition-colors shadow-xs flex items-center justify-center gap-1.5 disabled:opacity-50 cursor-pointer"
+            className="sm:flex-1 min-h-[44px] sm:min-h-[40px] px-3 rounded-lg bg-brand hover:bg-brand-hover text-white text-xs font-semibold transition-colors shadow-sm flex items-center justify-center gap-1.5 disabled:opacity-50 cursor-pointer"
           >
             {isSubmitting ? (
               <Loader2 className="w-3.5 h-3.5 animate-spin text-white" />

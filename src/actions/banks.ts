@@ -68,6 +68,7 @@ export async function createCompanyBank(
       short_code: shortCode,
       ifsc_prefix: ifscPrefix,
       account_number_masked: bankData.account_number_masked?.trim() || bankData.account_mask?.trim() || null,
+      full_debit_account_number: bankData.full_debit_account_number?.replace(/\s+/g, '').trim() || null,
       available_balance: bankData.available_balance || 0,
       is_primary: Boolean(bankData.is_primary),
       is_active: Boolean(bankData.is_active ?? true),
@@ -164,6 +165,7 @@ export async function updateCompanyBank(
       short_code: shortCode,
       ifsc_prefix: ifscPrefix,
       account_number_masked: bankData.account_number_masked?.trim() || bankData.account_mask?.trim() || null,
+      full_debit_account_number: bankData.full_debit_account_number?.replace(/\s+/g, '').trim() || null,
       is_primary: Boolean(bankData.is_primary),
       is_active: Boolean(bankData.is_active ?? currentBank.is_active),
       // Legacy columns fallback

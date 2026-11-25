@@ -54,8 +54,21 @@ export default async function HistoryPage() {
 
   const [banksRes, paymentsRes] = await Promise.all([banksQuery, paymentsQuery]);
 
-  const banks = (banksRes.data || []) as CompanyBank[];
-  const payments = (paymentsRes.data || []) as PaymentItem[];
+  const canSeeFullDebitAc = profile.role === 'PREPARER' || profile.is_admin;
+  const banks = ((banksRes.data || []) as CompanyBank[]).map((b) =>
+    canSeeFullDebitAc ? b : { ...b, full_debit_account_number: null }
+  );
+  const payments = ((paymentsRes.data || []) as PaymentItem[]).map((p) =>
+    canSeeFullDebitAc || !p.source_bank
+      ? p
+      : {
+        ...p,
+        source_bank: {
+          ...p.source_bank,
+          full_debit_account_number: null,
+        },
+      }
+  );
 
   return (
     <React.Suspense fallback={<HistoryLoadingSkeleton />}>
@@ -64,6 +77,8 @@ export default async function HistoryPage() {
         banks={banks}
         companyCode={activeCompany?.code || 'INDFURN'}
         companyName={activeCompany?.name || 'INDFURN'}
+        activeCompany={activeCompany}
+        currentUserName={profile.full_name || 'Accounts Team'}
       />
     </React.Suspense>
   );

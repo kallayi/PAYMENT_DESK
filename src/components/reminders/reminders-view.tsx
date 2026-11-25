@@ -171,9 +171,9 @@ export function RemindersView({
       prev.map((r) =>
         r.id === item.id
           ? {
-              ...r,
-              last_completed_month: prevDone ? null : currentMonth,
-            }
+            ...r,
+            last_completed_month: prevDone ? null : currentMonth,
+          }
           : r
       )
     );
@@ -236,13 +236,13 @@ export function RemindersView({
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-5 border-b border-slate-200">
-        <div>
-          <div className="flex items-center gap-2">
-            <h1 className="text-xl font-bold tracking-tight text-slate-900">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4 pb-4 sm:pb-5 border-b border-slate-200">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <h1 className="text-lg sm:text-xl font-bold tracking-tight text-slate-900">
               Monthly Reminders — {companyName}
             </h1>
-            <span className="px-2 py-0.5 rounded text-xs font-semibold bg-brand/10 text-brand">
+            <span className="px-2 py-0.5 rounded text-xs font-semibold bg-brand/10 text-brand shrink-0">
               {currentMonthLabel}
             </span>
           </div>
@@ -253,7 +253,7 @@ export function RemindersView({
 
         <Button
           onClick={handleOpenAdd}
-          className="bg-brand hover:bg-brand-hover text-white text-xs font-medium self-start sm:self-auto"
+          className="w-full sm:w-auto min-h-[40px] bg-brand hover:bg-brand-hover text-white text-xs font-semibold shrink-0"
           size="sm"
         >
           <Plus className="w-4 h-4 mr-1.5" />
@@ -313,37 +313,34 @@ export function RemindersView({
 
       {/* Filters & Search */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div className="flex items-center gap-1.5 p-1 bg-slate-100 rounded-lg w-fit">
+        <div className="grid grid-cols-3 sm:flex items-center gap-1 p-1 bg-slate-100 rounded-lg w-full sm:w-fit">
           <button
             type="button"
             onClick={() => setFilterTab('ALL')}
-            className={`px-3 py-1 rounded-md text-xs font-semibold transition-colors ${
-              filterTab === 'ALL'
+            className={`min-h-[36px] px-2.5 sm:px-3 py-1 rounded-md text-xs font-semibold transition-colors truncate ${filterTab === 'ALL'
                 ? 'bg-white text-slate-900 shadow-sm'
                 : 'text-slate-600 hover:text-slate-900'
-            }`}
+              }`}
           >
             All ({totalItems})
           </button>
           <button
             type="button"
             onClick={() => setFilterTab('PENDING')}
-            className={`px-3 py-1 rounded-md text-xs font-semibold transition-colors ${
-              filterTab === 'PENDING'
+            className={`min-h-[36px] px-2.5 sm:px-3 py-1 rounded-md text-xs font-semibold transition-colors truncate ${filterTab === 'PENDING'
                 ? 'bg-white text-amber-700 shadow-sm'
                 : 'text-slate-600 hover:text-slate-900'
-            }`}
+              }`}
           >
             Pending ({pendingItems.length})
           </button>
           <button
             type="button"
             onClick={() => setFilterTab('DONE')}
-            className={`px-3 py-1 rounded-md text-xs font-semibold transition-colors ${
-              filterTab === 'DONE'
+            className={`min-h-[36px] px-2.5 sm:px-3 py-1 rounded-md text-xs font-semibold transition-colors truncate ${filterTab === 'DONE'
                 ? 'bg-white text-emerald-700 shadow-sm'
                 : 'text-slate-600 hover:text-slate-900'
-            }`}
+              }`}
           >
             Done ({completedItems.length})
           </button>
@@ -356,7 +353,7 @@ export function RemindersView({
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search reminders or vendor..."
-            className="w-full pl-8 pr-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg text-slate-900 focus:outline-none focus:ring-1 focus:ring-brand focus:border-brand"
+            className="w-full min-h-[38px] pl-8 pr-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg text-slate-900 focus:outline-none focus:ring-1 focus:ring-brand focus:border-brand"
           />
         </div>
       </div>
@@ -392,11 +389,10 @@ export function RemindersView({
             return (
               <div
                 key={r.id}
-                className={`p-4 rounded-xl border transition-all duration-150 bg-white shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4 ${
-                  isDone
+                className={`p-4 rounded-xl border transition-all duration-150 bg-white shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4 ${isDone
                     ? 'border-emerald-200/70 bg-emerald-50/20'
                     : 'border-slate-200 hover:border-slate-300'
-                }`}
+                  }`}
               >
                 {/* Left Side: Checkbox + Title + Metadata */}
                 <div className="flex items-start gap-3">
@@ -419,9 +415,8 @@ export function RemindersView({
                   <div className="space-y-1">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span
-                        className={`text-sm font-bold ${
-                          isDone ? 'line-through text-slate-500' : 'text-slate-900'
-                        }`}
+                        className={`text-sm font-bold ${isDone ? 'line-through text-slate-500' : 'text-slate-900'
+                          }`}
                       >
                         {r.title}
                       </span>
@@ -457,7 +452,7 @@ export function RemindersView({
                 </div>
 
                 {/* Right Side: Estimated Amount & Quick Actions */}
-                <div className="flex items-center justify-between md:justify-end gap-3 pt-2 md:pt-0 border-t md:border-t-0 border-slate-100">
+                <div className="flex flex-wrap items-center justify-between md:justify-end gap-2.5 sm:gap-3 pt-2.5 md:pt-0 border-t md:border-t-0 border-slate-100">
                   <div className="text-left md:text-right pr-2">
                     <p className="text-[10px] text-slate-400 uppercase font-semibold">Estimated</p>
                     <p className="text-sm font-bold text-slate-900 tabular-nums">
@@ -469,7 +464,7 @@ export function RemindersView({
                     {/* Create Payment Entry with Pre-fill */}
                     <Link
                       href={`/payments?fromReminder=${r.id}`}
-                      className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-brand text-white hover:bg-brand-hover shadow-sm transition-colors"
+                      className="min-h-[38px] inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold rounded-lg bg-brand text-white hover:bg-brand-hover shadow-sm transition-colors"
                       title="Create payment entry pre-filled with this reminder"
                     >
                       <Plus className="w-3.5 h-3.5" />
@@ -479,7 +474,7 @@ export function RemindersView({
                     <button
                       type="button"
                       onClick={() => handleOpenEdit(r)}
-                      className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-md transition-colors"
+                      className="min-h-[38px] min-w-[38px] inline-flex items-center justify-center p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-md transition-colors"
                       title="Edit reminder"
                     >
                       <Edit2 className="w-3.5 h-3.5" />
@@ -489,7 +484,7 @@ export function RemindersView({
                       type="button"
                       onClick={() => handleDelete(r.id)}
                       disabled={deletingId === r.id}
-                      className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors disabled:opacity-50"
+                      className="min-h-[38px] min-w-[38px] inline-flex items-center justify-center p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors disabled:opacity-50"
                       title="Delete reminder"
                     >
                       {deletingId === r.id ? (
@@ -533,7 +528,7 @@ export function RemindersView({
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
                   Due Day of Month (1-31) <span className="text-red-500">*</span>
@@ -544,7 +539,7 @@ export function RemindersView({
                   max="31"
                   value={dueDay}
                   onChange={(e) => setDueDay(parseInt(e.target.value, 10) || 1)}
-                  className="w-full px-3 py-1.5 text-xs bg-white border border-slate-300 rounded-md text-slate-900 focus:outline-none focus:ring-1 focus:ring-brand focus:border-brand tabular-nums"
+                  className="w-full min-h-[40px] px-3 py-1.5 text-xs bg-white border border-slate-300 rounded-md text-slate-900 focus:outline-none focus:ring-1 focus:ring-brand focus:border-brand tabular-nums"
                   required
                 />
               </div>
@@ -560,7 +555,7 @@ export function RemindersView({
                   value={estimatedAmount}
                   onChange={(e) => setEstimatedAmount(e.target.value)}
                   placeholder="Optional"
-                  className="w-full px-3 py-1.5 text-xs bg-white border border-slate-300 rounded-md text-slate-900 focus:outline-none focus:ring-1 focus:ring-brand focus:border-brand tabular-nums"
+                  className="w-full min-h-[40px] px-3 py-1.5 text-xs bg-white border border-slate-300 rounded-md text-slate-900 focus:outline-none focus:ring-1 focus:ring-brand focus:border-brand tabular-nums"
                 />
               </div>
             </div>

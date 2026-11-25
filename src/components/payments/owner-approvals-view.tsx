@@ -337,10 +337,10 @@ export function OwnerApprovalsView({
       prev.map((p) =>
         p.id === item.id
           ? {
-              ...p,
-              source_bank_id: newBankId,
-              source_bank: chosenBank || p.source_bank,
-            }
+            ...p,
+            source_bank_id: newBankId,
+            source_bank: chosenBank || p.source_bank,
+          }
           : p
       )
     );
@@ -388,15 +388,15 @@ export function OwnerApprovalsView({
   };
 
   return (
-    <div className="w-full space-y-6 pb-24">
+    <div className={`w-full space-y-4 sm:space-y-6 ${selectedIds.size > 0 ? 'pb-44 lg:pb-24' : 'pb-24 lg:pb-8'}`}>
       {/* HEADER */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-4 border-b border-slate-200">
-        <div>
-          <div className="flex items-center gap-2">
-            <h1 className="text-xl font-bold tracking-tight text-slate-900">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-3 sm:pb-4 border-b border-slate-200">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <h1 className="text-lg sm:text-xl font-bold tracking-tight text-slate-900">
               Authorization & Approvals — {companyName}
             </h1>
-            <span className="px-2 py-0.5 rounded text-xs font-semibold bg-brand/10 text-brand">
+            <span className="px-2 py-0.5 rounded text-[11px] sm:text-xs font-semibold bg-brand/10 text-brand shrink-0">
               Owner Authorization
             </span>
           </div>
@@ -406,26 +406,26 @@ export function OwnerApprovalsView({
         </div>
       </div>
 
-      {/* 4-CARD FINANCIAL OVERVIEW STRIP */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+      {/* 4-CARD FINANCIAL OVERVIEW STRIP (Compact 2x2 on Mobile) */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3">
         {/* Card 1: Total Available Balance */}
         <div
           onClick={() => setShowBankBreakdown(!showBankBreakdown)}
-          className="p-4 rounded-xl border border-slate-200 bg-white shadow-sm flex flex-col justify-between cursor-pointer hover:border-slate-300 transition-colors"
+          className="p-3 sm:p-4 rounded-xl border border-slate-200 bg-white shadow-sm flex flex-col justify-between cursor-pointer hover:border-slate-300 transition-colors min-w-0"
           title="Click to toggle bank-by-bank balances"
         >
-          <div className="flex items-center justify-between text-slate-500">
-            <span className="text-[11px] font-semibold uppercase tracking-wider">
-              Total Available Balance
+          <div className="flex items-start justify-between gap-1.5 text-slate-500">
+            <span className="text-[10px] sm:text-[11px] font-semibold uppercase tracking-wider leading-tight">
+              Available Balance
             </span>
-            <Landmark className="w-4 h-4 text-slate-400" />
+            <Landmark className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-slate-400 shrink-0" />
           </div>
-          <div className="mt-2">
-            <div className="text-2xl font-bold text-slate-900 tabular-nums">
+          <div className="mt-1.5 sm:mt-2 min-w-0">
+            <div className="text-base sm:text-xl lg:text-2xl font-bold text-slate-900 tabular-nums break-words leading-tight">
               {formatINR(totalAvailableBalance)}
             </div>
-            <div className="text-[11px] text-brand font-medium mt-0.5 flex items-center gap-1">
-              <span>{banks.filter((b) => b.is_active).length} active banks</span>
+            <div className="text-[10px] sm:text-[11px] text-brand font-medium mt-1 flex items-center gap-1 flex-wrap">
+              <span>{banks.filter((b) => b.is_active).length} banks</span>
               <span>•</span>
               <span className="underline">View split</span>
             </div>
@@ -435,20 +435,20 @@ export function OwnerApprovalsView({
         {/* Card 2: Pending Verification */}
         <div
           onClick={() => setActiveTab('PENDING_VERIFICATION')}
-          className="p-4 rounded-xl border border-slate-200 bg-white shadow-sm flex flex-col justify-between cursor-pointer hover:border-slate-300 transition-colors"
+          className="p-3 sm:p-4 rounded-xl border border-slate-200 bg-white shadow-sm flex flex-col justify-between cursor-pointer hover:border-slate-300 transition-colors min-w-0"
         >
-          <div className="flex items-center justify-between text-slate-500">
-            <span className="text-[11px] font-semibold uppercase tracking-wider">
+          <div className="flex items-start justify-between gap-1.5 text-slate-500">
+            <span className="text-[10px] sm:text-[11px] font-semibold uppercase tracking-wider leading-tight">
               Pending Verification
             </span>
-            <Clock className="w-4 h-4 text-amber-500" />
+            <Clock className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-500 shrink-0" />
           </div>
-          <div className="mt-2">
-            <div className="text-2xl font-bold text-slate-900 tabular-nums">
+          <div className="mt-1.5 sm:mt-2 min-w-0">
+            <div className="text-base sm:text-xl lg:text-2xl font-bold text-slate-900 tabular-nums break-words leading-tight">
               {formatINR(pendingVerificationTotal)}
             </div>
-            <div className="text-[11px] text-amber-700 font-medium mt-0.5">
-              {pendingVerificationItems.length} bills with Senior Accountant
+            <div className="text-[10px] sm:text-[11px] text-amber-700 font-medium mt-1 leading-tight">
+              {pendingVerificationItems.length} with Verifier
             </div>
           </div>
         </div>
@@ -456,50 +456,49 @@ export function OwnerApprovalsView({
         {/* Card 3: Pending Approval */}
         <div
           onClick={() => setActiveTab('PENDING_APPROVAL')}
-          className="p-4 rounded-xl border border-slate-200 bg-white shadow-sm flex flex-col justify-between cursor-pointer hover:border-slate-300 transition-colors"
+          className="p-3 sm:p-4 rounded-xl border border-slate-200 bg-white shadow-sm flex flex-col justify-between cursor-pointer hover:border-slate-300 transition-colors min-w-0"
         >
-          <div className="flex items-center justify-between text-slate-500">
-            <span className="text-[11px] font-semibold uppercase tracking-wider">
-              Pending Authorization
+          <div className="flex items-start justify-between gap-1.5 text-slate-500">
+            <span className="text-[10px] sm:text-[11px] font-semibold uppercase tracking-wider leading-tight">
+              Pending Approval
             </span>
-            <AlertTriangle className="w-4 h-4 text-brand" />
+            <AlertTriangle className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-brand shrink-0" />
           </div>
-          <div className="mt-2">
-            <div className="text-2xl font-bold text-slate-900 tabular-nums">
+          <div className="mt-1.5 sm:mt-2 min-w-0">
+            <div className="text-base sm:text-xl lg:text-2xl font-bold text-slate-900 tabular-nums break-words leading-tight">
               {formatINR(pendingApprovalTotal)}
             </div>
-            <div className="text-[11px] text-brand font-medium mt-0.5">
-              {pendingApprovalItems.length} bills requiring Owner authorization
+            <div className="text-[10px] sm:text-[11px] text-brand font-medium mt-1 leading-tight">
+              {pendingApprovalItems.length} awaiting Owner
             </div>
           </div>
         </div>
 
         {/* Card 4: Projected Remaining Balance */}
         <div
-          className={`p-4 rounded-xl border shadow-sm flex flex-col justify-between transition-colors ${
-            isProjectedNegative
+          className={`p-3 sm:p-4 rounded-xl border shadow-sm flex flex-col justify-between transition-colors min-w-0 ${isProjectedNegative
               ? 'bg-rose-50 border-rose-300 text-rose-900'
               : 'bg-emerald-50/50 border-emerald-200 text-emerald-900'
-          }`}
+            }`}
         >
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-semibold uppercase tracking-wider">
-              Projected Remaining Cash
+          <div className="flex items-start justify-between gap-1.5">
+            <span className="text-[10px] sm:text-[11px] font-semibold uppercase tracking-wider leading-tight">
+              Projected Remaining
             </span>
             {isProjectedNegative ? (
-              <ShieldAlert className="w-4 h-4 text-rose-600 animate-pulse" />
+              <ShieldAlert className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-rose-600 animate-pulse shrink-0" />
             ) : (
-              <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+              <CheckCircle2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-emerald-600 shrink-0" />
             )}
           </div>
-          <div className="mt-2">
-            <div className="text-2xl font-bold tabular-nums">
+          <div className="mt-1.5 sm:mt-2 min-w-0">
+            <div className="text-base sm:text-xl lg:text-2xl font-bold tabular-nums break-words leading-tight">
               {formatINR(projectedRemainingBalance)}
             </div>
-            <div className="text-[11px] font-medium mt-0.5">
+            <div className="text-[10px] sm:text-[11px] font-medium mt-1 leading-tight">
               {isProjectedNegative ? (
                 <span className="text-rose-700 font-bold">
-                  Deficit warning: selected bills exceed cash
+                  Deficit: exceeds cash
                 </span>
               ) : (
                 <span className="text-emerald-700">
@@ -515,13 +514,13 @@ export function OwnerApprovalsView({
 
       {/* BANK BREAKDOWN EXPANDED STRIP (Optional click-to-expand) */}
       {showBankBreakdown && (
-        <div className="p-4 rounded-xl border border-slate-200 bg-slate-50 space-y-2 animate-in fade-in-50">
+        <div className="p-3 sm:p-4 rounded-xl border border-slate-200 bg-slate-50 space-y-2 animate-in fade-in-50">
           <div className="text-xs font-semibold text-slate-700">Bank-by-Bank Available Balances:</div>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <div className="grid grid-cols-1 xs:grid-cols-2 sm:grid-cols-4 gap-2">
             {banks.filter((b) => b.is_active).map((b) => (
-              <div key={b.id} className="p-2.5 rounded-lg bg-white border border-slate-200 text-xs">
-                <div className="font-bold text-slate-800">{b.bank_name || b.full_name}</div>
-                <div className="font-mono text-slate-400 text-[10px]">
+              <div key={b.id} className="p-2.5 rounded-lg bg-white border border-slate-200 text-xs min-w-0">
+                <div className="font-bold text-slate-800 truncate">{b.bank_name || b.full_name}</div>
+                <div className="font-mono text-slate-400 text-[10px] truncate">
                   {b.short_code || b.short_name} {b.account_number_masked ? `(${b.account_number_masked})` : ''}
                 </div>
                 <div className="font-bold text-slate-900 tabular-nums mt-1 text-sm">
@@ -535,9 +534,9 @@ export function OwnerApprovalsView({
 
       {/* SUBTLE PENDING UTR BANNER */}
       {readyToPayItems.length > 0 && (
-        <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-900 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <FileCheck2 className="w-4 h-4 text-emerald-600 shrink-0" />
+        <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-900 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div className="flex items-start sm:items-center gap-2 min-w-0">
+            <FileCheck2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5 sm:mt-0" />
             <span>
               <strong>{readyToPayItems.length} payments ({formatINR(readyToPayTotal)})</strong> have been authorized and are awaiting UTR / Cheque settlement.
             </span>
@@ -545,7 +544,7 @@ export function OwnerApprovalsView({
           <button
             type="button"
             onClick={() => setActiveTab('APPROVED')}
-            className="text-emerald-700 font-bold hover:underline shrink-0"
+            className="text-emerald-700 font-bold hover:underline shrink-0 self-start sm:self-center cursor-pointer"
           >
             View Ready to Pay &rarr;
           </button>
@@ -553,18 +552,22 @@ export function OwnerApprovalsView({
       )}
 
       {/* STATUS TABS */}
-      <div className="flex items-center gap-1.5 overflow-x-auto pb-1 border-b border-slate-200 scrollbar-none">
+      <div className="flex items-center gap-1.5 overflow-x-auto -mx-3 px-3 sm:mx-0 sm:px-0 pb-1.5 border-b border-slate-200 scrollbar-none">
         <button
           type="button"
           onClick={() => setActiveTab('PENDING_APPROVAL')}
-          className={`min-h-[38px] px-3.5 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap inline-flex items-center gap-2 transition-colors ${
-            activeTab === 'PENDING_APPROVAL'
-              ? 'bg-brand text-white shadow-xs'
+          className={`min-h-[38px] px-3 sm:px-3.5 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap inline-flex items-center gap-2 transition-colors shrink-0 ${activeTab === 'PENDING_APPROVAL'
+              ? 'bg-brand text-white shadow-sm'
               : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
-          }`}
+            }`}
         >
           <span>Pending Approval</span>
-          <span className="tabular-nums text-[11px] px-1.5 py-0.2 rounded-full bg-white/20 text-white">
+          <span
+            className={`tabular-nums text-[11px] px-1.5 py-0.5 rounded-full ${activeTab === 'PENDING_APPROVAL'
+                ? 'bg-white/20 text-white'
+                : 'bg-rose-100 text-brand'
+              }`}
+          >
             {pendingApprovalItems.length}
           </span>
         </button>
@@ -572,14 +575,13 @@ export function OwnerApprovalsView({
         <button
           type="button"
           onClick={() => setActiveTab('ON_HOLD')}
-          className={`min-h-[38px] px-3.5 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap inline-flex items-center gap-2 transition-colors ${
-            activeTab === 'ON_HOLD'
-              ? 'bg-amber-600 text-white shadow-xs'
+          className={`min-h-[38px] px-3 sm:px-3.5 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap inline-flex items-center gap-2 transition-colors shrink-0 ${activeTab === 'ON_HOLD'
+              ? 'bg-amber-600 text-white shadow-sm'
               : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
-          }`}
+            }`}
         >
           <span>On Hold</span>
-          <span className="tabular-nums text-[11px] px-1.5 py-0.2 rounded-full bg-amber-100 text-amber-800">
+          <span className="tabular-nums text-[11px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800">
             {holdItems.length}
           </span>
         </button>
@@ -587,15 +589,14 @@ export function OwnerApprovalsView({
         <button
           type="button"
           onClick={() => setActiveTab('PENDING_VERIFICATION')}
-          className={`min-h-[38px] px-3.5 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap inline-flex items-center gap-2 transition-colors ${
-            activeTab === 'PENDING_VERIFICATION'
-              ? 'bg-slate-900 text-white shadow-xs'
+          className={`min-h-[38px] px-3 sm:px-3.5 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap inline-flex items-center gap-2 transition-colors shrink-0 ${activeTab === 'PENDING_VERIFICATION'
+              ? 'bg-slate-900 text-white shadow-sm'
               : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
-          }`}
+            }`}
           title="Owner direct override when Senior Accountant is absent"
         >
           <span>Awaiting Verification (Override)</span>
-          <span className="tabular-nums text-[11px] px-1.5 py-0.2 rounded-full bg-slate-200 text-slate-800">
+          <span className="tabular-nums text-[11px] px-1.5 py-0.5 rounded-full bg-slate-200 text-slate-800">
             {pendingVerificationItems.length}
           </span>
         </button>
@@ -603,30 +604,29 @@ export function OwnerApprovalsView({
         <button
           type="button"
           onClick={() => setActiveTab('APPROVED')}
-          className={`min-h-[38px] px-3.5 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap inline-flex items-center gap-2 transition-colors ${
-            activeTab === 'APPROVED'
-              ? 'bg-emerald-700 text-white shadow-xs'
+          className={`min-h-[38px] px-3 sm:px-3.5 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap inline-flex items-center gap-2 transition-colors shrink-0 ${activeTab === 'APPROVED'
+              ? 'bg-emerald-700 text-white shadow-sm'
               : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
-          }`}
+            }`}
         >
           <span>Ready to Pay</span>
-          <span className="tabular-nums text-[11px] px-1.5 py-0.2 rounded-full bg-emerald-100 text-emerald-800">
+          <span className="tabular-nums text-[11px] px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
             {readyToPayItems.length}
           </span>
         </button>
       </div>
 
       {/* SEARCH & FILTERS BAR */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-3">
         <div className="flex items-center gap-2 flex-wrap">
           {/* Select All Checkbox for Bulk Actions */}
           {(activeTab === 'PENDING_APPROVAL' || activeTab === 'PENDING_VERIFICATION') && (
-            <label className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-slate-700 cursor-pointer hover:bg-slate-50">
+            <label className="min-h-[38px] flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-slate-700 cursor-pointer hover:bg-slate-50">
               <input
                 type="checkbox"
                 checked={visibleItems.length > 0 && selectedIds.size === visibleItems.length}
                 onChange={handleSelectAll}
-                className="w-3.5 h-3.5 rounded text-brand focus:ring-brand border-slate-300"
+                className="w-4 h-4 rounded text-brand focus:ring-brand border-slate-300"
               />
               <span>Select All ({visibleItems.length})</span>
             </label>
@@ -636,11 +636,10 @@ export function OwnerApprovalsView({
           <button
             type="button"
             onClick={() => setShowOverdueOnly(!showOverdueOnly)}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 ${
-              showOverdueOnly
+            className={`min-h-[38px] px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer ${showOverdueOnly
                 ? 'bg-rose-600 text-white shadow-sm'
                 : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
-            }`}
+              }`}
           >
             <AlertTriangle className="w-3.5 h-3.5" />
             <span>Overdue Only</span>
@@ -650,7 +649,7 @@ export function OwnerApprovalsView({
           <select
             value={selectedBankFilter}
             onChange={(e) => setSelectedBankFilter(e.target.value)}
-            className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-slate-700 outline-none focus:border-brand"
+            className="min-h-[38px] px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-slate-700 outline-none focus:border-brand max-w-full"
           >
             <option value="ALL">All Banks</option>
             {banks.filter((b) => b.is_active).map((b) => (
@@ -669,7 +668,7 @@ export function OwnerApprovalsView({
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search party, ref, or purpose..."
-            className="w-full pl-8 pr-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg text-slate-900 focus:outline-none focus:ring-1 focus:ring-brand focus:border-brand"
+            className="w-full min-h-[38px] pl-8 pr-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg text-slate-900 focus:outline-none focus:ring-1 focus:ring-brand focus:border-brand"
           />
         </div>
       </div>
@@ -715,44 +714,44 @@ export function OwnerApprovalsView({
 
       {/* STICKY BOTTOM BULK APPROVE BAR */}
       {selectedIds.size > 0 && (
-        <div className="fixed bottom-0 left-0 right-0 z-40 bg-white border-t border-slate-200 p-4 shadow-2xl animate-in slide-in-from-bottom-5">
-          <div className="max-w-7xl mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div className="flex items-center gap-4 flex-wrap">
+        <div className="fixed bottom-16 lg:bottom-0 left-0 right-0 lg:left-60 z-30 bg-white/95 backdrop-blur-sm border-t border-slate-200 px-3 py-3 sm:px-6 shadow-[0_-4px_16px_rgba(15,23,42,0.08)] animate-in slide-in-from-bottom-5">
+          <div className="max-w-7xl mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-3">
+            <div className="flex items-center justify-between sm:justify-start gap-x-4 gap-y-1 flex-wrap">
               <div>
-                <span className="text-sm font-bold text-slate-900">
-                  {selectedIds.size} payments selected
+                <span className="text-xs sm:text-sm font-bold text-slate-900">
+                  {selectedIds.size} selected
                 </span>
-                <span className="text-xs text-slate-500 ml-2 tabular-nums">
+                <span className="text-xs text-slate-500 ml-1.5 sm:ml-2 tabular-nums">
                   Total: <strong className="text-slate-900 font-bold">{formatINR(selectedPendingTotal)}</strong>
                 </span>
               </div>
 
-              <div className="text-xs border-l border-slate-200 pl-4">
-                <span className="text-slate-500">Projected Remaining: </span>
+              <div className="text-xs sm:border-l sm:border-slate-200 sm:pl-4">
+                <span className="text-slate-500">Projected: </span>
                 <strong
-                  className={`tabular-nums font-bold ${
-                    isProjectedNegative ? 'text-rose-600' : 'text-emerald-700'
-                  }`}
+                  className={`tabular-nums font-bold ${isProjectedNegative ? 'text-rose-600' : 'text-emerald-700'
+                    }`}
                 >
                   {formatINR(projectedRemainingBalance)}
                 </strong>
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 w-full sm:w-auto">
               <Button
                 variant="outline"
                 size="sm"
                 onClick={() => setSelectedIds(new Set())}
                 disabled={isBulkApproving}
+                className="min-h-[40px] flex-1 sm:flex-initial text-xs"
               >
-                Clear Selection
+                Clear
               </Button>
               <Button
                 size="sm"
                 onClick={handleBulkApprove}
                 disabled={isBulkApproving}
-                className="bg-emerald-700 hover:bg-emerald-800 text-white font-semibold shadow-sm"
+                className="min-h-[40px] flex-[2] sm:flex-initial bg-emerald-700 hover:bg-emerald-800 text-white font-semibold shadow-sm text-xs"
               >
                 {isBulkApproving ? (
                   <>

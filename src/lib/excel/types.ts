@@ -1,4 +1,4 @@
-export type BankBatchType = 'same_bank' | 'other_bank';
+export type BankBatchType = 'same_bank' | 'other_bank' | 'combined';
 
 export interface BulkExportRow {
   paymentId: string;
@@ -12,6 +12,8 @@ export interface BulkExportRow {
   sheetDate: string;
   sourceBankShortCode: string;
   sourceBankIfscPrefix: string;
+  sourceBankDebitAccount?: string | null;
+  whatsappNumber?: string | null;
   companyCode: string;
   paymentMode?: 'NEFT_RTGS' | 'CHEQUE';
 }
@@ -28,4 +30,5 @@ export interface BankTemplateAdapter {
   bankShortCode: string;
   buildSameBankWorkbook(rows: BulkExportRow[]): Promise<Buffer>;
   buildOtherBankWorkbook(rows: BulkExportRow[]): Promise<Buffer>;
+  buildCombinedWorkbook(rows: BulkExportRow[]): Promise<Buffer>;
 }

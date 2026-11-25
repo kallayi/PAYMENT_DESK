@@ -79,7 +79,7 @@ export const switchBankSchema = z.object({
 
 export type SwitchBankInput = z.infer<typeof switchBankSchema>;
 
-// Strict 5-Field Lean Vendor Schema for UI Form
+// Strict 5-Field Lean Vendor Schema (+ Optional WhatsApp Number) for UI Form
 export const leanVendorSchema = z.object({
   party_name: z.string().trim().min(1, 'Party Name is required'),
   beneficiary_name: z.string().trim().min(1, 'Beneficiary Name (Bank Account Holder) is required'),
@@ -89,18 +89,28 @@ export const leanVendorSchema = z.object({
     .trim()
     .toUpperCase()
     .regex(/^[A-Z]{4}0[A-Z0-9]{6}$/, 'IFSC code must be 11 uppercase characters (e.g. UTIB0001462)'),
+  whatsapp_number: z
+    .string()
+    .trim()
+    .refine(
+      (val) => !val || /^\+?[0-9\s-]{10,16}$/.test(val),
+      'Enter a valid 10-digit mobile or WhatsApp number (with optional +91)'
+    )
+    .optional()
+    .nullable(),
   remarks: z.string().trim().optional().nullable(),
 });
 
 export type LeanVendorInput = z.infer<typeof leanVendorSchema>;
 
-// General Vendor Input Schema (supports both 5-field lean form and quick-add)
+// General Vendor Input Schema (supports both lean form and quick-add)
 export const vendorSchema = z.object({
   company_id: z.string().uuid().optional(),
   party_name: z.string().trim().min(1, 'Party Name is required').optional(),
   beneficiary_name: z.string().trim().min(1, 'Beneficiary Name is required').optional(),
   account_number: z.string().trim().min(1, 'Account number is required').optional(),
   ifsc_code: z.string().trim().toUpperCase().optional().nullable(),
+  whatsapp_number: z.string().trim().optional().nullable(),
   remarks: z.string().trim().optional().nullable(),
   // Backward compatibility aliases
   name: z.string().trim().optional(),
@@ -122,6 +132,7 @@ export const companyBankSchema = z.object({
     .toUpperCase()
     .optional(),
   account_number_masked: z.string().trim().optional().nullable(),
+  full_debit_account_number: z.string().trim().optional().nullable(),
   available_balance: z.coerce.number().optional().default(0),
   is_primary: z.boolean().optional().default(false),
   is_active: z.boolean().optional().default(true),

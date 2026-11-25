@@ -61,9 +61,8 @@ export function CompanySwitcher({
     const singleCompany = activeCompany || allowedCompanies[0];
     return (
       <div
-        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-slate-100 text-slate-800 border border-slate-200/80 font-bold text-xs select-none ${
-          compact ? 'text-[11px] px-2 py-0.5' : ''
-        }`}
+        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-slate-100 text-slate-800 border border-slate-200/80 font-bold text-xs select-none ${compact ? 'text-[11px] px-2 py-0.5' : ''
+          }`}
         title={`Assigned company: ${singleCompany?.name || 'INDFURN'}`}
       >
         <Building2 className="w-3.5 h-3.5 text-slate-500 shrink-0" />
@@ -79,9 +78,8 @@ export function CompanySwitcher({
         type="button"
         onClick={() => setIsOpen((prev) => !prev)}
         disabled={isPending}
-        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-white hover:bg-slate-50 border border-slate-200 text-slate-900 font-bold text-xs shadow-2xs transition-colors cursor-pointer disabled:opacity-60 focus:outline-hidden focus:ring-2 focus:ring-[#7F1D1D]/20 ${
-          compact ? 'text-[11px] px-2 py-0.5' : 'min-h-[34px]'
-        }`}
+        className={`inline-flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 py-1 rounded-md bg-white hover:bg-slate-50 border border-slate-200 text-slate-900 font-bold text-xs shadow-sm transition-colors cursor-pointer disabled:opacity-60 focus:outline-none focus:ring-2 focus:ring-[#7F1D1D]/20 ${compact ? 'text-[11px] px-2 py-0.5' : 'min-h-[38px]'
+          }`}
         aria-haspopup="true"
         aria-expanded={isOpen}
       >
@@ -90,14 +88,14 @@ export function CompanySwitcher({
         ) : (
           <Building2 className="w-3.5 h-3.5 text-[#7F1D1D] shrink-0" />
         )}
-        <span className="truncate max-w-[100px] sm:max-w-none">
+        <span className="truncate max-w-[92px] sm:max-w-none">
           {activeCompany?.code || 'Select Company'}
         </span>
-        <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+        <ChevronDown className={`w-3.5 h-3.5 text-slate-400 shrink-0 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
       </button>
 
       {isOpen && (
-        <div className="absolute left-0 mt-1.5 w-44 rounded-lg bg-white border border-slate-200 shadow-lg py-1 z-50 text-xs animate-in fade-in-0 zoom-in-95">
+        <div className="absolute right-0 mt-1.5 w-48 max-w-[calc(100vw-1.5rem)] rounded-lg bg-white border border-slate-200 shadow-lg py-1 z-50 text-xs animate-in fade-in-0 zoom-in-95">
           <div className="px-3 py-1.5 text-[10px] uppercase font-semibold text-slate-400 tracking-wider border-b border-slate-100">
             Switch Workspace
           </div>
@@ -108,11 +106,10 @@ export function CompanySwitcher({
                 key={company.id}
                 type="button"
                 onClick={() => handleSwitch(company.code)}
-                className={`w-full px-3 py-2 text-left flex items-center justify-between font-medium transition-colors cursor-pointer ${
-                  isSelected
+                className={`w-full px-3 py-2 text-left flex items-center justify-between font-medium transition-colors cursor-pointer ${isSelected
                     ? 'bg-rose-50 text-[#7F1D1D] font-bold'
                     : 'text-slate-700 hover:bg-slate-50 hover:text-slate-900'
-                }`}
+                  }`}
               >
                 <div className="flex flex-col">
                   <span className="text-xs">{company.name}</span>

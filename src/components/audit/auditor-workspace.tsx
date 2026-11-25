@@ -364,7 +364,7 @@ export function AuditorWorkspace({
       </div>
 
       {/* STATUS TABS */}
-      <div className="flex items-center gap-1.5 overflow-x-auto pb-1 border-b border-slate-200/80 scrollbar-none">
+      <div className="flex items-center gap-1.5 overflow-x-auto -mx-3 px-3 sm:mx-0 sm:px-0 pb-1.5 border-b border-slate-200/80 scrollbar-none">
         {(
           [
             { id: 'UNAUDITED', label: 'Unaudited', count: unauditedItems.length },
@@ -378,17 +378,15 @@ export function AuditorWorkspace({
               key={tab.id}
               type="button"
               onClick={() => setActiveTab(tab.id)}
-              className={`min-h-[38px] px-3.5 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap inline-flex items-center gap-2 transition-colors cursor-pointer ${
-                isActive
-                  ? 'bg-brand text-white shadow-xs'
+              className={`min-h-[38px] px-3.5 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap inline-flex items-center gap-2 transition-colors cursor-pointer shrink-0 ${isActive
+                  ? 'bg-brand text-white shadow-sm'
                   : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
-              }`}
+                }`}
             >
               <span>{tab.label}</span>
               <span
-                className={`tabular-nums text-[11px] px-1.5 py-0.2 rounded-full ${
-                  isActive ? 'bg-white/20 text-white' : 'bg-slate-200/80 text-slate-600'
-                }`}
+                className={`tabular-nums text-[11px] px-1.5 py-0.5 rounded-full ${isActive ? 'bg-white/20 text-white' : 'bg-slate-200/80 text-slate-600'
+                  }`}
               >
                 {tab.count}
               </span>
@@ -398,7 +396,7 @@ export function AuditorWorkspace({
       </div>
 
       {/* FILTERS BAR */}
-      <div className="bg-white rounded-xl border border-slate-200 p-3.5 shadow-xs space-y-3">
+      <div className="bg-white rounded-xl border border-slate-200 p-3.5 shadow-sm space-y-3">
         <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5">
           {/* Vendor / UTR / Cheque Search */}
           <div className="sm:col-span-5 relative">
@@ -442,11 +440,10 @@ export function AuditorWorkspace({
                 key={preset.id}
                 type="button"
                 onClick={() => setDatePreset(preset.id)}
-                className={`px-2.5 py-1.5 rounded-lg text-[11px] font-semibold transition-colors ${
-                  datePreset === preset.id
+                className={`px-2.5 py-1.5 rounded-lg text-[11px] font-semibold transition-colors ${datePreset === preset.id
                     ? 'bg-slate-900 text-white'
                     : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                }`}
+                  }`}
               >
                 {preset.label}
               </button>
@@ -505,7 +502,7 @@ export function AuditorWorkspace({
       ) : (
         <div className="space-y-3">
           {/* Desktop Table */}
-          <div className="hidden md:block bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
+          <div className="hidden md:block bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
             <table className="w-full border-collapse text-left text-xs">
               <thead>
                 <tr className="bg-slate-50/80 border-b border-slate-200 text-slate-600 font-semibold uppercase tracking-wider text-[11px]">
@@ -626,7 +623,7 @@ export function AuditorWorkspace({
                 <div
                   key={item.id}
                   onClick={() => setReviewPayment(item)}
-                  className="bg-white rounded-xl border border-slate-200 p-4 shadow-xs space-y-2 cursor-pointer"
+                  className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm space-y-2 cursor-pointer"
                 >
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
@@ -642,11 +639,10 @@ export function AuditorWorkspace({
                         {formatINR(item.net_payable)}
                       </div>
                       <span
-                        className={`inline-block mt-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                          isAudited
+                        className={`inline-block mt-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${isAudited
                             ? 'bg-emerald-100 text-emerald-800'
                             : 'bg-amber-100 text-amber-800'
-                        }`}
+                          }`}
                       >
                         {isAudited ? 'Audited' : 'Unaudited'}
                       </span>
@@ -673,9 +669,9 @@ export function AuditorWorkspace({
           {reviewPayment && (
             <>
               {/* DRAWER TOP HEADER */}
-              <SheetHeader className="px-5 py-4 border-b border-slate-200 bg-slate-50/70">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pr-6">
-                  <div>
+              <SheetHeader className="px-4 sm:px-5 py-3.5 border-b border-slate-200 bg-slate-50/70 shrink-0">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pr-8">
+                  <div className="min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-xs font-bold uppercase tracking-wider text-brand">
                         Side-by-Side Audit Voucher
@@ -692,7 +688,7 @@ export function AuditorWorkspace({
                         </span>
                       )}
                     </div>
-                    <SheetTitle className="text-base sm:text-lg font-bold text-slate-900 mt-1">
+                    <SheetTitle className="text-sm sm:text-lg font-bold text-slate-900 mt-1 break-words">
                       {reviewPayment.vendor?.party_name || reviewPayment.vendor?.name} —{' '}
                       <span className="tabular-nums">{formatINR(reviewPayment.net_payable)}</span>
                     </SheetTitle>
@@ -703,22 +699,20 @@ export function AuditorWorkspace({
                     <button
                       type="button"
                       onClick={() => setMobileDrawerTab('VOUCHER')}
-                      className={`flex-1 py-1.5 px-3 rounded-md text-xs font-semibold transition-colors ${
-                        mobileDrawerTab === 'VOUCHER'
-                          ? 'bg-white text-slate-900 shadow-xs'
+                      className={`flex-1 min-h-[36px] py-1.5 px-3 rounded-md text-xs font-semibold transition-colors ${mobileDrawerTab === 'VOUCHER'
+                          ? 'bg-white text-slate-900 shadow-sm'
                           : 'text-slate-600'
-                      }`}
+                        }`}
                     >
                       Digital Voucher
                     </button>
                     <button
                       type="button"
                       onClick={() => setMobileDrawerTab('PROOF')}
-                      className={`flex-1 py-1.5 px-3 rounded-md text-xs font-semibold transition-colors ${
-                        mobileDrawerTab === 'PROOF'
-                          ? 'bg-white text-slate-900 shadow-xs'
+                      className={`flex-1 min-h-[36px] py-1.5 px-3 rounded-md text-xs font-semibold transition-colors ${mobileDrawerTab === 'PROOF'
+                          ? 'bg-white text-slate-900 shadow-sm'
                           : 'text-slate-600'
-                      }`}
+                        }`}
                     >
                       Bank Proof PDF
                     </button>
@@ -727,12 +721,11 @@ export function AuditorWorkspace({
               </SheetHeader>
 
               {/* TWO-COLUMN SIDE-BY-SIDE BODY */}
-              <div className="flex-1 overflow-hidden grid grid-cols-1 md:grid-cols-12">
+              <div className="flex-1 min-h-0 overflow-hidden grid grid-cols-1 md:grid-cols-12">
                 {/* LEFT COLUMN: DIGITAL PAYMENT VOUCHER */}
                 <div
-                  className={`md:col-span-5 overflow-y-auto p-5 border-r border-slate-200 space-y-5 ${
-                    mobileDrawerTab === 'VOUCHER' ? 'block' : 'hidden md:block'
-                  }`}
+                  className={`md:col-span-5 h-full overflow-y-auto p-4 sm:p-5 md:border-r border-slate-200 space-y-4 sm:space-y-5 ${mobileDrawerTab === 'VOUCHER' ? 'block' : 'hidden md:block'
+                    }`}
                 >
                   {/* Beneficiary & Financial Breakdown */}
                   <div className="rounded-xl border border-slate-200 divide-y divide-slate-100 text-xs overflow-hidden">
@@ -813,8 +806,8 @@ export function AuditorWorkspace({
                       <span className="font-mono font-bold text-emerald-800">
                         {reviewPayment.payment_mode === 'CHEQUE'
                           ? `#${reviewPayment.cheque_number || 'NA'} (${formatHumanDate(
-                              reviewPayment.cheque_date
-                            )})`
+                            reviewPayment.cheque_date
+                          )})`
                           : reviewPayment.utr_number || '—'}
                       </span>
                     </div>
@@ -925,9 +918,8 @@ export function AuditorWorkspace({
 
                 {/* RIGHT COLUMN: INLINE BANK ACKNOWLEDGEMENT PROOF VIEWER */}
                 <div
-                  className={`md:col-span-7 flex flex-col bg-slate-100/70 overflow-hidden ${
-                    mobileDrawerTab === 'PROOF' ? 'flex h-full min-h-[420px]' : 'hidden md:flex'
-                  }`}
+                  className={`md:col-span-7 h-full flex flex-col bg-slate-100/70 overflow-hidden ${mobileDrawerTab === 'PROOF' ? 'flex min-h-0' : 'hidden md:flex'
+                    }`}
                 >
                   <div className="px-4 py-2.5 bg-white border-b border-slate-200 flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2 text-xs font-semibold text-slate-800">
@@ -993,25 +985,26 @@ export function AuditorWorkspace({
               </div>
 
               {/* BOTTOM AUDIT ACTION BAR */}
-              <div className="px-5 py-3.5 border-t border-slate-200 bg-white flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div className="text-xs text-slate-500">
+              <div className="px-4 sm:px-5 py-3 border-t border-slate-200 bg-white flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 shrink-0 pb-safe">
+                <div className="text-[11px] sm:text-xs text-slate-500">
                   Match UTR / Cheque reference and Net Payable ({formatINR(reviewPayment.net_payable)}) against the Bank Proof before stamping.
                 </div>
 
-                <div className="flex items-center gap-2 shrink-0">
+                <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto">
                   <Button
                     type="button"
                     variant="outline"
                     size="sm"
                     onClick={() => setReviewPayment(null)}
+                    className="min-h-[40px] flex-1 sm:flex-initial"
                   >
                     Close
                   </Button>
 
                   {reviewPayment.audited_at ? (
-                    <div className="px-3.5 py-2 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold inline-flex items-center gap-1.5">
-                      <ShieldCheck className="w-4 h-4 text-emerald-700" />
-                      <span>
+                    <div className="px-3 py-2 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold inline-flex items-center gap-1.5 flex-[2] sm:flex-initial justify-center">
+                      <ShieldCheck className="w-4 h-4 text-emerald-700 shrink-0" />
+                      <span className="truncate">
                         Audited by {reviewPayment.auditor?.full_name || 'Auditor'} on{' '}
                         {formatDateTime(reviewPayment.audited_at)}
                       </span>
@@ -1022,7 +1015,7 @@ export function AuditorWorkspace({
                       size="sm"
                       disabled={isAuditing}
                       onClick={() => handleMarkAudited(reviewPayment)}
-                      className="bg-brand hover:bg-brand-hover text-white font-semibold px-4 shadow-xs"
+                      className="min-h-[40px] flex-[2] sm:flex-initial bg-brand hover:bg-brand-hover text-white font-semibold px-4 shadow-sm"
                     >
                       {isAuditing ? (
                         <>

@@ -278,18 +278,18 @@ export function NotificationBell({
         type="button"
         onClick={() => setIsOpen((prev) => !prev)}
         aria-label="Open notifications"
-        className="relative min-h-[38px] min-w-[38px] px-2 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100 inline-flex items-center justify-center transition-colors cursor-pointer"
+        className="relative min-h-[40px] min-w-[40px] px-2 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100 inline-flex items-center justify-center transition-colors cursor-pointer"
       >
         <Bell className="w-4 h-4" />
         {unreadCount > 0 && (
-          <span className="absolute top-1 right-1 min-w-[16px] h-4 px-1 rounded-full bg-[#7F1D1D] text-white text-[10px] font-bold tabular-nums flex items-center justify-center shadow-xs">
+          <span className="absolute top-1 right-1 min-w-[16px] h-4 px-1 rounded-full bg-[#7F1D1D] text-white text-[10px] font-bold tabular-nums flex items-center justify-center shadow-sm">
             {unreadCount > 99 ? '99+' : unreadCount}
           </span>
         )}
       </button>
 
       {isOpen && (
-        <div className="absolute right-0 mt-2 w-80 sm:w-96 rounded-xl border border-slate-200 bg-white shadow-xl z-50 overflow-hidden animate-in fade-in-50 zoom-in-95">
+        <div className="fixed inset-x-3 top-16 w-auto sm:absolute sm:inset-x-auto sm:right-0 sm:top-auto sm:mt-2 sm:w-96 max-h-[calc(100dvh-5.5rem)] flex flex-col rounded-xl border border-slate-200 bg-white shadow-xl z-50 overflow-hidden animate-in fade-in-50 zoom-in-95">
           {/* Header */}
           <div className="px-4 py-3 border-b border-slate-200 bg-slate-50/70 flex items-center justify-between gap-2">
             <div className="flex items-center gap-2">
@@ -333,11 +333,10 @@ export function NotificationBell({
                 type="button"
                 onClick={handleTogglePush}
                 disabled={isTogglingPush}
-                className={`px-2.5 py-1 rounded-md font-semibold inline-flex items-center gap-1 transition-colors cursor-pointer ${
-                  isPushEnabled
+                className={`px-2.5 py-1 rounded-md font-semibold inline-flex items-center gap-1 transition-colors cursor-pointer ${isPushEnabled
                     ? 'bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100'
                     : 'bg-brand text-white hover:bg-brand-hover'
-                }`}
+                  }`}
               >
                 {isTogglingPush ? (
                   <Loader2 className="w-3 h-3 animate-spin" />
@@ -365,23 +364,20 @@ export function NotificationBell({
                   key={item.id}
                   type="button"
                   onClick={() => handleNotificationClick(item)}
-                  className={`w-full text-left px-4 py-3 hover:bg-slate-50 transition-colors flex items-start gap-2.5 cursor-pointer ${
-                    !item.is_read ? 'bg-rose-50/35' : 'bg-white'
-                  }`}
+                  className={`w-full text-left px-4 py-3 hover:bg-slate-50 transition-colors flex items-start gap-2.5 cursor-pointer ${!item.is_read ? 'bg-rose-50/35' : 'bg-white'
+                    }`}
                 >
                   <span
-                    className={`mt-1.5 w-2 h-2 rounded-full shrink-0 ${
-                      !item.is_read ? 'bg-[#7F1D1D]' : 'bg-slate-200'
-                    }`}
+                    className={`mt-1.5 w-2 h-2 rounded-full shrink-0 ${!item.is_read ? 'bg-[#7F1D1D]' : 'bg-slate-200'
+                      }`}
                   />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between gap-2">
                       <span
-                        className={`text-xs truncate ${
-                          !item.is_read
+                        className={`text-xs truncate ${!item.is_read
                             ? 'font-bold text-slate-900'
                             : 'font-medium text-slate-700'
-                        }`}
+                          }`}
                       >
                         {item.title}
                       </span>

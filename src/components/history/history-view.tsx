@@ -12,6 +12,7 @@ import {
   FilterX,
   ShieldCheck,
   Clock,
+  MessageCircle,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -24,16 +25,19 @@ import {
 } from '@/components/ui/dialog';
 import { PaymentStatusBadge } from '@/components/payments/payment-status-badge';
 import { PaymentDetailDrawer } from '@/components/payments/payment-detail-drawer';
+import { PaymentAcknowledgementModal } from '@/components/payments/payment-acknowledgement-modal';
 import { formatHumanDate, formatINR, formatDDMMYYYY } from '@/lib/format';
 import { generatePaymentsCSV, downloadCSV } from '@/lib/csv';
 import { toast } from 'sonner';
-import type { CompanyBank, PaymentItem } from '@/types/database';
+import type { Company, CompanyBank, PaymentItem } from '@/types/database';
 
 interface HistoryViewProps {
   initialPayments: PaymentItem[];
   banks: CompanyBank[];
   companyCode?: string;
   companyName?: string;
+  activeCompany?: Company | null;
+  currentUserName?: string;
 }
 
 export function HistoryView({
@@ -41,6 +45,8 @@ export function HistoryView({
   banks,
   companyCode = 'INDFURN',
   companyName = 'INDFURN',
+  activeCompany,
+  currentUserName = 'Accounts Team',
 }: HistoryViewProps) {
   // Filters state
   const [searchQuery, setSearchQuery] = React.useState<string>('');
@@ -50,9 +56,10 @@ export function HistoryView({
   const [dateFrom, setDateFrom] = React.useState<string>('');
   const [dateTo, setDateTo] = React.useState<string>('');
 
-  // Payment detail drawer state
+  // Payment detail drawer & advice modal state
   const [selectedPayment, setSelectedPayment] = React.useState<PaymentItem | null>(null);
   const [isDetailOpen, setIsDetailOpen] = React.useState<boolean>(false);
+  const [advicePayment, setAdvicePayment] = React.useState<PaymentItem | null>(null);
 
   // Print dialog state
   const [isPrintDialogOpen, setIsPrintDialogOpen] = React.useState<boolean>(false);
@@ -209,13 +216,13 @@ export function HistoryView({
         </div>
 
         {/* Top Action Buttons */}
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Button
             type="button"
             variant="outline"
             onClick={handleExportCSV}
             disabled={filteredPayments.length === 0}
-            className="min-h-[44px] sm:min-h-[38px] px-3.5 border-slate-200 bg-white hover:bg-slate-50 text-xs font-medium text-slate-700 shadow-sm"
+            className="flex-1 sm:flex-initial min-h-[42px] sm:min-h-[38px] px-3.5 border-slate-200 bg-white hover:bg-slate-50 text-xs font-medium text-slate-700 shadow-sm"
           >
             <Download className="w-4 h-4 mr-1.5 text-slate-500" />
             Export CSV
@@ -224,7 +231,7 @@ export function HistoryView({
           <Button
             type="button"
             onClick={() => setIsPrintDialogOpen(true)}
-            className="min-h-[44px] sm:min-h-[38px] px-3.5 bg-brand hover:bg-brand-hover text-white text-xs font-semibold shadow-sm"
+            className="flex-1 sm:flex-initial min-h-[42px] sm:min-h-[38px] px-3.5 bg-brand hover:bg-brand-hover text-white text-xs font-semibold shadow-sm"
           >
             <Printer className="w-4 h-4 mr-1.5" />
             Print / Save PDF Voucher
@@ -307,17 +314,17 @@ export function HistoryView({
 
         {/* Date Range & Reset Filters */}
         <div className="flex flex-wrap items-center justify-between gap-2.5 pt-2 border-t border-slate-100 text-xs">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-slate-500 font-medium inline-flex items-center gap-1">
+          <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+            <span className="text-slate-500 font-medium inline-flex items-center gap-1 shrink-0">
               <Calendar className="w-3.5 h-3.5 text-slate-400" />
               Sheet Date Range:
             </span>
-            <div className="flex items-center gap-1.5">
+            <div className="flex flex-wrap sm:flex-nowrap items-center gap-1.5 w-full sm:w-auto">
               <input
                 type="date"
                 value={dateFrom}
                 onChange={(e) => setDateFrom(e.target.value)}
-                className="min-h-[36px] px-2.5 rounded-lg border border-slate-200 bg-white text-xs text-slate-700 outline-none focus:border-brand tabular-nums"
+                className="flex-1 sm:flex-initial min-w-[130px] min-h-[38px] px-2.5 rounded-lg border border-slate-200 bg-white text-xs text-slate-700 outline-none focus:border-brand tabular-nums"
                 title="From Date"
               />
               <span className="text-slate-400">to</span>
@@ -325,7 +332,7 @@ export function HistoryView({
                 type="date"
                 value={dateTo}
                 onChange={(e) => setDateTo(e.target.value)}
-                className="min-h-[36px] px-2.5 rounded-lg border border-slate-200 bg-white text-xs text-slate-700 outline-none focus:border-brand tabular-nums"
+                className="flex-1 sm:flex-initial min-w-[130px] min-h-[38px] px-2.5 rounded-lg border border-slate-200 bg-white text-xs text-slate-700 outline-none focus:border-brand tabular-nums"
                 title="To Date"
               />
             </div>
@@ -347,7 +354,7 @@ export function HistoryView({
       </div>
 
       {/* Summary Banner */}
-      <div className="flex items-center justify-between px-3.5 py-2.5 bg-slate-100/70 border border-slate-200/80 rounded-xl text-xs sm:text-sm">
+      <div className="flex flex-wrap items-center justify-between gap-1.5 px-3.5 py-2.5 bg-slate-100/70 border border-slate-200/80 rounded-xl text-xs sm:text-sm">
         <div className="font-medium text-slate-700">
           Showing{' '}
           <span className="tabular-nums font-semibold text-slate-900">
@@ -401,7 +408,7 @@ export function HistoryView({
                     <th className="py-3 px-3.5 text-center">Bank</th>
                     <th className="py-3 px-3.5 text-center">Status & Audit</th>
                     <th className="py-3 px-3.5 text-center">UTR / Cheque</th>
-                    <th className="py-3 px-3.5 text-center w-16">View</th>
+                    <th className="py-3 px-3.5 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -474,20 +481,36 @@ export function HistoryView({
                             <span className="text-slate-300 font-mono">—</span>
                           )}
                         </td>
-                        <td className="py-3 px-3.5 text-center">
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleOpenDetail(p);
-                            }}
-                            className="h-8 w-8 p-0 text-slate-400 hover:text-slate-900 hover:bg-slate-100"
-                            title="View Payment Details"
-                          >
-                            <Eye className="w-4 h-4" />
-                          </Button>
+                        <td className="py-3 px-3.5 text-right whitespace-nowrap">
+                          <div className="inline-flex items-center justify-end gap-1.5">
+                            {p.status === 'PAID' && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setAdvicePayment(p);
+                                }}
+                                className="h-8 px-2.5 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold inline-flex items-center gap-1 shadow-sm transition-colors cursor-pointer"
+                                title="Open Payment Acknowledgement & Share to WhatsApp"
+                              >
+                                <MessageCircle className="w-3.5 h-3.5" />
+                                <span>Advice / WhatsApp</span>
+                              </button>
+                            )}
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleOpenDetail(p);
+                              }}
+                              className="h-8 w-8 p-0 text-slate-400 hover:text-slate-900 hover:bg-slate-100"
+                              title="View Payment Details"
+                            >
+                              <Eye className="w-4 h-4" />
+                            </Button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -556,7 +579,7 @@ export function HistoryView({
                     {p.purpose}
                   </div>
 
-                  <div className="flex items-center justify-between pt-1 border-t border-slate-100 text-xs">
+                  <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-100 text-xs">
                     <div className="flex items-center gap-1.5 flex-wrap">
                       <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-700 border border-slate-200">
                         {p.source_bank?.short_code || p.source_bank?.short_name || 'Bank'}
@@ -569,18 +592,33 @@ export function HistoryView({
                       {p.status === 'PAID' && (
                         <span
                           className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${p.audited_at
-                              ? 'bg-emerald-100 text-emerald-800'
-                              : 'bg-amber-100 text-amber-800'
+                            ? 'bg-emerald-100 text-emerald-800'
+                            : 'bg-amber-100 text-amber-800'
                             }`}
                         >
                           {p.audited_at ? 'Audited' : 'Unaudited'}
                         </span>
                       )}
                     </div>
-                    <span className="text-[11px] font-medium text-slate-500 flex items-center">
-                      Details
-                      <ChevronRight className="w-3.5 h-3.5 ml-0.5 text-slate-400" />
-                    </span>
+                    <div className="flex items-center gap-2 ml-auto">
+                      {p.status === 'PAID' && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setAdvicePayment(p);
+                          }}
+                          className="min-h-[34px] px-2.5 py-1 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-semibold inline-flex items-center gap-1 shadow-sm cursor-pointer"
+                        >
+                          <MessageCircle className="w-3.5 h-3.5" />
+                          <span>Advice / WhatsApp</span>
+                        </button>
+                      )}
+                      <span className="text-[11px] font-medium text-slate-500 flex items-center">
+                        Details
+                        <ChevronRight className="w-3.5 h-3.5 ml-0.5 text-slate-400" />
+                      </span>
+                    </div>
                   </div>
                 </div>
               );
@@ -594,6 +632,19 @@ export function HistoryView({
         open={isDetailOpen}
         onOpenChange={setIsDetailOpen}
         payment={selectedPayment}
+        activeCompany={activeCompany}
+        fallbackUserName={currentUserName}
+      />
+
+      {/* Payment Acknowledgement / WhatsApp Modal */}
+      <PaymentAcknowledgementModal
+        open={Boolean(advicePayment)}
+        onOpenChange={(open) => {
+          if (!open) setAdvicePayment(null);
+        }}
+        payment={advicePayment}
+        activeCompany={activeCompany}
+        fallbackUserName={currentUserName}
       />
 
       {/* Print Voucher Options Dialog */}
@@ -615,8 +666,8 @@ export function HistoryView({
                 type="button"
                 onClick={() => setPrintMode('FILTERED')}
                 className={`flex-1 py-1.5 rounded-md text-xs font-semibold transition-colors ${printMode === 'FILTERED'
-                    ? 'bg-white text-slate-900 shadow-xs'
-                    : 'text-slate-600'
+                  ? 'bg-white text-slate-900 shadow-sm'
+                  : 'text-slate-600'
                   }`}
               >
                 Current Filtered View ({filteredPayments.length})
@@ -625,8 +676,8 @@ export function HistoryView({
                 type="button"
                 onClick={() => setPrintMode('DATE')}
                 className={`flex-1 py-1.5 rounded-md text-xs font-semibold transition-colors ${printMode === 'DATE'
-                    ? 'bg-white text-slate-900 shadow-xs'
-                    : 'text-slate-600'
+                  ? 'bg-white text-slate-900 shadow-sm'
+                  : 'text-slate-600'
                   }`}
               >
                 By Specific Sheet Date

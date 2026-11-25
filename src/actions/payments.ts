@@ -267,7 +267,7 @@ export async function createPayment(
       submitted_at: isDirectSubmit ? nowIso : null,
     })
     .select(
-      '*, vendor:vendors(id, name, party_name, beneficiary_name, account_number, ifsc_code, remarks), source_bank:company_banks(id, short_name, full_name, short_code, bank_name)'
+      '*, vendor:vendors(id, name, party_name, beneficiary_name, account_number, ifsc_code, whatsapp_number, remarks), source_bank:company_banks(id, short_name, full_name, short_code, bank_name, account_number_masked, account_mask), payer:profiles!paid_by(id, full_name, role)'
     )
     .single();
 
@@ -404,7 +404,7 @@ export async function updateDraftPayment(
     .update(updatePayload)
     .eq('id', id)
     .select(
-      '*, vendor:vendors(id, name, party_name, beneficiary_name, account_number, ifsc_code, remarks), source_bank:company_banks(id, short_name, full_name, short_code, bank_name)'
+      '*, vendor:vendors(id, name, party_name, beneficiary_name, account_number, ifsc_code, whatsapp_number, remarks), source_bank:company_banks(id, short_name, full_name, short_code, bank_name, account_number_masked, account_mask), payer:profiles!paid_by(id, full_name, role)'
     )
     .single();
 
@@ -506,7 +506,7 @@ export async function submitPayment(
     })
     .eq('id', paymentId)
     .select(
-      '*, vendor:vendors(id, name, party_name, beneficiary_name, account_number, ifsc_code, remarks), source_bank:company_banks(id, short_name, full_name, short_code, bank_name)'
+      '*, vendor:vendors(id, name, party_name, beneficiary_name, account_number, ifsc_code, whatsapp_number, remarks), source_bank:company_banks(id, short_name, full_name, short_code, bank_name, account_number_masked, account_mask), payer:profiles!paid_by(id, full_name, role)'
     )
     .single();
 
@@ -599,7 +599,7 @@ export async function verifyPayment(
     })
     .eq('id', paymentId)
     .select(
-      '*, vendor:vendors(id, name, party_name, beneficiary_name, account_number, ifsc_code, remarks), source_bank:company_banks(id, short_name, full_name, short_code, bank_name)'
+      '*, vendor:vendors(id, name, party_name, beneficiary_name, account_number, ifsc_code, whatsapp_number, remarks), source_bank:company_banks(id, short_name, full_name, short_code, bank_name, account_number_masked, account_mask), payer:profiles!paid_by(id, full_name, role)'
     )
     .single();
 
@@ -781,7 +781,7 @@ export async function cancelPayment(
     })
     .eq('id', paymentId)
     .select(
-      '*, vendor:vendors(id, name, party_name, beneficiary_name, account_number, ifsc_code, remarks), source_bank:company_banks(id, short_name, full_name, short_code, bank_name)'
+      '*, vendor:vendors(id, name, party_name, beneficiary_name, account_number, ifsc_code, whatsapp_number, remarks), source_bank:company_banks(id, short_name, full_name, short_code, bank_name, account_number_masked, account_mask), payer:profiles!paid_by(id, full_name, role)'
     )
     .single();
 
@@ -863,7 +863,7 @@ export async function ownerApprovePayment(
     })
     .eq('id', paymentId)
     .select(
-      '*, vendor:vendors(id, name, party_name, beneficiary_name, account_number, ifsc_code, remarks), source_bank:company_banks(id, short_name, full_name, short_code, bank_name)'
+      '*, vendor:vendors(id, name, party_name, beneficiary_name, account_number, ifsc_code, whatsapp_number, remarks), source_bank:company_banks(id, short_name, full_name, short_code, bank_name, account_number_masked, account_mask), payer:profiles!paid_by(id, full_name, role)'
     )
     .single();
 
@@ -963,9 +963,8 @@ export async function bulkApprovePayments(
     partyName: `${eligibleIds.length} payments`,
     netPayable: totalApprovedNet,
     customTitle: `[${activeCompany.code}] Batch Approved (${eligibleIds.length} payments)`,
-    customBody: `${eligibleIds.length} payment${
-      eligibleIds.length === 1 ? '' : 's'
-    } totaling ${formatINR(totalApprovedNet)} approved and ready to pay.`,
+    customBody: `${eligibleIds.length} payment${eligibleIds.length === 1 ? '' : 's'
+      } totaling ${formatINR(totalApprovedNet)} approved and ready to pay.`,
   });
 
   revalidatePath('/approvals');
@@ -1032,7 +1031,7 @@ export async function ownerHoldPayment(
     })
     .eq('id', paymentId)
     .select(
-      '*, vendor:vendors(id, name, party_name, beneficiary_name, account_number, ifsc_code, remarks), source_bank:company_banks(id, short_name, full_name, short_code, bank_name)'
+      '*, vendor:vendors(id, name, party_name, beneficiary_name, account_number, ifsc_code, whatsapp_number, remarks), source_bank:company_banks(id, short_name, full_name, short_code, bank_name, account_number_masked, account_mask), payer:profiles!paid_by(id, full_name, role)'
     )
     .single();
 
@@ -1139,7 +1138,7 @@ export async function ownerRejectPayment(
     })
     .eq('id', paymentId)
     .select(
-      '*, vendor:vendors(id, name, party_name, beneficiary_name, account_number, ifsc_code, remarks), source_bank:company_banks(id, short_name, full_name, short_code, bank_name)'
+      '*, vendor:vendors(id, name, party_name, beneficiary_name, account_number, ifsc_code, whatsapp_number, remarks), source_bank:company_banks(id, short_name, full_name, short_code, bank_name, account_number_masked, account_mask), payer:profiles!paid_by(id, full_name, role)'
     )
     .single();
 
@@ -1250,7 +1249,7 @@ export async function ownerSwitchBank(
     })
     .eq('id', paymentId)
     .select(
-      '*, vendor:vendors(id, name, party_name, beneficiary_name, account_number, ifsc_code, remarks), source_bank:company_banks(id, short_name, full_name, short_code, bank_name)'
+      '*, vendor:vendors(id, name, party_name, beneficiary_name, account_number, ifsc_code, whatsapp_number, remarks), source_bank:company_banks(id, short_name, full_name, short_code, bank_name, account_number_masked, account_mask), payer:profiles!paid_by(id, full_name, role)'
     )
     .single();
 
@@ -1516,7 +1515,7 @@ export async function markPaymentPaid(
     .eq('id', payment_id)
     .eq('company_id', activeCompany.id)
     .select(
-      '*, vendor:vendors(id, name, party_name, beneficiary_name, account_number, ifsc_code, remarks), source_bank:company_banks(id, short_name, full_name, short_code, bank_name)'
+      '*, vendor:vendors(id, name, party_name, beneficiary_name, account_number, ifsc_code, whatsapp_number, remarks), source_bank:company_banks(id, short_name, full_name, short_code, bank_name, account_number_masked, account_mask), payer:profiles!paid_by(id, full_name, role)'
     )
     .single();
 
