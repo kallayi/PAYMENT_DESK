@@ -11,12 +11,15 @@ import {
   ExternalLink,
 } from 'lucide-react';
 import { formatINR, formatShortDate } from '@/lib/format';
+import { OwnerBankSwitcher } from '@/components/payments/owner-bank-switcher';
+import { PaymentModeBadge } from '@/components/payments/payment-status-badge';
 import type { CompanyBank, PaymentItem } from '@/types/database';
 
 interface OwnerApprovalCardProps {
   item: PaymentItem;
   banks: CompanyBank[];
   isSelected?: boolean;
+  isHighlighted?: boolean;
   onToggleSelect?: () => void;
   onApprove: (item: PaymentItem) => void;
   onHold: (item: PaymentItem) => void;
@@ -24,6 +27,7 @@ interface OwnerApprovalCardProps {
   onBankSwitch: (item: PaymentItem, newBankId: string) => void;
   onViewBill: (item: PaymentItem) => void;
   isActionLoading?: boolean;
+  isBankSwitching?: boolean;
   isOverrideTab?: boolean;
 }
 
@@ -37,6 +41,7 @@ export function OwnerApprovalCard({
   item,
   banks,
   isSelected = false,
+  isHighlighted = false,
   onToggleSelect,
   onApprove,
   onHold,
@@ -44,9 +49,11 @@ export function OwnerApprovalCard({
   onBankSwitch,
   onViewBill,
   isActionLoading = false,
+  isBankSwitching = false,
   isOverrideTab = false,
 }: OwnerApprovalCardProps) {
   const isHold = item.status === 'ON_HOLD';
+  const isAlreadyApproved = item.status === 'APPROVED' || item.status === 'PAID';
   const vendor = item.vendor;
   const partyName = vendor?.party_name || vendor?.name || 'Unknown Party';
   const beneficiaryName = vendor?.beneficiary_name || partyName;
@@ -54,7 +61,10 @@ export function OwnerApprovalCard({
 
   return (
     <article
-      className={`bg-white rounded-xl border p-3.5 sm:p-5 flex flex-col gap-3 sm:gap-3.5 transition-all shadow-sm ${isSelected
+      data-payment-id={item.id}
+      className={`bg-white rounded-xl border p-3 sm:p-5 flex flex-col gap-2.5 sm:gap-3.5 transition-all shadow-sm ${isHighlighted
+        ? 'border-brand ring-2 ring-brand animate-pulse'
+        : isSelected
           ? 'border-brand ring-1 ring-brand bg-brand/5'
           : 'border-slate-200 hover:border-slate-300'
         }`}
@@ -62,7 +72,7 @@ export function OwnerApprovalCard({
       {/* ROW 1: CHECKBOX + VENDOR & BENEFICIARY + NET PAYABLE */}
       <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2.5 sm:gap-3">
         <div className="flex items-start gap-2.5 sm:gap-3 min-w-0 flex-1">
-          {onToggleSelect && (
+          {onToggleSelect && !isAlreadyApproved && (
             <input
               type="checkbox"
               checked={isSelected}
@@ -116,6 +126,8 @@ export function OwnerApprovalCard({
               <span className="tabular-nums">
                 Due: <span className="font-medium text-slate-800">{formatShortDate(item.due_date)}</span>
               </span>
+              <span className="text-slate-300">·</span>
+              <PaymentModeBadge mode={item.payment_mode} compact />
             </div>
           </div>
         </div>
@@ -143,21 +155,18 @@ export function OwnerApprovalCard({
 
       {/* ROW 3: INTERACTIVE INLINE BANK SWITCHER + VIEW BILL */}
       <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-100">
-        <div className="flex items-center gap-1.5 min-w-0 flex-1 max-w-full">
+        <div className="flex flex-wrap items-center gap-2 min-w-0 flex-1 max-w-full">
           <span className="text-xs text-slate-500 font-medium shrink-0">Disburse from:</span>
-          <select
-            aria-label={`Select source bank for ${partyName}`}
-            value={item.source_bank_id}
-            disabled={isActionLoading}
-            onChange={(e) => onBankSwitch(item, e.target.value)}
-            className="min-h-[38px] max-w-full min-w-0 flex-1 sm:flex-initial pl-2.5 pr-6 py-1 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-xs font-semibold text-slate-800 outline-none focus:border-brand cursor-pointer transition-colors disabled:opacity-50 truncate"
-          >
-            {banks.map((b) => (
-              <option key={b.id} value={b.id}>
-                {b.bank_name || b.full_name} ({b.short_code || b.short_name}) — Bal: {formatINR(b.available_balance ?? 0)}
-              </option>
-            ))}
-          </select>
+          <OwnerBankSwitcher
+            banks={banks}
+            selectedBankId={item.source_bank_id}
+            fallbackBank={item.source_bank}
+            billNetPayable={Number(item.net_payable) || 0}
+            partyName={partyName}
+            disabled={isActionLoading || isAlreadyApproved}
+            isSwitching={isBankSwitching}
+            onSelectBank={(newBankId) => onBankSwitch(item, newBankId)}
+          />
         </div>
 
         {item.invoice_file_path ? (
@@ -174,45 +183,54 @@ export function OwnerApprovalCard({
         )}
       </div>
 
-      {/* ROW 4: ACTION BUTTONS */}
-      <div className="flex flex-wrap sm:flex-nowrap items-center gap-2 pt-1">
-        {/* APPROVE BUTTON (Solid, widest) */}
-        <button
-          type="button"
-          disabled={isActionLoading}
-          onClick={() => onApprove(item)}
-          className="flex-[1.5] min-w-[120px] min-h-[44px] px-3 rounded-lg bg-emerald-700 hover:bg-emerald-800 active:scale-[0.99] text-white text-xs font-semibold inline-flex items-center justify-center gap-1.5 transition-all shadow-sm disabled:opacity-50 cursor-pointer"
-        >
-          {isActionLoading ? (
-            <Loader2 className="w-4 h-4 animate-spin text-white" />
-          ) : (
-            <Check className="w-4 h-4" />
-          )}
-          <span>{isOverrideTab ? 'Authorize Override' : 'Approve'}</span>
-        </button>
-
-        {/* HOLD / RESUME BUTTON */}
-        {!isOverrideTab && (
+      {/* ROW 4: ACTION BUTTONS (or Read-only Approved Badge) */}
+      {isAlreadyApproved ? (
+        <div className="pt-1 flex items-center">
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold">
+            <Check className="w-3.5 h-3.5 text-emerald-600" />
+            <span>{item.status === 'PAID' ? 'Paid / Settled' : 'Approved — Awaiting UTR'}</span>
+          </span>
+        </div>
+      ) : (
+        <div className="flex flex-wrap sm:flex-nowrap items-center gap-2 pt-1">
+          {/* APPROVE BUTTON (Solid, widest) */}
           <button
             type="button"
             disabled={isActionLoading}
-            onClick={() => onHold(item)}
-            className="flex-1 min-w-[74px] min-h-[44px] px-3 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold transition-colors disabled:opacity-50 cursor-pointer"
+            onClick={() => onApprove(item)}
+            className="flex-[1.5] min-w-[120px] min-h-[44px] px-3 rounded-lg bg-emerald-700 hover:bg-emerald-800 active:scale-[0.99] text-white text-xs font-semibold inline-flex items-center justify-center gap-1.5 transition-all shadow-sm disabled:opacity-50 cursor-pointer"
           >
-            <span>{isHold ? 'Resume' : 'Hold'}</span>
+            {isActionLoading ? (
+              <Loader2 className="w-4 h-4 animate-spin text-white" />
+            ) : (
+              <Check className="w-4 h-4" />
+            )}
+            <span>{isOverrideTab ? 'Authorize Override' : 'Approve'}</span>
           </button>
-        )}
 
-        {/* REJECT BUTTON */}
-        <button
-          type="button"
-          disabled={isActionLoading}
-          onClick={() => onReject(item)}
-          className="flex-1 min-w-[74px] min-h-[44px] px-3 rounded-lg border border-rose-200 bg-white hover:bg-rose-50 text-rose-700 text-xs font-semibold transition-colors disabled:opacity-50 cursor-pointer"
-        >
-          <span>Reject</span>
-        </button>
-      </div>
+          {/* HOLD / RESUME BUTTON */}
+          {!isOverrideTab && (
+            <button
+              type="button"
+              disabled={isActionLoading}
+              onClick={() => onHold(item)}
+              className="flex-1 min-w-[74px] min-h-[44px] px-3 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold transition-colors disabled:opacity-50 cursor-pointer"
+            >
+              <span>{isHold ? 'Resume' : 'Hold'}</span>
+            </button>
+          )}
+
+          {/* REJECT BUTTON */}
+          <button
+            type="button"
+            disabled={isActionLoading}
+            onClick={() => onReject(item)}
+            className="flex-1 min-w-[74px] min-h-[44px] px-3 rounded-lg border border-rose-200 bg-white hover:bg-rose-50 text-rose-700 text-xs font-semibold transition-colors disabled:opacity-50 cursor-pointer"
+          >
+            <span>Reject</span>
+          </button>
+        </div>
+      )}
     </article>
   );
 }

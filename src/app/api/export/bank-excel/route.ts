@@ -5,14 +5,20 @@ import { getCurrentUserContext } from '@/lib/auth';
 import {
   getBankTemplateAdapter,
   splitRowsByIfsc,
+  buildSalarySameBankWorkbook,
+  buildSalaryOtherBankWorkbook,
   type BulkExportRow,
 } from '@/lib/excel';
 
 const exportRequestSchema = z.object({
   paymentIds: z.array(z.string().uuid()).min(1, 'At least one approved payment must be selected.'),
   bankId: z.string().uuid('A valid source bank ID is required.'),
-  batchType: z.enum(['same_bank', 'other_bank', 'combined']),
+  batchType: z.enum(['same_bank', 'other_bank']),
+  templateCategory: z.enum(['vendor', 'salary']).optional().default('vendor'),
 });
+
+const isSalaryPayment = (p: { purpose?: string | null }) =>
+  (p.purpose || '').toLowerCase().includes('salary');
 
 export async function POST(req: NextRequest) {
   try {
@@ -49,7 +55,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const { paymentIds, bankId, batchType } = parsed.data;
+    const { paymentIds, bankId, batchType, templateCategory } = parsed.data;
     const supabase = await createClient();
 
     // Verify source bank belongs to activeCompany (explicitly select full_debit_account_number for PREPARER/is_admin)
@@ -71,9 +77,22 @@ export async function POST(req: NextRequest) {
 
     const bankShortCode = (bank.short_code || bank.short_name || 'BANK').trim().toUpperCase();
     const bankIfscPrefix = (bank.ifsc_prefix || '').trim().toUpperCase();
+    const bankFullName = (bank.bank_name || bank.full_name || '').trim().toUpperCase();
+    const isAxisBank =
+      bankIfscPrefix.startsWith('UTIB') ||
+      bankShortCode.includes('AXIS') ||
+      bankFullName.includes('AXIS');
+
+    if (!isAxisBank) {
+      return NextResponse.json(
+        { error: 'Bulk Excel export is supported for Axis Bank only.' },
+        { status: 400 }
+      );
+    }
+
     const fullDebitAccount = (bank.full_debit_account_number || '').trim();
 
-    // Query APPROVED, NEFT_RTGS items scoped strictly to activeCompany and selected bank
+    // Query APPROVED electronic transfer items (NEFT_RTGS or IMPS) scoped strictly to activeCompany and selected bank
     const { data: items, error: itemsError } = await supabase
       .from('payment_items')
       .select(
@@ -81,7 +100,7 @@ export async function POST(req: NextRequest) {
       )
       .eq('company_id', activeCompany.id)
       .eq('status', 'APPROVED')
-      .eq('payment_mode', 'NEFT_RTGS')
+      .in('payment_mode', ['NEFT_RTGS', 'IMPS'])
       .eq('source_bank_id', bankId)
       .in('id', paymentIds)
       .order('due_date', { ascending: true });
@@ -100,9 +119,26 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const categoryFilteredItems =
+      templateCategory === 'salary'
+        ? items.filter(isSalaryPayment)
+        : items.filter((p) => !isSalaryPayment(p));
+
+    if (categoryFilteredItems.length === 0) {
+      return NextResponse.json(
+        {
+          error:
+            templateCategory === 'salary'
+              ? 'No approved Salary payments found for Axis Bank export.'
+              : 'No approved Vendor payments found for Axis Bank export.',
+        },
+        { status: 400 }
+      );
+    }
+
     const companyCode = (activeCompany.code || 'INDFURN').trim().toUpperCase();
 
-    const exportRows: BulkExportRow[] = items.map((item: any) => {
+    const exportRows: BulkExportRow[] = categoryFilteredItems.map((item: any) => {
       const v = item.vendor || {};
       const partyName = (v.party_name || v.name || 'Unknown Party').trim();
       const beneficiaryName = (v.beneficiary_name || partyName).trim();
@@ -130,11 +166,7 @@ export async function POST(req: NextRequest) {
 
     const split = splitRowsByIfsc(exportRows, bankIfscPrefix);
     const targetRows =
-      batchType === 'combined'
-        ? exportRows
-        : batchType === 'same_bank'
-          ? split.sameBankRows
-          : split.otherBankRows;
+      batchType === 'same_bank' ? split.sameBankRows : split.otherBankRows;
 
     if (targetRows.length === 0) {
       return NextResponse.json(
@@ -142,30 +174,44 @@ export async function POST(req: NextRequest) {
           error:
             batchType === 'same_bank'
               ? `No Same-Bank (${bankIfscPrefix}) entries found in this selection.`
-              : batchType === 'other_bank'
-                ? `No Other-Bank (NEFT/RTGS) entries found in this selection.`
-                : `No eligible NEFT/RTGS entries found in this selection.`,
+              : `No Other-Bank (NEFT/RTGS/IMPS) entries found in this selection.`,
         },
         { status: 400 }
       );
     }
 
-    const adapter = getBankTemplateAdapter(bankShortCode, bankIfscPrefix);
-    const workbookBuffer =
-      batchType === 'combined'
-        ? await adapter.buildCombinedWorkbook(targetRows)
-        : batchType === 'same_bank'
+    let workbookBuffer: Buffer;
+    let filename: string;
+
+    if (templateCategory === 'salary') {
+      workbookBuffer =
+        batchType === 'same_bank'
+          ? await buildSalarySameBankWorkbook(targetRows)
+          : await buildSalaryOtherBankWorkbook(targetRows);
+
+      const istDateParts = new Intl.DateTimeFormat('en-GB', {
+        timeZone: 'Asia/Kolkata',
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+      }).formatToParts(new Date());
+      const getPart = (t: string) => istDateParts.find((p) => p.type === t)?.value || '';
+      const todayYYYYMMDD = `${getPart('year')}${getPart('month')}${getPart('day')}`;
+
+      const salaryBatchLabel =
+        batchType === 'same_bank' ? 'WithinAxis' : 'AcrossAllBanks';
+      filename = `${companyCode}_Axis_Salary_${salaryBatchLabel}_${todayYYYYMMDD}.xlsx`;
+    } else {
+      const adapter = getBankTemplateAdapter(bankShortCode, bankIfscPrefix);
+      workbookBuffer =
+        batchType === 'same_bank'
           ? await adapter.buildSameBankWorkbook(targetRows)
           : await adapter.buildOtherBankWorkbook(targetRows);
 
-    const todayStr = new Date().toISOString().split('T')[0];
-    const batchLabel =
-      batchType === 'combined'
-        ? 'ALL_BANKS'
-        : batchType === 'same_bank'
-          ? 'SAME_BANK'
-          : 'OTHER_BANK';
-    const filename = `${companyCode}_${bankShortCode}_${batchLabel}_${todayStr}.xlsx`;
+      const todayStr = new Date().toISOString().split('T')[0];
+      const batchLabel = batchType === 'same_bank' ? 'SAME_BANK' : 'OTHER_BANK';
+      filename = `${companyCode}_${bankShortCode}_${batchLabel}_${todayStr}.xlsx`;
+    }
 
     return new NextResponse(new Uint8Array(workbookBuffer), {
       status: 200,

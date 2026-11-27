@@ -15,6 +15,8 @@ import {
   Building2,
   AlertCircle,
   IndianRupee,
+  ExternalLink,
+  Clock,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
@@ -32,36 +34,35 @@ import {
   deleteReminder,
   toggleReminderMonthDone,
 } from '@/actions/reminders';
-import { formatINR } from '@/lib/format';
-import type { RecurringReminder, Vendor } from '@/types/database';
+import { formatINR, getCurrentISTInfo } from '@/lib/format';
+import type {
+  RecurringReminder,
+  ReminderLinkedPayment,
+  Vendor,
+} from '@/types/database';
 
 interface RemindersViewProps {
   initialReminders: RecurringReminder[];
   vendors: Vendor[];
   companyName: string;
-}
-
-function getCurrentMonthKey(): string {
-  const d = new Date();
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  return `${year}-${month}`;
-}
-
-function getCurrentMonthLabel(): string {
-  return new Date().toLocaleDateString('en-IN', {
-    month: 'long',
-    year: 'numeric',
-  });
+  linkedPaymentsByReminder?: Record<string, ReminderLinkedPayment>;
+  currentMonthKey?: string;
+  currentMonthLabel?: string;
+  canCreatePayment?: boolean;
 }
 
 export function RemindersView({
   initialReminders,
   vendors,
   companyName,
+  linkedPaymentsByReminder = {},
+  currentMonthKey,
+  currentMonthLabel: propMonthLabel,
+  canCreatePayment = true,
 }: RemindersViewProps) {
-  const currentMonth = getCurrentMonthKey();
-  const currentMonthLabel = getCurrentMonthLabel();
+  const istInfo = React.useMemo(() => getCurrentISTInfo(), []);
+  const currentMonth = currentMonthKey || istInfo.yearMonth;
+  const currentMonthLabel = propMonthLabel || istInfo.monthLabel;
 
   const [reminders, setReminders] = React.useState<RecurringReminder[]>(initialReminders);
   const [searchQuery, setSearchQuery] = React.useState<string>('');
@@ -234,10 +235,10 @@ export function RemindersView({
     });
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4 pb-4 sm:pb-5 border-b border-slate-200">
-        <div className="min-w-0">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4 sm:pb-5 sm:border-b sm:border-slate-200">
+        <div className="hidden sm:block min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <h1 className="text-lg sm:text-xl font-bold tracking-tight text-slate-900">
               Monthly Reminders — {companyName}
@@ -318,8 +319,8 @@ export function RemindersView({
             type="button"
             onClick={() => setFilterTab('ALL')}
             className={`min-h-[36px] px-2.5 sm:px-3 py-1 rounded-md text-xs font-semibold transition-colors truncate ${filterTab === 'ALL'
-                ? 'bg-white text-slate-900 shadow-sm'
-                : 'text-slate-600 hover:text-slate-900'
+              ? 'bg-white text-slate-900 shadow-sm'
+              : 'text-slate-600 hover:text-slate-900'
               }`}
           >
             All ({totalItems})
@@ -328,8 +329,8 @@ export function RemindersView({
             type="button"
             onClick={() => setFilterTab('PENDING')}
             className={`min-h-[36px] px-2.5 sm:px-3 py-1 rounded-md text-xs font-semibold transition-colors truncate ${filterTab === 'PENDING'
-                ? 'bg-white text-amber-700 shadow-sm'
-                : 'text-slate-600 hover:text-slate-900'
+              ? 'bg-white text-amber-700 shadow-sm'
+              : 'text-slate-600 hover:text-slate-900'
               }`}
           >
             Pending ({pendingItems.length})
@@ -338,8 +339,8 @@ export function RemindersView({
             type="button"
             onClick={() => setFilterTab('DONE')}
             className={`min-h-[36px] px-2.5 sm:px-3 py-1 rounded-md text-xs font-semibold transition-colors truncate ${filterTab === 'DONE'
-                ? 'bg-white text-emerald-700 shadow-sm'
-                : 'text-slate-600 hover:text-slate-900'
+              ? 'bg-white text-emerald-700 shadow-sm'
+              : 'text-slate-600 hover:text-slate-900'
               }`}
           >
             Done ({completedItems.length})
@@ -353,7 +354,7 @@ export function RemindersView({
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search reminders or vendor..."
-            className="w-full min-h-[38px] pl-8 pr-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg text-slate-900 focus:outline-none focus:ring-1 focus:ring-brand focus:border-brand"
+            className="w-full min-h-[38px] pl-8 pr-3 py-1.5 text-xs bg-white border border-slate-300 rounded-lg text-slate-950 font-medium placeholder:text-slate-500 shadow-sm hover:border-slate-400 focus:outline-none focus:border-[#7F1D1D] focus:ring-2 focus:ring-[#7F1D1D]/15 transition-colors"
           />
         </div>
       </div>
@@ -383,14 +384,92 @@ export function RemindersView({
         <div className="space-y-3">
           {filtered.map((r) => {
             const isDone = r.last_completed_month === currentMonth;
+            const linked = linkedPaymentsByReminder[r.id];
             const vendor = r.vendor;
             const vendorDisplayName = vendor?.party_name || vendor?.name || 'No vendor linked';
+            const effectiveDueDay = Math.min(r.due_day_of_month, istInfo.daysInMonth);
+            const isDueTodayOrPast = !isDone && istInfo.day >= effectiveDueDay;
+            const hasActiveSubmittedPayment = Boolean(
+              linked &&
+              [
+                'PENDING_VERIFICATION',
+                'PENDING_APPROVAL',
+                'ON_HOLD',
+                'APPROVED',
+                'PAID',
+              ].includes(linked.status)
+            );
+
+            let stageBadge: React.ReactNode;
+            if (linked?.status === 'PAID') {
+              stageBadge = (
+                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                  ✓✓ Paid ({formatINR(linked.net_payable)})
+                  {linked.utr_number ? ` · UTR ${linked.utr_number}` : ''}
+                </span>
+              );
+            } else if (linked?.status === 'APPROVED') {
+              stageBadge = (
+                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-sky-100 text-sky-800 border border-sky-200">
+                  Approved · Pending UTR
+                </span>
+              );
+            } else if (linked?.status === 'PENDING_VERIFICATION') {
+              stageBadge = (
+                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-800 border border-indigo-200">
+                  Entry Submitted · Pending Verification
+                </span>
+              );
+            } else if (linked?.status === 'PENDING_APPROVAL') {
+              stageBadge = (
+                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-800 border border-blue-200">
+                  Entry Submitted · Pending Approval
+                </span>
+              );
+            } else if (linked?.status === 'ON_HOLD') {
+              stageBadge = (
+                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-orange-100 text-orange-800 border border-orange-200">
+                  On Hold
+                </span>
+              );
+            } else if (linked?.status === 'DRAFT') {
+              stageBadge = (
+                <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-700 border border-slate-200">
+                  Draft Saved (Not Submitted)
+                </span>
+              );
+            } else if (linked?.status === 'REJECTED' || linked?.status === 'CANCELLED') {
+              stageBadge = (
+                <span
+                  title={linked.rejection_reason || undefined}
+                  className="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-100 text-rose-800 border border-rose-200"
+                >
+                  {linked.status === 'REJECTED'
+                    ? 'Returned / Rejected — Re-enter'
+                    : 'Cancelled — Re-enter'}
+                </span>
+              );
+            } else if (isDone) {
+              stageBadge = (
+                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                  ✓ Done (Manual) · {currentMonthLabel}
+                </span>
+              );
+            } else {
+              stageBadge = (
+                <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-800">
+                  Pending
+                </span>
+              );
+            }
 
             return (
               <div
                 key={r.id}
                 className={`p-4 rounded-xl border transition-all duration-150 bg-white shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4 ${isDone
-                    ? 'border-emerald-200/70 bg-emerald-50/20'
+                  ? 'border-emerald-200/70 bg-emerald-50/20'
+                  : isDueTodayOrPast
+                    ? 'border-amber-300 bg-amber-50/15'
                     : 'border-slate-200 hover:border-slate-300'
                   }`}
               >
@@ -423,13 +502,11 @@ export function RemindersView({
                       <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-700">
                         Due {r.due_day_of_month}th of every month
                       </span>
-                      {isDone ? (
-                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800">
-                          Done ({currentMonthLabel})
-                        </span>
-                      ) : (
-                        <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-800">
-                          Pending
+                      {stageBadge}
+                      {isDueTodayOrPast && !hasActiveSubmittedPayment && (
+                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200 inline-flex items-center gap-1">
+                          <Clock className="w-2.5 h-2.5" />
+                          Due Now
                         </span>
                       )}
                     </div>
@@ -461,15 +538,26 @@ export function RemindersView({
                   </div>
 
                   <div className="flex items-center gap-1.5">
-                    {/* Create Payment Entry with Pre-fill */}
-                    <Link
-                      href={`/payments?fromReminder=${r.id}`}
-                      className="min-h-[38px] inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold rounded-lg bg-brand text-white hover:bg-brand-hover shadow-sm transition-colors"
-                      title="Create payment entry pre-filled with this reminder"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      <span>Create Entry</span>
-                    </Link>
+                    {canCreatePayment &&
+                      (hasActiveSubmittedPayment ? (
+                        <Link
+                          href="/payments"
+                          className="min-h-[38px] inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100 transition-colors"
+                          title="View linked payment in Payments Ledger"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5 text-slate-500" />
+                          <span>View in Payments</span>
+                        </Link>
+                      ) : (
+                        <Link
+                          href={`/payments?fromReminder=${r.id}`}
+                          className="min-h-[38px] inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold rounded-lg bg-brand text-white hover:bg-brand-hover shadow-sm transition-colors"
+                          title="Create payment entry pre-filled with this reminder"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          <span>Create Entry</span>
+                        </Link>
+                      ))}
 
                     <button
                       type="button"
@@ -515,7 +603,7 @@ export function RemindersView({
 
           <form onSubmit={handleSaveReminder} className="space-y-4 py-2">
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
+              <label className="block text-xs font-semibold text-slate-800 tracking-tight mb-1">
                 Obligation / Title <span className="text-red-500">*</span>
               </label>
               <input
@@ -523,14 +611,14 @@ export function RemindersView({
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 placeholder="e.g. KSEB Electricity Bill, Office Rent, Staff Salaries"
-                className="w-full px-3 py-1.5 text-xs bg-white border border-slate-300 rounded-md text-slate-900 focus:outline-none focus:ring-1 focus:ring-brand focus:border-brand"
+                className="w-full min-h-[42px] px-3 py-1.5 text-sm bg-white border border-slate-300 rounded-lg text-slate-950 font-medium placeholder:text-slate-500 shadow-sm hover:border-slate-400 focus:outline-none focus:border-[#7F1D1D] focus:ring-2 focus:ring-[#7F1D1D]/15 transition-colors"
                 required
               />
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                <label className="block text-xs font-semibold text-slate-800 tracking-tight mb-1">
                   Due Day of Month (1-31) <span className="text-red-500">*</span>
                 </label>
                 <input
@@ -539,13 +627,13 @@ export function RemindersView({
                   max="31"
                   value={dueDay}
                   onChange={(e) => setDueDay(parseInt(e.target.value, 10) || 1)}
-                  className="w-full min-h-[40px] px-3 py-1.5 text-xs bg-white border border-slate-300 rounded-md text-slate-900 focus:outline-none focus:ring-1 focus:ring-brand focus:border-brand tabular-nums"
+                  className="w-full min-h-[42px] px-3 py-1.5 text-sm bg-white border border-slate-300 rounded-lg text-slate-950 font-medium shadow-sm hover:border-slate-400 focus:outline-none focus:border-[#7F1D1D] focus:ring-2 focus:ring-[#7F1D1D]/15 tabular-nums transition-colors"
                   required
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                <label className="block text-xs font-semibold text-slate-800 tracking-tight mb-1">
                   Estimated Amount (₹)
                 </label>
                 <input
@@ -555,19 +643,19 @@ export function RemindersView({
                   value={estimatedAmount}
                   onChange={(e) => setEstimatedAmount(e.target.value)}
                   placeholder="Optional"
-                  className="w-full min-h-[40px] px-3 py-1.5 text-xs bg-white border border-slate-300 rounded-md text-slate-900 focus:outline-none focus:ring-1 focus:ring-brand focus:border-brand tabular-nums"
+                  className="w-full min-h-[42px] px-3 py-1.5 text-sm bg-white border border-slate-300 rounded-lg text-slate-950 font-medium placeholder:text-slate-500 shadow-sm hover:border-slate-400 focus:outline-none focus:border-[#7F1D1D] focus:ring-2 focus:ring-[#7F1D1D]/15 tabular-nums transition-colors"
                 />
               </div>
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
+              <label className="block text-xs font-semibold text-slate-800 tracking-tight mb-1">
                 Linked Vendor / Beneficiary
               </label>
               <select
                 value={vendorId}
                 onChange={(e) => setVendorId(e.target.value)}
-                className="w-full px-3 py-1.5 text-xs bg-white border border-slate-300 rounded-md text-slate-900 focus:outline-none focus:ring-1 focus:ring-brand focus:border-brand"
+                className="w-full min-h-[42px] px-3 py-1.5 text-sm bg-white border border-slate-300 rounded-lg text-slate-950 font-medium shadow-sm hover:border-slate-400 focus:outline-none focus:border-[#7F1D1D] focus:ring-2 focus:ring-[#7F1D1D]/15 transition-colors"
               >
                 <option value="">-- No specific vendor linked --</option>
                 {vendors.map((v) => (
@@ -579,7 +667,7 @@ export function RemindersView({
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
+              <label className="block text-xs font-semibold text-slate-800 tracking-tight mb-1">
                 Remarks / Notes
               </label>
               <input
@@ -587,7 +675,7 @@ export function RemindersView({
                 value={remarks}
                 onChange={(e) => setRemarks(e.target.value)}
                 placeholder="Optional notes or consumer number"
-                className="w-full px-3 py-1.5 text-xs bg-white border border-slate-300 rounded-md text-slate-900 focus:outline-none focus:ring-1 focus:ring-brand focus:border-brand"
+                className="w-full min-h-[42px] px-3 py-1.5 text-sm bg-white border border-slate-300 rounded-lg text-slate-950 font-medium placeholder:text-slate-500 shadow-sm hover:border-slate-400 focus:outline-none focus:border-[#7F1D1D] focus:ring-2 focus:ring-[#7F1D1D]/15 transition-colors"
               />
             </div>
 

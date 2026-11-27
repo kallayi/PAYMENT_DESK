@@ -1,11 +1,12 @@
 'use client';
 
 import * as React from 'react';
-import { Plus, Search, Edit2, Loader2, Building2 } from 'lucide-react';
+import { Plus, Search, Edit2, Loader2, Building2, Download, Upload } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { toast } from 'sonner';
 import { createVendor, updateVendor, toggleVendorActive } from '@/actions/vendors';
+import { VendorImportModal } from '@/components/vendors/vendor-import-modal';
 import { leanVendorSchema, type LeanVendorInput } from '@/lib/validators';
 import type { Company, Vendor } from '@/types/database';
 import { Button } from '@/components/ui/button';
@@ -53,6 +54,8 @@ export function VendorManagement({
   const [vendors, setVendors] = React.useState<Vendor[]>(initialVendors);
   const [search, setSearch] = React.useState('');
   const [isAddModalOpen, setIsAddModalOpen] = React.useState(false);
+  const [isImportModalOpen, setIsImportModalOpen] = React.useState(false);
+  const [isExportingExcel, setIsExportingExcel] = React.useState(false);
   const [editingVendor, setEditingVendor] = React.useState<Vendor | null>(null);
   const [isPending, startTransition] = React.useTransition();
 
@@ -177,13 +180,46 @@ export function VendorManagement({
     });
   }
 
+  async function handleExportExcel() {
+    setIsExportingExcel(true);
+    try {
+      const res = await fetch('/api/vendors/export');
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Export failed' }));
+        toast.error(err.error || 'Failed to export vendors Excel.');
+        return;
+      }
+
+      const blob = await res.blob();
+      const contentDisposition = res.headers.get('Content-Disposition') || '';
+      const filenameMatch = contentDisposition.match(/filename="?([^"]+)"?/i);
+      const companyCode = (activeCompany?.code || 'INDFURN').toUpperCase();
+      const todayStr = new Date().toISOString().split('T')[0];
+      const filename = filenameMatch?.[1] || `${companyCode}_Vendors_${todayStr}.xlsx`;
+
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      toast.success(`Exported ${filename}`);
+    } catch {
+      toast.error('Network error while exporting vendor Excel.');
+    } finally {
+      setIsExportingExcel(false);
+    }
+  }
+
   return (
     <div>
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
-        <div>
-          <div className="flex items-center gap-2">
-            <h1 className="text-xl font-bold tracking-tight text-slate-900">Vendor Master</h1>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 sm:mb-5">
+        <div className="hidden sm:block">
+          <div className="flex items-center gap-2 flex-wrap">
+            <h1 className="text-lg sm:text-xl font-bold tracking-tight text-slate-900">Vendor Master</h1>
             {activeCompany && (
               <span className="text-[11px] font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-800 border border-slate-200">
                 {activeCompany.name}
@@ -195,16 +231,45 @@ export function VendorManagement({
           </p>
         </div>
 
-        {canManage && (
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
           <Button
             type="button"
-            onClick={openCreateModal}
-            className="w-full sm:w-auto min-h-[42px] sm:min-h-[40px] px-4 rounded-lg bg-[#7F1D1D] hover:bg-[#991B1B] text-white text-xs font-semibold inline-flex items-center justify-center gap-1.5 shadow-sm transition-colors cursor-pointer shrink-0"
+            variant="outline"
+            onClick={handleExportExcel}
+            disabled={isExportingExcel}
+            className="flex-1 sm:flex-initial min-h-[40px] px-3.5 rounded-lg border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold inline-flex items-center justify-center gap-1.5 shadow-sm transition-colors cursor-pointer"
           >
-            <Plus className="w-4 h-4" />
-            <span>Add Vendor</span>
+            {isExportingExcel ? (
+              <Loader2 className="w-4 h-4 animate-spin text-slate-500" />
+            ) : (
+              <Download className="w-4 h-4 text-slate-500" />
+            )}
+            <span>Export Excel</span>
           </Button>
-        )}
+
+          {canManage && (
+            <>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setIsImportModalOpen(true)}
+                className="flex-1 sm:flex-initial min-h-[40px] px-3.5 rounded-lg border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold inline-flex items-center justify-center gap-1.5 shadow-sm transition-colors cursor-pointer"
+              >
+                <Upload className="w-4 h-4 text-[#7F1D1D]" />
+                <span>Import Excel</span>
+              </Button>
+
+              <Button
+                type="button"
+                onClick={openCreateModal}
+                className="w-full sm:w-auto min-h-[42px] sm:min-h-[40px] px-4 rounded-lg bg-[#7F1D1D] hover:bg-[#991B1B] text-white text-xs font-semibold inline-flex items-center justify-center gap-1.5 shadow-sm transition-colors cursor-pointer shrink-0"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Add Vendor</span>
+              </Button>
+            </>
+          )}
+        </div>
       </div>
 
       {/* Search Bar */}
@@ -305,8 +370,8 @@ export function VendorManagement({
                             onClick={() => handleToggleActive(v.id)}
                             disabled={isPending}
                             className={`px-2.5 py-1.5 rounded-lg border text-xs font-medium transition-colors cursor-pointer ${v.is_active
-                                ? 'border-slate-200 text-slate-600 hover:bg-slate-100'
-                                : 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                              ? 'border-slate-200 text-slate-600 hover:bg-slate-100'
+                              : 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
                               }`}
                           >
                             {v.is_active ? 'Disable' : 'Enable'}
@@ -396,8 +461,8 @@ export function VendorManagement({
                       onClick={() => handleToggleActive(v.id)}
                       disabled={isPending}
                       className={`min-h-[40px] px-3.5 rounded-lg border text-xs font-semibold cursor-pointer ${v.is_active
-                          ? 'border-slate-200 text-slate-600 hover:bg-slate-50'
-                          : 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                        ? 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                        : 'border-emerald-200 bg-emerald-50 text-emerald-700'
                         }`}
                     >
                       {v.is_active ? 'Disable' : 'Enable'}
@@ -669,6 +734,15 @@ export function VendorManagement({
           </form>
         </DialogContent>
       </Dialog>
+
+      {/* DIALOG: BULK IMPORT VENDORS */}
+      {canManage && (
+        <VendorImportModal
+          open={isImportModalOpen}
+          onOpenChange={setIsImportModalOpen}
+          activeCompany={activeCompany}
+        />
+      )}
     </div>
   );
 }

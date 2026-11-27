@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import { Toaster } from 'sonner';
 import { PwaRegister } from '@/components/layout/pwa-register';
+import { ThemeProvider } from '@/components/layout/theme-provider';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -8,9 +9,12 @@ export const metadata: Metadata = {
   description: 'Digital payment authorization, bank reconciliation, and UTR tracking for INDFURN and VINMORE.',
   manifest: '/manifest.webmanifest',
   icons: {
-    icon: '/icon-192.png',
-    shortcut: '/icon-192.png',
-    apple: '/icon-192.png',
+    icon: [
+      { url: '/favicon.ico', sizes: '32x32' },
+      { url: '/icon-192.png?v=2', sizes: '192x192', type: 'image/png' },
+    ],
+    shortcut: '/favicon.ico',
+    apple: '/apple-touch-icon.png',
   },
   appleWebApp: {
     capable: true,
@@ -20,11 +24,17 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: '#7F1D1D',
+  viewportFit: 'cover',
+  themeColor: [
+    { media: '(prefers-color-scheme: light)', color: '#ffffff' },
+    { media: '(prefers-color-scheme: dark)', color: '#0e0e11' },
+  ],
   width: 'device-width',
   initialScale: 1,
   maximumScale: 1,
 };
+
+const themeBootScript = `(function(){try{var p=localStorage.getItem('payment-desk-theme');if(p!=='light'&&p!=='dark'&&p!=='system'){p='light';}var d=p==='dark'||(p==='system'&&window.matchMedia('(prefers-color-scheme: dark)').matches);document.documentElement.classList.toggle('dark',d);document.documentElement.style.colorScheme=d?'dark':'light';var c=d?'#0e0e11':'#ffffff';var ms=document.querySelectorAll('meta[name="theme-color"]');if(ms.length){for(var i=0;i<ms.length;i++){ms[i].setAttribute('content',c);ms[i].removeAttribute('media');}}else{var m=document.createElement('meta');m.name='theme-color';m.content=c;document.head.appendChild(m);}}catch(e){}})();`;
 
 export default function RootLayout({
   children,
@@ -32,17 +42,22 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="h-full bg-[#F8FAFC] antialiased">
+    <html lang="en" className="h-full antialiased" suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeBootScript }} />
+      </head>
       <body className="h-full bg-[#F8FAFC] text-[#0F172A] font-sans selection:bg-rose-100 selection:text-rose-950">
-        <PwaRegister />
-        {children}
-        <Toaster
-          position="bottom-right"
-          toastOptions={{
-            duration: 3500,
-            className: 'border border-slate-200 text-xs shadow-lg font-sans',
-          }}
-        />
+        <ThemeProvider>
+          <PwaRegister />
+          {children}
+          <Toaster
+            position="bottom-right"
+            toastOptions={{
+              duration: 3500,
+              className: 'border border-slate-200 text-xs shadow-lg font-sans',
+            }}
+          />
+        </ThemeProvider>
       </body>
     </html>
   );

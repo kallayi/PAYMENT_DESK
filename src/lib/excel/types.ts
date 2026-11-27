@@ -1,4 +1,6 @@
-export type BankBatchType = 'same_bank' | 'other_bank' | 'combined';
+import type { PaymentMode } from '@/types/database';
+
+export type BankBatchType = 'same_bank' | 'other_bank';
 
 export interface BulkExportRow {
   paymentId: string;
@@ -15,7 +17,7 @@ export interface BulkExportRow {
   sourceBankDebitAccount?: string | null;
   whatsappNumber?: string | null;
   companyCode: string;
-  paymentMode?: 'NEFT_RTGS' | 'CHEQUE';
+  paymentMode?: PaymentMode;
 }
 
 export interface IfscSplitResult {

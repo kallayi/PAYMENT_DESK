@@ -4,17 +4,19 @@ interface PaymentDeskLogoProps {
   className?: string;
   size?: 'sm' | 'md' | 'lg';
   showWordmark?: boolean;
+  showSubtitle?: boolean;
 }
 
 export function PaymentDeskLogo({
   className = '',
   size = 'md',
   showWordmark = true,
+  showSubtitle = false,
 }: PaymentDeskLogoProps) {
-  const iconSizes = {
-    sm: 'w-7 h-7 text-xs',
-    md: 'w-8 h-8 text-sm',
-    lg: 'w-10 h-10 text-base',
+  const frameStyles = {
+    sm: 'w-8 h-8 rounded-lg p-1 bg-zinc-100 dark:bg-zinc-800/80 ring-1 ring-black/10 dark:ring-white/15',
+    md: 'w-9 h-9 rounded-lg p-1 bg-zinc-100 dark:bg-zinc-800/80 ring-1 ring-black/10 dark:ring-white/15',
+    lg: 'w-14 h-14 rounded-2xl p-2 bg-[#F4F4F6] dark:bg-zinc-800/80 ring-1 ring-black/10 dark:ring-white/15 shadow-md',
   };
 
   const titleSizes = {
@@ -25,28 +27,16 @@ export function PaymentDeskLogo({
 
   return (
     <div className={`inline-flex items-center gap-2.5 ${className}`}>
-      {/* Standalone Maroon Emblem */}
+      {/* Tightly Cropped Transparent Payment Desk Folder Mark */}
       <div
-        className={`${iconSizes[size]} rounded-lg bg-[#7F1D1D] text-white flex items-center justify-center font-bold tracking-tight shadow-sm shrink-0 select-none`}
-        aria-hidden="true"
+        className={`${frameStyles[size]} shrink-0 select-none flex items-center justify-center`}
       >
-        <svg
-          viewBox="0 0 24 24"
-          fill="none"
-          xmlns="http://www.w3.org/2000/svg"
-          className="w-4/5 h-4/5 stroke-current"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          {/* Desk / Ledger Geometric Monogram */}
-          <rect x="3" y="4" width="18" height="15" rx="2" />
-          <line x1="3" y1="10" x2="21" y2="10" />
-          <path d="M7 15h3" />
-          <path d="M14 15h3" />
-          <path d="M7 7h.01" />
-          <path d="M10 7h.01" />
-        </svg>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/app-logo-mark.png"
+          alt="Payment Desk"
+          className="w-full h-full object-contain"
+        />
       </div>
 
       {/* Neutral Standalone Wordmark */}
@@ -55,7 +45,9 @@ export function PaymentDeskLogo({
           <span className={`${titleSizes[size]} font-bold tracking-tight text-slate-900`}>
             Payment Desk
           </span>
-          <span className="text-[10px] text-slate-500 font-medium">Internal Workflow</span>
+          {showSubtitle && (
+            <span className="text-[10px] text-slate-500 font-medium">Internal Workflow</span>
+          )}
         </div>
       )}
     </div>

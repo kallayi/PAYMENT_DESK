@@ -169,7 +169,7 @@ export async function createUser(input: CreateUserInput): Promise<ActionResult<P
   const email = userData.email.trim().toLowerCase();
   const adminClient = createAdminClient();
 
-  // Step 1: Create auth user via Supabase Admin API
+  // Step 1: Create auth user via Supabase Admin API (strictly lock is_admin to false)
   const { data: authRecord, error: authError } = await adminClient.auth.admin.createUser({
     email,
     password: userData.password,
@@ -179,7 +179,7 @@ export async function createUser(input: CreateUserInput): Promise<ActionResult<P
     },
     app_metadata: {
       role: userData.role,
-      is_admin: Boolean(userData.is_admin),
+      is_admin: false,
     },
   });
 
@@ -197,7 +197,7 @@ export async function createUser(input: CreateUserInput): Promise<ActionResult<P
         id: createdUserId,
         full_name: userData.full_name.trim(),
         role: userData.role,
-        is_admin: Boolean(userData.is_admin),
+        is_admin: false,
         is_active: true,
       },
       { onConflict: 'id' }
@@ -276,19 +276,31 @@ export async function updateUser(input: UpdateUserInput): Promise<ActionResult<P
     return { success: false, error: errorMsg };
   }
 
-  const { user_id, full_name, role, is_admin, is_active, company_ids } = parsed.data;
+  const { user_id, full_name, role, is_active, company_ids } = parsed.data;
+  const adminClient = createAdminClient();
 
-  // Self-Lockout Guards
-  if (callerProfile.id === user_id) {
-    if (!is_active) {
-      return { success: false, error: 'You cannot disable your own administrator account.' };
-    }
-    if (!is_admin) {
-      return { success: false, error: 'You cannot remove administrator privileges from yourself.' };
-    }
+  // Fetch target user's current profile first to preserve is_admin & protect Admin accounts
+  const { data: targetProfile, error: targetFetchError } = await adminClient
+    .from('profiles')
+    .select('id, is_admin, is_active')
+    .eq('id', user_id)
+    .maybeSingle();
+
+  if (targetFetchError || !targetProfile) {
+    return { success: false, error: 'Target user record not found.' };
   }
 
-  const adminClient = createAdminClient();
+  // Strictly block disabling any Administrator account (and self-lockout)
+  if (targetProfile.is_admin && !is_active) {
+    return { success: false, error: 'Administrator accounts cannot be disabled.' };
+  }
+
+  if (callerProfile.id === user_id && !is_active) {
+    return { success: false, error: 'You cannot disable your own administrator account.' };
+  }
+
+  // Never allow promoting or demoting is_admin via this action
+  const preservedIsAdmin = Boolean(targetProfile.is_admin);
 
   // 1. Update public.profiles
   const { data: updatedProfile, error: profileError } = await adminClient
@@ -296,7 +308,7 @@ export async function updateUser(input: UpdateUserInput): Promise<ActionResult<P
     .update({
       full_name: full_name.trim(),
       role,
-      is_admin: Boolean(is_admin),
+      is_admin: preservedIsAdmin,
       is_active: Boolean(is_active),
       updated_at: new Date().toISOString(),
     })
@@ -316,7 +328,7 @@ export async function updateUser(input: UpdateUserInput): Promise<ActionResult<P
         app_metadata: {
           ...targetAuthUser.user.app_metadata,
           role,
-          is_admin: Boolean(is_admin),
+          is_admin: preservedIsAdmin,
         },
         user_metadata: {
           ...targetAuthUser.user.user_metadata,
@@ -387,6 +399,10 @@ export async function toggleUserActive(targetUserId: string): Promise<ActionResu
   }
 
   const newStatus = !currentTarget.is_active;
+
+  if (currentTarget.is_admin && !newStatus) {
+    return { success: false, error: 'Administrator accounts cannot be disabled.' };
+  }
 
   const { data: updated, error } = await adminClient
     .from('profiles')

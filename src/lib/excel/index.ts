@@ -4,6 +4,11 @@ import type { BankTemplateAdapter, BulkExportRow } from '@/lib/excel/types';
 
 export * from '@/lib/excel/types';
 export * from '@/lib/excel/ifsc';
+export {
+  buildSalarySameBankWorkbook,
+  buildSalaryOtherBankWorkbook,
+  buildSalaryCombinedWorkbook,
+} from '@/lib/excel/axis-adapter';
 
 function createGenericBankAdapter(bankShortCode: string): BankTemplateAdapter {
   const code = bankShortCode.trim().toUpperCase() || 'BANK';

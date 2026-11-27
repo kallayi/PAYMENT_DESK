@@ -1,6 +1,7 @@
 'use client';
 
 import * as React from 'react';
+import { useRouter } from 'next/navigation';
 import {
   CheckCircle2,
   XCircle,
@@ -15,6 +16,9 @@ import {
   UserCheck,
   ShieldCheck,
   Calendar,
+  Landmark,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
@@ -29,12 +33,14 @@ import {
 import { verifyPayment, ownerRejectPayment } from '@/actions/payments';
 import { getSignedFileUrl } from '@/actions/storage';
 import { formatINR, formatHumanDate, formatShortDate } from '@/lib/format';
-import { BankBadge } from '@/components/payments/payment-status-badge';
-import type { PaymentItem } from '@/types/database';
+import { BankBadge, PaymentModeBadge } from '@/components/payments/payment-status-badge';
+import { PaymentUrlSync, usePaymentHighlight } from '@/components/layout/payment-url-sync';
+import type { PaymentItem, CompanyBank, PaymentMode } from '@/types/database';
 
 interface VerifierQueueViewProps {
   initialPayments: PaymentItem[];
   companyName: string;
+  banks?: CompanyBank[];
 }
 
 function isOverdue(dueDateStr: string): boolean {
@@ -46,10 +52,21 @@ function isOverdue(dueDateStr: string): boolean {
 export function VerifierQueueView({
   initialPayments,
   companyName,
+  banks = [],
 }: VerifierQueueViewProps) {
+  const router = useRouter();
+  const [, startRefreshTransition] = React.useTransition();
+  const refreshServerState = React.useCallback(() => {
+    startRefreshTransition(() => {
+      router.refresh();
+    });
+  }, [router]);
+
   const [payments, setPayments] = React.useState<PaymentItem[]>(initialPayments);
   const [searchQuery, setSearchQuery] = React.useState<string>('');
   const [showOverdueOnly, setShowOverdueOnly] = React.useState<boolean>(false);
+  const [modeFilter, setModeFilter] = React.useState<'ALL' | PaymentMode>('ALL');
+  const [showBankSplit, setShowBankSplit] = React.useState<boolean>(false);
 
   // Action states
   const [verifyingId, setVerifyingId] = React.useState<string | null>(null);
@@ -60,6 +77,14 @@ export function VerifierQueueView({
   const [rejectionReason, setRejectionReason] = React.useState<string>('');
   const [isRejecting, setIsRejecting] = React.useState<boolean>(false);
 
+  const { highlightedId, triggerHighlight } = usePaymentHighlight();
+  const handleUrlParams = React.useCallback(
+    ({ highlightId }: { tab: string | null; highlightId: string | null }) => {
+      if (highlightId) triggerHighlight(highlightId);
+    },
+    [triggerHighlight]
+  );
+
   React.useEffect(() => {
     setPayments(initialPayments);
   }, [initialPayments]);
@@ -69,7 +94,7 @@ export function VerifierQueueView({
     const previous = payments;
     // Optimistic removal from verification queue
     setPayments((prev) => prev.filter((p) => p.id !== item.id));
-    toast.success(`Verified payment for "${item.vendor?.party_name || item.vendor?.name}" and forwarded for Owner approval.`);
+    toast.success(`Verified payment for "${item.vendor?.party_name || item.vendor?.name}" and forwarded for Approval.`);
 
     setVerifyingId(item.id);
     try {
@@ -79,6 +104,7 @@ export function VerifierQueueView({
         toast.error(res.error || 'Failed to verify payment.');
         return;
       }
+      refreshServerState();
     } catch {
       setPayments(previous);
       toast.error('Network error during verification. Rolled back.');
@@ -112,6 +138,7 @@ export function VerifierQueueView({
         return;
       }
       toast.success(`Payment returned to Preparer with reason.`);
+      refreshServerState();
     } catch {
       setPayments(previous);
       toast.error('Network error during rejection. Rolled back.');
@@ -139,6 +166,10 @@ export function VerifierQueueView({
   };
 
   // Computations
+  const totalAvailableBalance = banks.reduce(
+    (sum, b) => sum + (Number(b.available_balance) || 0),
+    0
+  );
   const totalItems = payments.length;
   const totalNet = payments.reduce((sum, p) => sum + (Number(p.net_payable) || 0), 0);
   const overdueCount = payments.filter((p) => isOverdue(p.due_date)).length;
@@ -147,6 +178,12 @@ export function VerifierQueueView({
   const filtered = payments
     .filter((p) => {
       if (showOverdueOnly) return isOverdue(p.due_date);
+      return true;
+    })
+    .filter((p) => {
+      if (modeFilter !== 'ALL') {
+        return (p.payment_mode || 'NEFT_RTGS') === modeFilter;
+      }
       return true;
     })
     .filter((p) => {
@@ -161,8 +198,9 @@ export function VerifierQueueView({
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-5 border-b border-slate-200">
+      <PaymentUrlSync onParams={handleUrlParams} />
+      {/* Header (Desktop/tablet — mobile top bar already shows active title) */}
+      <div className="hidden sm:flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-5 border-b border-slate-200">
         <div>
           <div className="flex items-center gap-2">
             <h1 className="text-xl font-bold tracking-tight text-slate-900">
@@ -173,57 +211,165 @@ export function VerifierQueueView({
             </span>
           </div>
           <p className="text-xs text-slate-500 mt-1">
-            Review bills, verify beneficiary account numbers, check TDS, and forward for final Owner approval.
+            Review bills, verify beneficiary account numbers, check TDS, and forward for final Approval.
           </p>
         </div>
       </div>
 
       {/* KPI Overview Strip */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <div className="p-4 rounded-xl border border-slate-200 bg-white shadow-sm flex items-center justify-between">
-          <div>
-            <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
-              Awaiting Verification
-            </p>
-            <p className="text-lg font-bold text-slate-900 tabular-nums mt-0.5">
-              {totalItems} bills
-            </p>
-            <p className="text-[11px] text-slate-400 mt-0.5">Submitted by Preparers</p>
+      <div className="space-y-2.5">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3">
+          <button
+            type="button"
+            onClick={() => setShowBankSplit((prev) => !prev)}
+            aria-expanded={showBankSplit}
+            className={`text-left p-3 sm:p-4 rounded-xl border bg-white shadow-sm flex items-center justify-between gap-2 transition-colors cursor-pointer min-w-0 ${
+              showBankSplit
+                ? 'border-emerald-300 ring-1 ring-emerald-200 bg-emerald-50/30'
+                : 'border-slate-200 hover:border-emerald-200 hover:bg-slate-50/50'
+            }`}
+          >
+            <div className="min-w-0">
+              <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider truncate">
+                Available Balance
+              </p>
+              <p className="text-base sm:text-lg font-bold text-emerald-700 tabular-nums mt-0.5 truncate">
+                {formatINR(totalAvailableBalance)}
+              </p>
+              <p className="text-[11px] text-slate-500 mt-0.5 flex items-center gap-1 truncate">
+                <span>
+                  {banks.length} {banks.length === 1 ? 'bank' : 'banks'}
+                </span>
+                <span>•</span>
+                <span className="font-medium text-emerald-700 inline-flex items-center gap-0.5">
+                  {showBankSplit ? 'Hide split' : 'View split'}
+                  {showBankSplit ? (
+                    <ChevronUp className="w-3 h-3 shrink-0" />
+                  ) : (
+                    <ChevronDown className="w-3 h-3 shrink-0" />
+                  )}
+                </span>
+              </p>
+            </div>
+            <div className="p-2 sm:p-2.5 rounded-lg bg-emerald-50 text-emerald-700 shrink-0">
+              <Landmark className="w-4 h-4 sm:w-5 sm:h-5" />
+            </div>
+          </button>
+
+          <div className="p-3 sm:p-4 rounded-xl border border-slate-200 bg-white shadow-sm flex items-center justify-between gap-2 min-w-0">
+            <div className="min-w-0">
+              <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider truncate">
+                Awaiting Verification
+              </p>
+              <p className="text-base sm:text-lg font-bold text-slate-900 tabular-nums mt-0.5">
+                {totalItems} bills
+              </p>
+              <p className="text-[11px] text-slate-400 mt-0.5 truncate">Submitted by Preparers</p>
+            </div>
+            <div className="p-2 sm:p-2.5 rounded-lg bg-slate-100 text-slate-600 shrink-0">
+              <Clock className="w-4 h-4 sm:w-5 sm:h-5" />
+            </div>
           </div>
-          <div className="p-2.5 rounded-lg bg-slate-100 text-slate-600">
-            <Clock className="w-5 h-5" />
+
+          <div className="p-3 sm:p-4 rounded-xl border border-slate-200 bg-white shadow-sm flex items-center justify-between gap-2 min-w-0">
+            <div className="min-w-0">
+              <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider truncate">
+                Total Net Payable
+              </p>
+              <p className="text-base sm:text-lg font-bold text-slate-900 tabular-nums mt-0.5 truncate">
+                {formatINR(totalNet)}
+              </p>
+              <p className="text-[11px] text-slate-400 mt-0.5 truncate">Pending authorization</p>
+            </div>
+            <div className="p-2 sm:p-2.5 rounded-lg bg-brand/10 text-brand shrink-0">
+              <ShieldCheck className="w-4 h-4 sm:w-5 sm:h-5" />
+            </div>
+          </div>
+
+          <div className="p-3 sm:p-4 rounded-xl border border-rose-200 bg-rose-50/40 shadow-sm flex items-center justify-between gap-2 min-w-0">
+            <div className="min-w-0">
+              <p className="text-[11px] font-semibold text-rose-700 uppercase tracking-wider truncate">
+                Overdue Invoices
+              </p>
+              <p className="text-base sm:text-lg font-bold text-rose-800 tabular-nums mt-0.5">
+                {overdueCount} bills
+              </p>
+              <p className="text-[11px] text-rose-600 mt-0.5 truncate">Due date is past</p>
+            </div>
+            <div className="p-2 sm:p-2.5 rounded-lg bg-rose-100 text-rose-700 shrink-0">
+              <AlertTriangle className="w-4 h-4 sm:w-5 sm:h-5" />
+            </div>
           </div>
         </div>
 
-        <div className="p-4 rounded-xl border border-slate-200 bg-white shadow-sm flex items-center justify-between">
-          <div>
-            <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
-              Total Net Payable
-            </p>
-            <p className="text-lg font-bold text-slate-900 tabular-nums mt-0.5">
-              {formatINR(totalNet)}
-            </p>
-            <p className="text-[11px] text-slate-400 mt-0.5">Pending disbursement authorization</p>
-          </div>
-          <div className="p-2.5 rounded-lg bg-brand/10 text-brand">
-            <ShieldCheck className="w-5 h-5" />
-          </div>
-        </div>
+        {showBankSplit && (
+          <div className="p-3 sm:p-4 rounded-xl border border-emerald-200/80 bg-emerald-50/20 shadow-sm">
+            <div className="flex items-center justify-between gap-2 mb-2.5">
+              <p className="text-[11px] font-semibold text-slate-600 uppercase tracking-wider">
+                Bank-by-Bank Available Balance
+              </p>
+              <span className="text-[11px] font-medium text-slate-500 tabular-nums">
+                {banks.length} active {banks.length === 1 ? 'account' : 'accounts'}
+              </span>
+            </div>
 
-        <div className="p-4 rounded-xl border border-rose-200 bg-rose-50/40 shadow-sm flex items-center justify-between">
-          <div>
-            <p className="text-[11px] font-semibold text-rose-700 uppercase tracking-wider">
-              Overdue Invoices
-            </p>
-            <p className="text-lg font-bold text-rose-800 tabular-nums mt-0.5">
-              {overdueCount} bills
-            </p>
-            <p className="text-[11px] text-rose-600 mt-0.5">Due date is past</p>
+            {banks.length === 0 ? (
+              <p className="text-xs text-slate-500 py-2">
+                No active bank accounts found for {companyName}.
+              </p>
+            ) : (
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                {banks.map((b) => {
+                  const bankName =
+                    b.bank_name || b.full_name || b.short_code || b.short_name || 'Bank';
+                  const maskedAc = b.account_number_masked || b.account_mask;
+                  const updaterName = b.balance_updater?.full_name;
+                  const updatedLabel = b.balance_updated_at
+                    ? new Date(b.balance_updated_at).toLocaleString('en-IN', {
+                        day: '2-digit',
+                        month: 'short',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })
+                    : null;
+
+                  return (
+                    <div
+                      key={b.id}
+                      className="p-2.5 sm:p-3 rounded-lg border border-slate-200 bg-white min-w-0"
+                    >
+                      <div className="flex items-center justify-between gap-1.5 min-w-0">
+                        <span className="text-xs font-semibold text-slate-800 truncate">
+                          {bankName}
+                        </span>
+                        {(b.short_code || b.short_name) && (
+                          <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 text-[10px] font-semibold shrink-0">
+                            {b.short_code || b.short_name}
+                          </span>
+                        )}
+                      </div>
+                      {maskedAc && (
+                        <div className="text-[10px] font-mono text-slate-400 truncate mt-0.5">
+                          {maskedAc}
+                        </div>
+                      )}
+                      <div className="text-sm sm:text-base font-bold text-slate-900 tabular-nums mt-1.5 truncate">
+                        {formatINR(Number(b.available_balance) || 0)}
+                      </div>
+                      {(updatedLabel || updaterName) && (
+                        <div className="text-[10px] text-slate-400 truncate mt-1">
+                          {updatedLabel ? `Updated ${updatedLabel}` : ''}
+                          {updatedLabel && updaterName ? ' • ' : ''}
+                          {updaterName || ''}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
-          <div className="p-2.5 rounded-lg bg-rose-100 text-rose-700">
-            <AlertTriangle className="w-5 h-5" />
-          </div>
-        </div>
+        )}
       </div>
 
       {/* Filters & Search */}
@@ -250,6 +396,29 @@ export function VerifierQueueView({
             <AlertTriangle className="w-3.5 h-3.5" />
             <span>Overdue Only ({overdueCount})</span>
           </button>
+          <div className="inline-flex items-center p-0.5 rounded-lg bg-slate-100 border border-slate-200">
+            {(
+              [
+                { id: 'ALL', label: 'All' },
+                { id: 'NEFT_RTGS', label: 'NEFT / RTGS' },
+                { id: 'IMPS', label: 'IMPS' },
+                { id: 'CHEQUE', label: 'Cheque' },
+              ] as const
+            ).map((pill) => (
+              <button
+                key={pill.id}
+                type="button"
+                onClick={() => setModeFilter(pill.id)}
+                className={`min-h-[34px] px-2.5 rounded-md text-[11px] font-semibold transition-colors cursor-pointer ${
+                  modeFilter === pill.id
+                    ? 'bg-white text-slate-900 shadow-sm'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                {pill.label}
+              </button>
+            ))}
+          </div>
         </div>
 
         <div className="relative w-full sm:w-72">
@@ -275,7 +444,7 @@ export function VerifierQueueView({
           </p>
           <p className="text-xs text-slate-500 mt-1">
             {totalItems === 0
-              ? 'All submitted payments have been verified and forwarded to the Owner.'
+              ? 'All submitted payments have been verified and forwarded to the Approver.'
               : 'Try clearing your search query or switching off the overdue filter.'}
           </p>
         </div>
@@ -307,7 +476,11 @@ export function VerifierQueueView({
                   return (
                     <tr
                       key={item.id}
-                      className="hover:bg-slate-50/60 transition-colors"
+                      data-payment-id={item.id}
+                      className={`hover:bg-slate-50/60 transition-colors ${highlightedId === item.id
+                        ? 'ring-2 ring-inset ring-brand bg-brand-tint/60 animate-pulse'
+                        : ''
+                        }`}
                     >
                       {/* Due Date */}
                       <td className="py-3 px-3.5 whitespace-nowrap">
@@ -390,12 +563,15 @@ export function VerifierQueueView({
                         </div>
                       </td>
 
-                      {/* Source Bank */}
+                      {/* Source Bank & Mode */}
                       <td className="py-3 px-3.5 text-center whitespace-nowrap">
-                        <BankBadge
-                          shortName={item.source_bank?.short_code || item.source_bank?.short_name}
-                          fullName={item.source_bank?.bank_name || item.source_bank?.full_name}
-                        />
+                        <div className="flex flex-col items-center gap-1">
+                          <BankBadge
+                            shortName={item.source_bank?.short_code || item.source_bank?.short_name}
+                            fullName={item.source_bank?.bank_name || item.source_bank?.full_name}
+                          />
+                          <PaymentModeBadge mode={item.payment_mode} compact />
+                        </div>
                       </td>
 
                       {/* Actions */}
@@ -419,7 +595,7 @@ export function VerifierQueueView({
                             onClick={() => handleVerify(item)}
                             disabled={isVerifying}
                             className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold inline-flex items-center gap-1.5 shadow-sm transition-colors disabled:opacity-50"
-                            title="Verify and forward to Owner for approval"
+                            title="Verify and forward to Approver for approval"
                           >
                             {isVerifying ? (
                               <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -463,7 +639,11 @@ export function VerifierQueueView({
               return (
                 <div
                   key={item.id}
-                  className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm space-y-3"
+                  data-payment-id={item.id}
+                  className={`bg-white rounded-xl border p-4 shadow-sm space-y-3 transition-all ${highlightedId === item.id
+                    ? 'border-brand ring-2 ring-brand animate-pulse'
+                    : 'border-slate-200'
+                    }`}
                 >
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
@@ -497,10 +677,13 @@ export function VerifierQueueView({
                       <span className="font-semibold text-slate-800 truncate min-w-0">
                         Beneficiary: {beneficiary}
                       </span>
-                      <BankBadge
-                        shortName={item.source_bank?.short_code || item.source_bank?.short_name}
-                        fullName={item.source_bank?.bank_name || item.source_bank?.full_name}
-                      />
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <PaymentModeBadge mode={item.payment_mode} compact />
+                        <BankBadge
+                          shortName={item.source_bank?.short_code || item.source_bank?.short_name}
+                          fullName={item.source_bank?.bank_name || item.source_bank?.full_name}
+                        />
+                      </div>
                     </div>
                     <div className="text-[11px] font-mono text-slate-500 flex flex-wrap items-center justify-between gap-1">
                       <span className="break-all">A/C: {vendor?.account_number || 'NA'}</span>

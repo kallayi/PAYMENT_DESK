@@ -2,6 +2,7 @@
 
 import * as React from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import {
   Check,
   Clock,
@@ -22,6 +23,7 @@ import {
 import { toast } from 'sonner';
 import { OwnerApprovalCard } from '@/components/payments/owner-approval-card';
 import { PaymentDetailDrawer } from '@/components/payments/payment-detail-drawer';
+import { PaymentUrlSync, usePaymentHighlight } from '@/components/layout/payment-url-sync';
 import {
   Dialog,
   DialogContent,
@@ -40,7 +42,7 @@ import {
 } from '@/actions/payments';
 import { getSignedFileUrl } from '@/actions/storage';
 import { formatHumanDate, formatINR, formatShortDate } from '@/lib/format';
-import type { CompanyBank, PaymentItem } from '@/types/database';
+import type { CompanyBank, PaymentItem, PaymentMode } from '@/types/database';
 
 interface OwnerApprovalsViewProps {
   initialPayments: PaymentItem[];
@@ -51,14 +53,21 @@ interface OwnerApprovalsViewProps {
 type ApproverTab =
   | 'PENDING_APPROVAL'
   | 'ON_HOLD'
-  | 'PENDING_VERIFICATION'
-  | 'APPROVED';
+  | 'PENDING_VERIFICATION';
 
 export function OwnerApprovalsView({
   initialPayments,
   banks,
   companyName = 'INDFURN',
 }: OwnerApprovalsViewProps) {
+  const router = useRouter();
+  const [, startRefreshTransition] = React.useTransition();
+  const refreshServerState = React.useCallback(() => {
+    startRefreshTransition(() => {
+      router.refresh();
+    });
+  }, [router]);
+
   const [payments, setPayments] = React.useState<PaymentItem[]>(initialPayments);
   const [activeTab, setActiveTab] = React.useState<ApproverTab>('PENDING_APPROVAL');
 
@@ -66,6 +75,7 @@ export function OwnerApprovalsView({
   const [searchQuery, setSearchQuery] = React.useState<string>('');
   const [showOverdueOnly, setShowOverdueOnly] = React.useState<boolean>(false);
   const [selectedBankFilter, setSelectedBankFilter] = React.useState<string>('ALL');
+  const [selectedModeFilter, setSelectedModeFilter] = React.useState<'ALL' | PaymentMode>('ALL');
 
   // Multi-select state
   const [selectedIds, setSelectedIds] = React.useState<Set<string>>(new Set());
@@ -78,10 +88,40 @@ export function OwnerApprovalsView({
 
   const [viewingItem, setViewingItem] = React.useState<PaymentItem | null>(null);
   const [actionLoadingId, setActionLoadingId] = React.useState<string | null>(null);
+  const [switchingBankItemId, setSwitchingBankItemId] = React.useState<string | null>(null);
   const [isViewingBill, setIsViewingBill] = React.useState<boolean>(false);
 
   // Bank balance popover / drawer
   const [showBankBreakdown, setShowBankBreakdown] = React.useState<boolean>(false);
+
+  const { highlightedId, triggerHighlight } = usePaymentHighlight();
+  const paymentsRef = React.useRef(payments);
+  paymentsRef.current = payments;
+
+  const handleUrlParams = React.useCallback(
+    ({ tab, highlightId }: { tab: string | null; highlightId: string | null }) => {
+      const normalizedTab = tab?.toUpperCase() || null;
+      if (
+        normalizedTab &&
+        ['PENDING_APPROVAL', 'ON_HOLD', 'PENDING_VERIFICATION'].includes(normalizedTab)
+      ) {
+        setActiveTab(normalizedTab as ApproverTab);
+      } else if (highlightId) {
+        const target = paymentsRef.current.find((p) => p.id === highlightId);
+        if (
+          target &&
+          ['PENDING_APPROVAL', 'ON_HOLD', 'PENDING_VERIFICATION'].includes(target.status)
+        ) {
+          setActiveTab(target.status as ApproverTab);
+        }
+      }
+
+      if (highlightId) {
+        triggerHighlight(highlightId);
+      }
+    },
+    [triggerHighlight]
+  );
 
   // Synchronize when initial props change
   React.useEffect(() => {
@@ -93,23 +133,49 @@ export function OwnerApprovalsView({
     setSelectedIds(new Set());
   }, [activeTab]);
 
+  // Active banks & active bank filter scope
+  const activeBanks = banks.filter((b) => b.is_active);
+  const scopedBanks =
+    selectedBankFilter === 'ALL'
+      ? activeBanks
+      : activeBanks.filter((b) => b.id === selectedBankFilter);
+  const selectedBankObj =
+    selectedBankFilter === 'ALL'
+      ? null
+      : activeBanks.find((b) => b.id === selectedBankFilter) || null;
+  const scopedBankCode = selectedBankObj
+    ? selectedBankObj.short_code || selectedBankObj.short_name
+    : null;
+  const matchesBankFilter = (p: PaymentItem) =>
+    selectedBankFilter === 'ALL' || p.source_bank_id === selectedBankFilter;
+
   // Item buckets
   const pendingApprovalItems = payments.filter((p) => p.status === 'PENDING_APPROVAL');
   const holdItems = payments.filter((p) => p.status === 'ON_HOLD');
   const pendingVerificationItems = payments.filter((p) => p.status === 'PENDING_VERIFICATION');
   const readyToPayItems = payments.filter((p) => p.status === 'APPROVED');
 
-  // FINANCIAL TOTALS
-  const totalAvailableBalance = banks
-    .filter((b) => b.is_active)
-    .reduce((sum, b) => sum + (Number(b.available_balance) || 0), 0);
+  const scopedPendingVerificationItems = pendingVerificationItems.filter(matchesBankFilter);
+  const scopedPendingApprovalItems = pendingApprovalItems.filter(matchesBankFilter);
+  const scopedReadyToPayItems = readyToPayItems.filter(matchesBankFilter);
 
-  const pendingVerificationTotal = pendingVerificationItems.reduce(
+  // FINANCIAL TOTALS (Scoped to selectedBankFilter)
+  const scopedAvailableBalance = scopedBanks.reduce(
+    (sum, b) => sum + (Number(b.available_balance) || 0),
+    0
+  );
+
+  const scopedPendingVerificationTotal = scopedPendingVerificationItems.reduce(
     (sum, p) => sum + (Number(p.net_payable) || 0),
     0
   );
 
-  const pendingApprovalTotal = pendingApprovalItems.reduce(
+  const scopedPendingApprovalTotal = scopedPendingApprovalItems.reduce(
+    (sum, p) => sum + (Number(p.net_payable) || 0),
+    0
+  );
+
+  const scopedReadyToPayTotal = scopedReadyToPayItems.reduce(
     (sum, p) => sum + (Number(p.net_payable) || 0),
     0
   );
@@ -119,25 +185,90 @@ export function OwnerApprovalsView({
     0
   );
 
-  // Selected pending total for bulk approval
-  const selectedPendingTotal = Array.from(selectedIds).reduce((sum, id) => {
-    const item = payments.find((p) => p.id === id);
-    return sum + (item ? Number(item.net_payable) || 0 : 0);
-  }, 0);
+  // Selected totals (exclude already-APPROVED items from projection to prevent double-counting)
+  const selectedItemsList = Array.from(selectedIds)
+    .map((id) => payments.find((p) => p.id === id))
+    .filter((item): item is PaymentItem => Boolean(item));
 
-  // Projected Remaining Balance:
-  // Available Cash minus already approved (ready to pay) minus current selected batch (or total pending if approving all)
-  const projectedRemainingBalance =
-    totalAvailableBalance - (readyToPayTotal + selectedPendingTotal);
+  const selectedBatchTotal = selectedItemsList.reduce(
+    (sum, item) => sum + (Number(item.net_payable) || 0),
+    0
+  );
 
+  const selectedScopedTotal = selectedItemsList
+    .filter((item) => item.status !== 'APPROVED' && matchesBankFilter(item))
+    .reduce((sum, item) => sum + (Number(item.net_payable) || 0), 0);
+
+  // Dual-mode Projected Remaining Balance:
+  // - Live Selection Mode (selectedIds.size > 0): Ready-to-pay + selected non-approved items
+  // - Default Queue Forecast Mode (selectedIds.size === 0): Ready-to-pay + all pending approval
+  const activeOutflow =
+    selectedIds.size > 0
+      ? scopedReadyToPayTotal + selectedScopedTotal
+      : scopedReadyToPayTotal + scopedPendingApprovalTotal;
+
+  const projectedRemainingBalance = scopedAvailableBalance - activeOutflow;
+
+  // Per-bank projected balance & individual bank shortfall detection
+  const bankProjections = scopedBanks.map((bank) => {
+    const bankAvailable = Number(bank.available_balance) || 0;
+    const bankReadyToPay = readyToPayItems
+      .filter((p) => p.source_bank_id === bank.id)
+      .reduce((sum, p) => sum + (Number(p.net_payable) || 0), 0);
+
+    const bankPendingOrSelected =
+      selectedIds.size > 0
+        ? selectedItemsList
+            .filter((p) => p.status !== 'APPROVED' && p.source_bank_id === bank.id)
+            .reduce((sum, p) => sum + (Number(p.net_payable) || 0), 0)
+        : pendingApprovalItems
+            .filter((p) => p.source_bank_id === bank.id)
+            .reduce((sum, p) => sum + (Number(p.net_payable) || 0), 0);
+
+    const bankOutflow = bankReadyToPay + bankPendingOrSelected;
+    const bankProjectedLeft = bankAvailable - bankOutflow;
+
+    return {
+      bank,
+      bankAvailable,
+      bankReadyToPay,
+      bankPendingOrSelected,
+      bankOutflow,
+      bankProjectedLeft,
+    };
+  });
+
+  const shortfallBanks = bankProjections.filter((bp) => bp.bankProjectedLeft < 0);
   const isProjectedNegative = projectedRemainingBalance < 0;
+  const hasBankShortfall = !isProjectedNegative && shortfallBanks.length > 0;
 
   // Filter visible items according to current tab
   let currentTabItems: PaymentItem[] = [];
   if (activeTab === 'PENDING_APPROVAL') currentTabItems = pendingApprovalItems;
   else if (activeTab === 'ON_HOLD') currentTabItems = holdItems;
   else if (activeTab === 'PENDING_VERIFICATION') currentTabItems = pendingVerificationItems;
-  else if (activeTab === 'APPROVED') currentTabItems = readyToPayItems;
+
+  // Prune any selected IDs that were processed on another device via live refresh
+  React.useEffect(() => {
+    const validTabIds = new Set(
+      currentTabItems
+        .filter((item) => item.status !== 'APPROVED' && item.status !== 'PAID')
+        .map((item) => item.id)
+    );
+    setSelectedIds((prev) => {
+      if (prev.size === 0) return prev;
+      let changed = false;
+      const next = new Set<string>();
+      for (const id of prev) {
+        if (validTabIds.has(id)) {
+          next.add(id);
+        } else {
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [currentTabItems]);
 
   const todayStr = new Date().toISOString().split('T')[0];
 
@@ -151,6 +282,12 @@ export function OwnerApprovalsView({
     .filter((p) => {
       if (selectedBankFilter !== 'ALL') {
         return p.source_bank_id === selectedBankFilter;
+      }
+      return true;
+    })
+    .filter((p) => {
+      if (selectedModeFilter !== 'ALL') {
+        return (p.payment_mode || 'NEFT_RTGS') === selectedModeFilter;
       }
       return true;
     })
@@ -188,7 +325,20 @@ export function OwnerApprovalsView({
   const handleBulkApprove = async () => {
     if (selectedIds.size === 0) return;
 
-    const idsToApprove = Array.from(selectedIds);
+    const eligibleItems = selectedItemsList.filter(
+      (item) => item.status !== 'APPROVED' && item.status !== 'PAID'
+    );
+    if (eligibleItems.length === 0) {
+      setSelectedIds(new Set());
+      toast.info('Selected payments are already approved.');
+      return;
+    }
+
+    const idsToApprove = eligibleItems.map((item) => item.id);
+    const eligibleBatchTotal = eligibleItems.reduce(
+      (sum, item) => sum + (Number(item.net_payable) || 0),
+      0
+    );
     const count = idsToApprove.length;
     const previous = payments;
     const nowIso = new Date().toISOString();
@@ -202,7 +352,7 @@ export function OwnerApprovalsView({
       )
     );
     setSelectedIds(new Set());
-    toast.success(`Bulk approved ${count} payment${count === 1 ? '' : 's'} (${formatINR(selectedPendingTotal)}).`);
+    toast.success(`Bulk approved ${count} payment${count === 1 ? '' : 's'} (${formatINR(eligibleBatchTotal)}).`);
 
     setIsBulkApproving(true);
     try {
@@ -212,6 +362,7 @@ export function OwnerApprovalsView({
         toast.error(res.error || 'Failed to bulk approve payments.');
         return;
       }
+      refreshServerState();
     } catch {
       setPayments(previous);
       toast.error('Network error during bulk approval. Rolled back.');
@@ -222,6 +373,11 @@ export function OwnerApprovalsView({
 
   // Handler: Single Approve (Optimistic UI)
   const handleApprove = async (targetItem: PaymentItem) => {
+    if (targetItem.status === 'APPROVED' || targetItem.status === 'PAID') {
+      toast.info('This payment is already approved.');
+      return;
+    }
+
     const previous = payments;
     const optimisticApproved: PaymentItem = {
       ...targetItem,
@@ -246,6 +402,7 @@ export function OwnerApprovalsView({
       setPayments((prev) =>
         prev.map((p) => (p.id === targetItem.id ? res.data : p))
       );
+      refreshServerState();
     } catch {
       setPayments(previous);
       toast.error('Failed to approve payment. Rolled back.');
@@ -279,6 +436,7 @@ export function OwnerApprovalsView({
       setPayments((prev) =>
         prev.map((p) => (p.id === item.id ? res.data : p))
       );
+      refreshServerState();
     } catch {
       setPayments(previous);
       toast.error('Failed to update hold status. Rolled back.');
@@ -320,6 +478,7 @@ export function OwnerApprovalsView({
       setPayments((prev) =>
         prev.map((p) => (p.id === item.id ? res.data : p))
       );
+      refreshServerState();
     } catch {
       setPayments(previous);
       toast.error('Failed to reject payment. Rolled back.');
@@ -348,6 +507,7 @@ export function OwnerApprovalsView({
     toast.success(`Disbursement bank switched to ${chosenBank?.short_code || chosenBank?.short_name || 'Bank'}`);
 
     setActionLoadingId(item.id);
+    setSwitchingBankItemId(item.id);
     try {
       const res = await ownerSwitchBank(item.id, newBankId);
       if (!res.success) {
@@ -358,11 +518,13 @@ export function OwnerApprovalsView({
       setPayments((prev) =>
         prev.map((p) => (p.id === item.id ? res.data : p))
       );
+      refreshServerState();
     } catch {
       setPayments(previous);
       toast.error('Failed to switch bank. Rolled back.');
     } finally {
       setActionLoadingId(null);
+      setSwitchingBankItemId(null);
     }
   };
 
@@ -389,15 +551,16 @@ export function OwnerApprovalsView({
 
   return (
     <div className={`w-full space-y-4 sm:space-y-6 ${selectedIds.size > 0 ? 'pb-44 lg:pb-24' : 'pb-24 lg:pb-8'}`}>
-      {/* HEADER */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-3 sm:pb-4 border-b border-slate-200">
+      <PaymentUrlSync onParams={handleUrlParams} />
+      {/* HEADER (Desktop/tablet — mobile top bar already shows active title) */}
+      <div className="hidden sm:flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-4 border-b border-slate-200">
         <div className="min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <h1 className="text-lg sm:text-xl font-bold tracking-tight text-slate-900">
               Authorization & Approvals — {companyName}
             </h1>
             <span className="px-2 py-0.5 rounded text-[11px] sm:text-xs font-semibold bg-brand/10 text-brand shrink-0">
-              Owner Authorization
+              Approver Authorization
             </span>
           </div>
           <p className="text-xs text-slate-500 mt-1">
@@ -407,27 +570,36 @@ export function OwnerApprovalsView({
       </div>
 
       {/* 4-CARD FINANCIAL OVERVIEW STRIP (Compact 2x2 on Mobile) */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3">
         {/* Card 1: Total Available Balance */}
         <div
           onClick={() => setShowBankBreakdown(!showBankBreakdown)}
-          className="p-3 sm:p-4 rounded-xl border border-slate-200 bg-white shadow-sm flex flex-col justify-between cursor-pointer hover:border-slate-300 transition-colors min-w-0"
+          className="p-2.5 sm:p-4 rounded-xl border border-slate-200 bg-white shadow-sm flex flex-col justify-between cursor-pointer hover:border-slate-300 transition-colors min-w-0"
           title="Click to toggle bank-by-bank balances"
         >
           <div className="flex items-start justify-between gap-1.5 text-slate-500">
-            <span className="text-[10px] sm:text-[11px] font-semibold uppercase tracking-wider leading-tight">
-              Available Balance
-            </span>
+            <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+              <span className="text-[10px] sm:text-[11px] font-semibold uppercase tracking-wider leading-tight">
+                Available Balance
+              </span>
+              {scopedBankCode && (
+                <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 text-[9px] font-bold uppercase tracking-wide shrink-0">
+                  {scopedBankCode} only
+                </span>
+              )}
+            </div>
             <Landmark className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-slate-400 shrink-0" />
           </div>
-          <div className="mt-1.5 sm:mt-2 min-w-0">
+          <div className="mt-1 sm:mt-2 min-w-0">
             <div className="text-base sm:text-xl lg:text-2xl font-bold text-slate-900 tabular-nums break-words leading-tight">
-              {formatINR(totalAvailableBalance)}
+              {formatINR(scopedAvailableBalance)}
             </div>
             <div className="text-[10px] sm:text-[11px] text-brand font-medium mt-1 flex items-center gap-1 flex-wrap">
-              <span>{banks.filter((b) => b.is_active).length} banks</span>
-              <span>•</span>
-              <span className="underline">View split</span>
+              <span className="hidden sm:inline">
+                {scopedBanks.length} {scopedBanks.length === 1 ? 'bank' : 'banks'}
+              </span>
+              <span className="hidden sm:inline">•</span>
+              <span className="underline">{showBankBreakdown ? 'Hide split' : 'View split'}</span>
             </div>
           </div>
         </div>
@@ -435,7 +607,7 @@ export function OwnerApprovalsView({
         {/* Card 2: Pending Verification */}
         <div
           onClick={() => setActiveTab('PENDING_VERIFICATION')}
-          className="p-3 sm:p-4 rounded-xl border border-slate-200 bg-white shadow-sm flex flex-col justify-between cursor-pointer hover:border-slate-300 transition-colors min-w-0"
+          className="p-2.5 sm:p-4 rounded-xl border border-slate-200 bg-white shadow-sm flex flex-col justify-between cursor-pointer hover:border-slate-300 transition-colors min-w-0"
         >
           <div className="flex items-start justify-between gap-1.5 text-slate-500">
             <span className="text-[10px] sm:text-[11px] font-semibold uppercase tracking-wider leading-tight">
@@ -443,12 +615,12 @@ export function OwnerApprovalsView({
             </span>
             <Clock className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-500 shrink-0" />
           </div>
-          <div className="mt-1.5 sm:mt-2 min-w-0">
+          <div className="mt-1 sm:mt-2 min-w-0">
             <div className="text-base sm:text-xl lg:text-2xl font-bold text-slate-900 tabular-nums break-words leading-tight">
-              {formatINR(pendingVerificationTotal)}
+              {formatINR(scopedPendingVerificationTotal)}
             </div>
-            <div className="text-[10px] sm:text-[11px] text-amber-700 font-medium mt-1 leading-tight">
-              {pendingVerificationItems.length} with Verifier
+            <div className="hidden sm:block text-[11px] text-amber-700 font-medium mt-1 leading-tight">
+              {scopedPendingVerificationItems.length} with Verifier
             </div>
           </div>
         </div>
@@ -456,7 +628,7 @@ export function OwnerApprovalsView({
         {/* Card 3: Pending Approval */}
         <div
           onClick={() => setActiveTab('PENDING_APPROVAL')}
-          className="p-3 sm:p-4 rounded-xl border border-slate-200 bg-white shadow-sm flex flex-col justify-between cursor-pointer hover:border-slate-300 transition-colors min-w-0"
+          className="p-2.5 sm:p-4 rounded-xl border border-slate-200 bg-white shadow-sm flex flex-col justify-between cursor-pointer hover:border-slate-300 transition-colors min-w-0"
         >
           <div className="flex items-start justify-between gap-1.5 text-slate-500">
             <span className="text-[10px] sm:text-[11px] font-semibold uppercase tracking-wider leading-tight">
@@ -464,49 +636,85 @@ export function OwnerApprovalsView({
             </span>
             <AlertTriangle className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-brand shrink-0" />
           </div>
-          <div className="mt-1.5 sm:mt-2 min-w-0">
+          <div className="mt-1 sm:mt-2 min-w-0">
             <div className="text-base sm:text-xl lg:text-2xl font-bold text-slate-900 tabular-nums break-words leading-tight">
-              {formatINR(pendingApprovalTotal)}
+              {formatINR(scopedPendingApprovalTotal)}
             </div>
-            <div className="text-[10px] sm:text-[11px] text-brand font-medium mt-1 leading-tight">
-              {pendingApprovalItems.length} awaiting Owner
+            <div className="hidden sm:block text-[11px] text-brand font-medium mt-1 leading-tight">
+              {scopedPendingApprovalItems.length} awaiting Approval
             </div>
           </div>
         </div>
 
         {/* Card 4: Projected Remaining Balance */}
         <div
-          className={`p-3 sm:p-4 rounded-xl border shadow-sm flex flex-col justify-between transition-colors min-w-0 ${isProjectedNegative
+          className={`p-2.5 sm:p-4 rounded-xl border shadow-sm flex flex-col justify-between transition-colors min-w-0 ${isProjectedNegative
               ? 'bg-rose-50 border-rose-300 text-rose-900'
-              : 'bg-emerald-50/50 border-emerald-200 text-emerald-900'
+              : hasBankShortfall
+                ? 'bg-amber-50/70 border-amber-300 text-amber-950'
+                : 'bg-emerald-50/50 border-emerald-200 text-emerald-900'
             }`}
         >
           <div className="flex items-start justify-between gap-1.5">
-            <span className="text-[10px] sm:text-[11px] font-semibold uppercase tracking-wider leading-tight">
-              Projected Remaining
-            </span>
+            <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+              <span className="text-[10px] sm:text-[11px] font-semibold uppercase tracking-wider leading-tight">
+                Projected Remaining
+              </span>
+              {selectedIds.size > 0 && (
+                <span className="px-1.5 py-0.5 rounded bg-slate-900 text-white text-[9px] font-bold uppercase tracking-wide shrink-0">
+                  Live
+                </span>
+              )}
+              {scopedBankCode && (
+                <span className="px-1.5 py-0.5 rounded bg-white/80 border border-current/15 text-[9px] font-bold uppercase tracking-wide shrink-0">
+                  {scopedBankCode} only
+                </span>
+              )}
+            </div>
             {isProjectedNegative ? (
               <ShieldAlert className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-rose-600 animate-pulse shrink-0" />
+            ) : hasBankShortfall ? (
+              <AlertTriangle className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-600 shrink-0" />
             ) : (
               <CheckCircle2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-emerald-600 shrink-0" />
             )}
           </div>
-          <div className="mt-1.5 sm:mt-2 min-w-0">
+          <div className="mt-1 sm:mt-2 min-w-0">
             <div className="text-base sm:text-xl lg:text-2xl font-bold tabular-nums break-words leading-tight">
               {formatINR(projectedRemainingBalance)}
             </div>
-            <div className="text-[10px] sm:text-[11px] font-medium mt-1 leading-tight">
+            <div className="text-[10px] sm:text-[11px] font-medium mt-1 leading-tight space-y-1">
               {isProjectedNegative ? (
-                <span className="text-rose-700 font-bold">
-                  Deficit: exceeds cash
-                </span>
+                <div className="text-rose-700 font-bold">
+                  Cash shortfall: {formatINR(Math.abs(projectedRemainingBalance))}
+                </div>
+              ) : hasBankShortfall ? (
+                <button
+                  type="button"
+                  onClick={() => setShowBankBreakdown(true)}
+                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-100 hover:bg-amber-200/80 text-amber-900 font-bold text-[10px] text-left cursor-pointer transition-colors"
+                >
+                  <span>
+                    ⚠️ {shortfallBanks.map((s) => s.bank.short_code || s.bank.short_name).join(', ')} short — click to inspect
+                  </span>
+                </button>
               ) : (
-                <span className="text-emerald-700">
-                  {selectedIds.size > 0
-                    ? `After ${selectedIds.size} selected (${formatINR(selectedPendingTotal)})`
-                    : 'Surplus cash remaining'}
-                </span>
+                <div className="hidden sm:block text-emerald-700 font-semibold">
+                  Surplus cash remaining
+                </div>
               )}
+              <div
+                className={`hidden sm:block text-[10px] tabular-nums leading-snug ${isProjectedNegative
+                    ? 'text-rose-700/85'
+                    : hasBankShortfall
+                      ? 'text-amber-800/90'
+                      : 'text-emerald-800/80'
+                  }`}
+              >
+                {selectedIds.size > 0
+                  ? `After ${selectedIds.size} selected + ${formatINR(scopedReadyToPayTotal)} ready to pay`
+                  : `After all pending (${formatINR(scopedPendingApprovalTotal)}) + ready to pay (${formatINR(scopedReadyToPayTotal)})`}
+              </div>
             </div>
           </div>
         </div>
@@ -514,20 +722,66 @@ export function OwnerApprovalsView({
 
       {/* BANK BREAKDOWN EXPANDED STRIP (Optional click-to-expand) */}
       {showBankBreakdown && (
-        <div className="p-3 sm:p-4 rounded-xl border border-slate-200 bg-slate-50 space-y-2 animate-in fade-in-50">
-          <div className="text-xs font-semibold text-slate-700">Bank-by-Bank Available Balances:</div>
-          <div className="grid grid-cols-1 xs:grid-cols-2 sm:grid-cols-4 gap-2">
-            {banks.filter((b) => b.is_active).map((b) => (
-              <div key={b.id} className="p-2.5 rounded-lg bg-white border border-slate-200 text-xs min-w-0">
-                <div className="font-bold text-slate-800 truncate">{b.bank_name || b.full_name}</div>
-                <div className="font-mono text-slate-400 text-[10px] truncate">
-                  {b.short_code || b.short_name} {b.account_number_masked ? `(${b.account_number_masked})` : ''}
+        <div className="p-3 sm:p-4 rounded-xl border border-slate-200 bg-slate-50 space-y-2.5 animate-in fade-in-50">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <div className="text-xs font-semibold text-slate-700">
+              Bank-by-Bank Cash Projection ({selectedIds.size > 0 ? 'Live Selection' : 'Full Queue Forecast'}):
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowBankBreakdown(false)}
+              className="text-[11px] font-semibold text-slate-500 hover:text-slate-800 underline cursor-pointer"
+            >
+              Hide split
+            </button>
+          </div>
+          <div className="grid grid-cols-1 xs:grid-cols-2 sm:grid-cols-4 gap-2.5">
+            {bankProjections.map(({ bank: b, bankAvailable, bankOutflow, bankProjectedLeft }) => {
+              const isBankShort = bankProjectedLeft < 0;
+              return (
+                <div
+                  key={b.id}
+                  className={`p-3 rounded-lg bg-white border text-xs min-w-0 space-y-2 ${isBankShort ? 'border-rose-300 ring-1 ring-rose-200/70' : 'border-slate-200'
+                    }`}
+                >
+                  <div>
+                    <div className="flex items-center justify-between gap-1.5">
+                      <span className="font-bold text-slate-800 truncate">
+                        {b.bank_name || b.full_name}
+                      </span>
+                      <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 text-[10px] font-semibold shrink-0">
+                        {b.short_code || b.short_name}
+                      </span>
+                    </div>
+                    {b.account_number_masked && (
+                      <div className="font-mono text-slate-400 text-[10px] truncate mt-0.5">
+                        {b.account_number_masked}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="space-y-1 pt-1.5 border-t border-slate-100 text-[11px] tabular-nums">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-slate-500">Available:</span>
+                      <span className="font-semibold text-slate-800">{formatINR(bankAvailable)}</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-slate-500">Queued / Selected:</span>
+                      <span className="font-medium text-slate-700">- {formatINR(bankOutflow)}</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-100">
+                      <span className="font-semibold text-slate-700">Projected Left:</span>
+                      <span
+                        className={`font-bold ${isBankShort ? 'text-rose-600' : 'text-emerald-700'
+                          }`}
+                      >
+                        {formatINR(bankProjectedLeft)}
+                      </span>
+                    </div>
+                  </div>
                 </div>
-                <div className="font-bold text-slate-900 tabular-nums mt-1 text-sm">
-                  {formatINR(b.available_balance ?? 0)}
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}
@@ -541,13 +795,12 @@ export function OwnerApprovalsView({
               <strong>{readyToPayItems.length} payments ({formatINR(readyToPayTotal)})</strong> have been authorized and are awaiting UTR / Cheque settlement.
             </span>
           </div>
-          <button
-            type="button"
-            onClick={() => setActiveTab('APPROVED')}
-            className="text-emerald-700 font-bold hover:underline shrink-0 self-start sm:self-center cursor-pointer"
+          <Link
+            href="/history"
+            className="text-emerald-700 font-bold hover:underline shrink-0 self-start sm:self-center"
           >
-            View Ready to Pay &rarr;
-          </button>
+            View in History &rarr;
+          </Link>
         </div>
       )}
 
@@ -593,25 +846,11 @@ export function OwnerApprovalsView({
               ? 'bg-slate-900 text-white shadow-sm'
               : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
             }`}
-          title="Owner direct override when Senior Accountant is absent"
+          title="Approver direct override when Senior Accountant is absent"
         >
           <span>Awaiting Verification (Override)</span>
           <span className="tabular-nums text-[11px] px-1.5 py-0.5 rounded-full bg-slate-200 text-slate-800">
             {pendingVerificationItems.length}
-          </span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab('APPROVED')}
-          className={`min-h-[38px] px-3 sm:px-3.5 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap inline-flex items-center gap-2 transition-colors shrink-0 ${activeTab === 'APPROVED'
-              ? 'bg-emerald-700 text-white shadow-sm'
-              : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
-            }`}
-        >
-          <span>Ready to Pay</span>
-          <span className="tabular-nums text-[11px] px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
-            {readyToPayItems.length}
           </span>
         </button>
       </div>
@@ -658,6 +897,19 @@ export function OwnerApprovalsView({
               </option>
             ))}
           </select>
+
+          {/* Mode Filter Dropdown */}
+          <select
+            aria-label="Filter by disbursement mode"
+            value={selectedModeFilter}
+            onChange={(e) => setSelectedModeFilter(e.target.value as 'ALL' | PaymentMode)}
+            className="min-h-[38px] px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-slate-700 outline-none focus:border-brand max-w-full"
+          >
+            <option value="ALL">All Modes</option>
+            <option value="NEFT_RTGS">NEFT / RTGS</option>
+            <option value="IMPS">IMPS</option>
+            <option value="CHEQUE">Cheque</option>
+          </select>
         </div>
 
         {/* Instant Search */}
@@ -692,6 +944,7 @@ export function OwnerApprovalsView({
               item={item}
               banks={banks.filter((b) => b.is_active)}
               isSelected={selectedIds.has(item.id)}
+              isHighlighted={highlightedId === item.id}
               onToggleSelect={
                 activeTab === 'PENDING_APPROVAL' || activeTab === 'PENDING_VERIFICATION'
                   ? () => handleToggleSelect(item.id)
@@ -706,6 +959,7 @@ export function OwnerApprovalsView({
               onBankSwitch={handleBankSwitch}
               onViewBill={handleViewBill}
               isActionLoading={actionLoadingId === item.id}
+              isBankSwitching={switchingBankItemId === item.id}
               isOverrideTab={activeTab === 'PENDING_VERIFICATION'}
             />
           ))}
@@ -722,14 +976,18 @@ export function OwnerApprovalsView({
                   {selectedIds.size} selected
                 </span>
                 <span className="text-xs text-slate-500 ml-1.5 sm:ml-2 tabular-nums">
-                  Total: <strong className="text-slate-900 font-bold">{formatINR(selectedPendingTotal)}</strong>
+                  Total: <strong className="text-slate-900 font-bold">{formatINR(selectedBatchTotal)}</strong>
                 </span>
               </div>
 
               <div className="text-xs sm:border-l sm:border-slate-200 sm:pl-4">
-                <span className="text-slate-500">Projected: </span>
+                <span className="text-slate-500">Projected Remaining: </span>
                 <strong
-                  className={`tabular-nums font-bold ${isProjectedNegative ? 'text-rose-600' : 'text-emerald-700'
+                  className={`tabular-nums font-bold ${isProjectedNegative
+                      ? 'text-rose-600'
+                      : hasBankShortfall
+                        ? 'text-amber-600'
+                        : 'text-emerald-700'
                     }`}
                 >
                   {formatINR(projectedRemainingBalance)}

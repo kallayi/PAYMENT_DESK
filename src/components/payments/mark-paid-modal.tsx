@@ -22,8 +22,9 @@ import {
 import { toast } from 'sonner';
 import { markPaymentPaid, uploadReceiptFile } from '@/actions/payments';
 import { PaymentAcknowledgementModal } from '@/components/payments/payment-acknowledgement-modal';
-import { formatINR } from '@/lib/format';
-import type { Company, PaymentItem } from '@/types/database';
+import { DatePicker } from '@/components/ui/date-picker';
+import { formatINR, formatPaymentMode } from '@/lib/format';
+import type { Company, PaymentItem, PaymentMode } from '@/types/database';
 
 interface MarkPaidModalProps {
   open: boolean;
@@ -165,7 +166,7 @@ export function MarkPaidModal({
     try {
       const res = await markPaymentPaid({
         payment_id: payment.id,
-        payment_mode: (payment.payment_mode || 'NEFT_RTGS') as 'NEFT_RTGS' | 'CHEQUE',
+        payment_mode: (payment.payment_mode || 'NEFT_RTGS') as PaymentMode,
         utr_number: isCheque ? null : utrNumber.trim().toUpperCase(),
         cheque_number: isCheque ? chequeNumber.trim() : null,
         cheque_date: isCheque ? chequeDate.trim() : null,
@@ -256,10 +257,10 @@ export function MarkPaidModal({
                 <div className="flex items-center justify-between text-[11px] font-medium text-slate-500 mb-1">
                   <span className="inline-flex items-center gap-1.5">
                     <Lock className="w-3.5 h-3.5 text-slate-600" />
-                    <span>Locked after Owner approval</span>
+                    <span>Locked after Approval</span>
                   </span>
-                  <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-200 text-slate-800">
-                    {isCheque ? 'CHEQUE' : 'NEFT / RTGS'}
+                  <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-200 text-slate-800 uppercase">
+                    {formatPaymentMode(payment.payment_mode)}
                   </span>
                 </div>
 
@@ -301,7 +302,7 @@ export function MarkPaidModal({
                   <div>
                     <label
                       htmlFor="utr-number"
-                      className="block text-xs font-medium text-slate-700 mb-1"
+                      className="block text-xs font-semibold text-slate-800 tracking-tight mb-1"
                     >
                       UTR / Payment Reference No <span className="text-rose-600">*</span>
                     </label>
@@ -316,7 +317,7 @@ export function MarkPaidModal({
                         setUtrNumber(e.target.value.toUpperCase());
                         setErrorMessage(null);
                       }}
-                      className="w-full min-h-[44px] sm:min-h-[38px] px-3 rounded-lg border border-slate-200 bg-white text-sm font-mono uppercase tabular-nums outline-none focus:border-brand focus:ring-1 focus:ring-brand transition-colors"
+                      className="w-full min-h-[44px] sm:min-h-[38px] px-3 rounded-lg border border-slate-300 bg-white text-sm text-slate-950 font-mono font-medium uppercase placeholder:text-slate-500 shadow-sm tabular-nums hover:border-slate-400 outline-none focus:border-[#7F1D1D] focus:ring-2 focus:ring-[#7F1D1D]/15 transition-colors"
                     />
                   </div>
                 ) : (
@@ -325,7 +326,7 @@ export function MarkPaidModal({
                     <div>
                       <label
                         htmlFor="cheque-number"
-                        className="block text-xs font-medium text-slate-700 mb-1"
+                        className="block text-xs font-semibold text-slate-800 tracking-tight mb-1"
                       >
                         Cheque Number <span className="text-rose-600">*</span>
                       </label>
@@ -340,26 +341,25 @@ export function MarkPaidModal({
                           setChequeNumber(e.target.value);
                           setErrorMessage(null);
                         }}
-                        className="w-full min-h-[44px] sm:min-h-[38px] px-3 rounded-lg border border-slate-200 bg-white text-sm font-mono tabular-nums outline-none focus:border-brand focus:ring-1 focus:ring-brand transition-colors"
+                        className="w-full min-h-[44px] sm:min-h-[38px] px-3 rounded-lg border border-slate-300 bg-white text-sm text-slate-950 font-mono font-medium placeholder:text-slate-500 shadow-sm tabular-nums hover:border-slate-400 outline-none focus:border-[#7F1D1D] focus:ring-2 focus:ring-[#7F1D1D]/15 transition-colors"
                       />
                     </div>
                     <div>
                       <label
                         htmlFor="cheque-date"
-                        className="block text-xs font-medium text-slate-700 mb-1"
+                        className="block text-xs font-semibold text-slate-800 tracking-tight mb-1"
                       >
                         Cheque Date <span className="text-rose-600">*</span>
                       </label>
-                      <input
+                      <DatePicker
                         id="cheque-date"
-                        type="date"
-                        required
                         value={chequeDate}
-                        onChange={(e) => {
-                          setChequeDate(e.target.value);
+                        onChange={(val) => {
+                          setChequeDate(val);
                           setErrorMessage(null);
                         }}
-                        className="w-full min-h-[44px] sm:min-h-[38px] px-3 rounded-lg border border-slate-200 bg-white text-xs sm:text-sm tabular-nums outline-none focus:border-brand focus:ring-1 focus:ring-brand transition-colors"
+                        placeholder="Select cheque date"
+                        required
                       />
                     </div>
                   </div>
@@ -434,9 +434,9 @@ export function MarkPaidModal({
                 <div>
                   <label
                     htmlFor="utr-remarks"
-                    className="block text-xs font-medium text-slate-700 mb-1"
+                    className="block text-xs font-semibold text-slate-800 tracking-tight mb-1"
                   >
-                    Remarks <span className="text-slate-400 font-normal">(Optional)</span>
+                    Remarks <span className="text-slate-500 font-normal">(Optional)</span>
                   </label>
                   <input
                     id="utr-remarks"
@@ -444,7 +444,7 @@ export function MarkPaidModal({
                     value={remarks}
                     onChange={(e) => setRemarks(e.target.value)}
                     placeholder="Optional settlement note"
-                    className="w-full min-h-[44px] sm:min-h-[38px] px-3 rounded-lg border border-slate-200 bg-white text-sm outline-none focus:border-brand focus:ring-1 focus:ring-brand transition-colors"
+                    className="w-full min-h-[44px] sm:min-h-[38px] px-3 rounded-lg border border-slate-300 bg-white text-sm text-slate-950 font-medium placeholder:text-slate-500 shadow-sm hover:border-slate-400 outline-none focus:border-[#7F1D1D] focus:ring-2 focus:ring-[#7F1D1D]/15 transition-colors"
                   />
                 </div>
 

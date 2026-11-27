@@ -19,6 +19,7 @@ export interface DispatchWorkflowNotificationInput {
   netPayable: number;
   reason?: string | null;
   createdById?: string | null;
+  createdByIds?: string[];
   customTitle?: string;
   customBody?: string;
 }
@@ -42,7 +43,7 @@ export async function getMyNotifications(
   const [listRes, countRes] = await Promise.all([
     supabase
       .from('notifications')
-      .select('id, company_id, recipient_user_id, payment_item_id, event_type, title, body, is_read, created_at')
+      .select('id, company_id, recipient_user_id, payment_item_id, payment_request_id, action_url, event_type, title, body, is_read, created_at')
       .eq('recipient_user_id', user.id)
       .order('created_at', { ascending: false })
       .limit(safeLimit),
@@ -138,18 +139,9 @@ export async function dispatchWorkflowNotification(
       return;
     }
 
-    const supabase = await createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    if (!user || user.id !== input.actorId) {
-      return;
-    }
-
     const admin = createAdminClient();
 
-    // Fetch company code, active profiles, and company access list concurrently
+    // Fetch company code, active profiles, and company access list concurrently via service-role client
     const [companyRes, profilesRes, accessRes] = await Promise.all([
       admin
         .from('companies')
@@ -166,9 +158,21 @@ export async function dispatchWorkflowNotification(
         .eq('company_id', input.companyId),
     ]);
 
+    if (profilesRes.error) {
+      console.warn('[Notifications] Profiles query error:', profilesRes.error.message);
+    }
+    if (accessRes.error) {
+      console.warn('[Notifications] Company access query error:', accessRes.error.message);
+    }
+
     const companyCode = companyRes.data?.code || 'DESK';
     const activeProfiles = profilesRes.data || [];
     const companyUserIds = new Set((accessRes.data || []).map((row) => row.user_id));
+    const creatorIdSet = new Set<string>(
+      [input.createdById, ...(input.createdByIds || [])].filter(
+        (id): id is string => Boolean(id)
+      )
+    );
 
     const hasCompanyAccess = (p: { id: string; is_admin: boolean }) =>
       p.is_admin || companyUserIds.has(p.id);
@@ -179,34 +183,45 @@ export async function dispatchWorkflowNotification(
     let defaultBody: string;
     const formattedAmount = formatINR(input.netPayable);
 
+    const highlightSuffix =
+      input.paymentItemId && !input.customTitle
+        ? `highlight=${encodeURIComponent(input.paymentItemId)}`
+        : '';
+
     switch (input.eventType) {
       case 'SUBMITTED_FOR_VERIFICATION':
         targetRole = 'VERIFIER';
-        targetUrl = '/verify';
+        targetUrl = highlightSuffix ? `/verify?${highlightSuffix}` : '/verify';
         defaultTitle = `[${companyCode}] Pending Verification`;
         defaultBody = `${input.partyName} · ${formattedAmount} submitted for verification.`;
         break;
       case 'VERIFIED_FOR_APPROVAL':
         targetRole = 'APPROVER';
-        targetUrl = '/approvals';
+        targetUrl = highlightSuffix ? `/approvals?${highlightSuffix}` : '/approvals';
         defaultTitle = `[${companyCode}] Ready for Approval`;
         defaultBody = `${input.partyName} · ${formattedAmount} verified and awaiting approval.`;
         break;
       case 'APPROVED':
         targetRole = 'PREPARER';
-        targetUrl = '/payments';
-        defaultTitle = `[${companyCode}] Payment Approved`;
-        defaultBody = `${input.partyName} · ${formattedAmount} approved and ready to pay.`;
+        targetUrl = highlightSuffix
+          ? `/payments?tab=APPROVED&${highlightSuffix}`
+          : '/payments?tab=APPROVED';
+        defaultTitle = `[${companyCode}] Payment Approved — Ready to Pay`;
+        defaultBody = `${input.partyName} · ${formattedAmount} approved — Ready to Pay.`;
         break;
       case 'HELD':
         targetRole = 'PREPARER';
-        targetUrl = '/payments';
+        targetUrl = highlightSuffix
+          ? `/payments?tab=ON_HOLD&${highlightSuffix}`
+          : '/payments?tab=ON_HOLD';
         defaultTitle = `[${companyCode}] Payment Placed on Hold`;
         defaultBody = `${input.partyName} · ${formattedAmount} was placed on hold.`;
         break;
       case 'REJECTED':
         targetRole = 'PREPARER';
-        targetUrl = '/payments';
+        targetUrl = highlightSuffix
+          ? `/payments?tab=REJECTED&${highlightSuffix}`
+          : '/payments?tab=REJECTED';
         defaultTitle = `[${companyCode}] Payment Returned / Rejected`;
         defaultBody = `${input.partyName} · ${formattedAmount} was rejected${
           input.reason ? `: "${input.reason}"` : '.'
@@ -219,21 +234,22 @@ export async function dispatchWorkflowNotification(
     const title = input.customTitle || defaultTitle;
     const body = input.customBody || defaultBody;
 
-    const recipientIds = activeProfiles
-      .filter((p) => {
-        if (p.id === input.actorId) return false;
-        if (!hasCompanyAccess(p)) return false;
+    const recipientIdSet = new Set<string>();
+    for (const p of activeProfiles) {
+      if (p.id === input.actorId) continue;
 
-        if (targetRole === 'PREPARER') {
-          return (
-            p.role === 'PREPARER' ||
-            (Boolean(input.createdById) && p.id === input.createdById)
-          );
+      if (targetRole === 'PREPARER') {
+        const isCompanyPreparer = p.role === 'PREPARER' && hasCompanyAccess(p);
+        const isCreator = creatorIdSet.has(p.id);
+        if (isCompanyPreparer || isCreator) {
+          recipientIdSet.add(p.id);
         }
-        return p.role === targetRole;
-      })
-      .map((p) => p.id);
+      } else if (hasCompanyAccess(p) && p.role === targetRole) {
+        recipientIdSet.add(p.id);
+      }
+    }
 
+    const recipientIds = Array.from(recipientIdSet);
     if (recipientIds.length === 0) {
       return;
     }
@@ -259,7 +275,7 @@ export async function dispatchWorkflowNotification(
     // Dispatch Web Push without crashing or blocking if push fails
     await Promise.race([
       sendPushToUsers(recipientIds, { title, body, url: targetUrl }),
-      new Promise<void>((resolve) => setTimeout(resolve, 2000)),
+      new Promise<void>((resolve) => setTimeout(resolve, 2500)),
     ]);
   } catch (err) {
     console.warn('[Notifications] Non-blocking dispatch failed:', err);

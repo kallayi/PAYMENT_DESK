@@ -28,10 +28,10 @@ export default async function SettingsPage() {
 
   const supabase = await createClient();
 
-  // Fetch all companies for assignment checkboxes
+  // Fetch all companies for profile editing and user assignment checkboxes
   const { data: companiesData } = await supabase
     .from('companies')
-    .select('id, code, name, is_active, created_at')
+    .select('id, code, name, contact_email, contact_phone, is_active, created_at')
     .eq('is_active', true)
     .order('code', { ascending: true });
 
@@ -119,12 +119,16 @@ export default async function SettingsPage() {
     banks = (banksRes.data || []) as CompanyBank[];
   }
 
+  const resolvedActiveCompany = activeCompany
+    ? allCompanies.find((c) => c.id === activeCompany.id) ?? activeCompany
+    : null;
+
   return (
     <SettingsManagement
       currentUserId={user.id}
       initialUsers={enrichedUsers}
       initialBanks={banks}
-      activeCompany={activeCompany}
+      activeCompany={resolvedActiveCompany}
       allCompanies={allCompanies}
     />
   );

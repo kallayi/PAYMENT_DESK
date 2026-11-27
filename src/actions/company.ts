@@ -2,7 +2,9 @@
 
 import { cookies } from 'next/headers';
 import { revalidatePath } from 'next/cache';
+import { createClient } from '@/lib/supabase/server';
 import { getCurrentUserContext } from '@/lib/auth';
+import { companyProfileSchema, type CompanyProfileInput } from '@/lib/validators';
 import type { ActionResult, Company } from '@/types/database';
 
 /**
@@ -45,4 +47,59 @@ export async function switchActiveCompany(
 
   revalidatePath('/', 'layout');
   return { success: true, data: targetCompany };
+}
+
+/**
+ * Admin-only update of company display/signature name and slip contact details.
+ * Never modifies `companies.code` (`INDFURN` / `VINMORE`) to preserve logo/workspace isolation.
+ */
+export async function updateCompanyProfile(
+  input: CompanyProfileInput
+): Promise<ActionResult<Company>> {
+  const { user, profile } = await getCurrentUserContext();
+
+  if (!user || !profile || !profile.is_active) {
+    return { success: false, error: 'Unauthorized. Please sign in.' };
+  }
+
+  if (!profile.is_admin) {
+    return { success: false, error: 'Only an Administrator can update company profile details.' };
+  }
+
+  const parsed = companyProfileSchema.safeParse(input);
+  if (!parsed.success) {
+    return {
+      success: false,
+      error: parsed.error.issues[0]?.message || 'Invalid company profile details.',
+    };
+  }
+
+  const { companyId, name, contact_email, contact_phone } = parsed.data;
+  const supabase = await createClient();
+
+  const { data: updated, error } = await supabase
+    .from('companies')
+    .update({
+      name: name.trim(),
+      contact_email: contact_email.trim() || null,
+      contact_phone: contact_phone.trim() || null,
+    })
+    .eq('id', companyId)
+    .select('id, code, name, contact_email, contact_phone, is_active, created_at')
+    .single();
+
+  if (error || !updated) {
+    return {
+      success: false,
+      error: error?.message || 'Failed to update company profile details.',
+    };
+  }
+
+  revalidatePath('/', 'layout');
+  revalidatePath('/settings');
+  revalidatePath('/history');
+  revalidatePath('/payments');
+  revalidatePath('/print');
+
+  return { success: true, data: updated as Company };
 }

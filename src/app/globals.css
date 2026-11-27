@@ -42,18 +42,100 @@
 
     --radius: 0.5rem;
 
-    /* Hex design tokens specified in docs/UI_UX_DESIGN.md */
+    /* Hex design tokens & Company Signature Accents (INDFURN default = Maroon) */
     --bg-canvas: #F8FAFC;
     --bg-surface: #FFFFFF;
     --border-subtle: #E2E8F0;
     --text-primary: #0F172A;
     --text-secondary: #475569;
+    --brand: #7F1D1D;
     --brand-primary: #7F1D1D;
     --brand-primary-hover: #991B1B;
     --brand-tint: #FEF2F2;
+    --brand-accent: #7F1D1D;
+    --brand-ring: rgba(127, 29, 29, 0.25);
     --status-success: #047857;
     --status-warning: #B45309;
     --status-danger: #BE123C;
+  }
+
+  [data-company="INDFURN"] {
+    --primary: 0 63% 31%;
+    --ring: 0 63% 31%;
+    --brand: #7F1D1D;
+    --brand-primary: #7F1D1D;
+    --brand-primary-hover: #991B1B;
+    --brand-tint: #FEF2F2;
+    --brand-accent: #7F1D1D;
+    --brand-ring: rgba(127, 29, 29, 0.25);
+  }
+
+  [data-company="VINMORE"] {
+    --primary: 175 77% 26%;
+    --ring: 175 77% 26%;
+    --brand: #0F766E;
+    --brand-primary: #0F766E;
+    --brand-primary-hover: #115E59;
+    --brand-tint: #F0FDFA;
+    --brand-accent: #0F766E;
+    --brand-ring: rgba(15, 118, 110, 0.25);
+  }
+
+  .dark {
+    --background: 0 0% 2%;
+    --foreground: 0 0% 98%;
+
+    --card: 240 10% 6%;
+    --card-foreground: 0 0% 98%;
+
+    --popover: 240 10% 6%;
+    --popover-foreground: 0 0% 98%;
+
+    --primary: 0 70% 35%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 240 10% 10%;
+    --secondary-foreground: 0 0% 98%;
+
+    --muted: 240 10% 10%;
+    --muted-foreground: 240 5% 58%;
+
+    --accent: 240 10% 10%;
+    --accent-foreground: 0 0% 98%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 240 8% 15%;
+    --input: 240 9% 17%;
+    --ring: 0 74% 42%;
+
+    --bg-canvas: #050505;
+    --bg-surface: #0E0E11;
+    --border-subtle: #222228;
+    --text-primary: #FAFAFA;
+    --text-secondary: #8E8E98;
+    --brand: #991B1B;
+    --brand-primary: #991B1B;
+    --brand-primary-hover: #B91C1C;
+    --brand-tint: rgba(153, 27, 27, 0.14);
+    --brand-accent: #EF4444;
+    --brand-ring: rgba(239, 68, 68, 0.30);
+    --status-success: #34D399;
+    --status-warning: #FBBF24;
+    --status-danger: #FB7185;
+  }
+
+  html.dark[data-company="VINMORE"],
+  html.dark [data-company="VINMORE"] {
+    --primary: 175 77% 26%;
+    --ring: 173 80% 40%;
+    --brand: #0F766E;
+    --brand-primary: #0F766E;
+    --brand-primary-hover: #0D9488;
+    --brand-tint: rgba(13, 148, 136, 0.15);
+    --brand-accent: #2DD4BF;
+    --brand-ring: rgba(45, 212, 191, 0.30);
   }
 }
 
@@ -80,7 +162,7 @@
 
 /* Brand helper classes */
 .bg-brand {
-  background-color: var(--brand-primary);
+  background-color: var(--brand);
 }
 
 .bg-brand-hover:hover {
@@ -92,11 +174,46 @@
 }
 
 .text-brand {
-  color: var(--brand-primary);
+  color: var(--brand-accent);
 }
 
 .border-brand {
-  border-color: var(--brand-primary);
+  border-color: var(--brand-accent);
+}
+
+.ring-brand,
+.focus\:ring-brand:focus {
+  --tw-ring-color: var(--brand-accent);
+}
+
+/* Company Signature Theme Overrides (strictly excludes .keep-light paper sheets) */
+[data-company="VINMORE"] .bg-\[\#7F1D1D\]:not(.keep-light):not(.keep-light *) {
+  background-color: var(--brand);
+}
+
+[data-company="VINMORE"] .hover\:bg-\[\#991B1B\]:hover:not(.keep-light):not(.keep-light *) {
+  background-color: var(--brand-primary-hover);
+}
+
+[data-company="VINMORE"] .text-\[\#7F1D1D\]:not(.keep-light):not(.keep-light *) {
+  color: var(--brand-accent);
+}
+
+[data-company="VINMORE"] .border-\[\#7F1D1D\]:not(.keep-light):not(.keep-light *) {
+  border-color: var(--brand-accent);
+}
+
+[data-company="VINMORE"] .focus\:border-\[\#7F1D1D\]:focus:not(.keep-light):not(.keep-light *) {
+  border-color: var(--brand-accent);
+}
+
+[data-company="VINMORE"] .bg-brand\/10:not(.keep-light):not(.keep-light *),
+[data-company="VINMORE"] .bg-\[\#7F1D1D\]\/10:not(.keep-light):not(.keep-light *) {
+  background-color: var(--brand-tint);
+}
+
+[data-company="VINMORE"] .bg-brand\/5:not(.keep-light):not(.keep-light *) {
+  background-color: var(--brand-tint);
 }
 
 /* Subtle scrollbars */
@@ -123,15 +240,350 @@
   padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
+/* Strict paper protection for printed sheets & PNG Payment Advice slips */
+.keep-light,
+html.dark .keep-light {
+  background-color: #ffffff !important;
+  color: #111111 !important;
+  color-scheme: light !important;
+  --background: 0 0% 100% !important;
+  --foreground: 222.2 84% 4.9% !important;
+  --card: 0 0% 100% !important;
+  --card-foreground: 222.2 84% 4.9% !important;
+  --border: 214.3 31.8% 82% !important;
+  --input: 214.3 31.8% 82% !important;
+  --bg-canvas: #F8FAFC !important;
+  --bg-surface: #FFFFFF !important;
+  --border-subtle: #E2E8F0 !important;
+  --text-primary: #111111 !important;
+  --text-secondary: #475569 !important;
+}
+
+.keep-light img,
+html.dark .keep-light img {
+  filter: none !important;
+  opacity: 1 !important;
+  mix-blend-mode: normal !important;
+}
+
+/* Keep inner wrappers inside Payment Advice slips transparent so z-0 watermark is never occluded */
+#advice-preview-slip > *,
+#advice-export-slip > *,
+#printable-advice-slip > * {
+  background-color: transparent !important;
+}
+
+/* Obsidian / Linear-style Minimalist Dark Palette (Screen only, strictly excludes .keep-light) */
+@media screen {
+  html.dark {
+    color-scheme: dark;
+    background-color: #050505;
+  }
+
+  html.dark body {
+    background-color: #050505;
+    color: #FAFAFA;
+  }
+
+  /* 1. True Deep Neutral Elevation (No Blue-Slate Tint) */
+  html.dark .bg-\[\#F8FAFC\]:not(.keep-light):not(.keep-light *),
+  html.dark .bg-slate-50:not(.keep-light):not(.keep-light *) {
+    background-color: #050505;
+  }
+
+  html.dark [class^="bg-slate-50/"]:not(.keep-light):not(.keep-light *),
+  html.dark [class*=" bg-slate-50/"]:not(.keep-light):not(.keep-light *),
+  html.dark .bg-slate-100:not(.keep-light):not(.keep-light *),
+  html.dark [class^="bg-slate-100/"]:not(.keep-light):not(.keep-light *),
+  html.dark [class*=" bg-slate-100/"]:not(.keep-light):not(.keep-light *) {
+    background-color: #0A0A0C;
+  }
+
+  html.dark .bg-white:not(.keep-light):not(.keep-light *) {
+    background-color: #0E0E11;
+  }
+
+  html.dark [class^="bg-white/"]:not(.keep-light):not(.keep-light *),
+  html.dark [class*=" bg-white/"]:not(.keep-light):not(.keep-light *) {
+    background-color: rgba(14, 14, 17, 0.94);
+  }
+
+  html.dark .hover\:bg-slate-50:hover:not(.keep-light):not(.keep-light *),
+  html.dark [class*="hover:bg-slate-50/"]:hover:not(.keep-light):not(.keep-light *),
+  html.dark .hover\:bg-slate-100:hover:not(.keep-light):not(.keep-light *) {
+    background-color: #17171C;
+  }
+
+  html.dark .bg-slate-200:not(.keep-light):not(.keep-light *),
+  html.dark [class^="bg-slate-200/"]:not(.keep-light):not(.keep-light *),
+  html.dark [class*=" bg-slate-200/"]:not(.keep-light):not(.keep-light *) {
+    background-color: #1C1C22;
+  }
+
+  /* Dark Neutral Buttons / Active Toggles (Stand out cleanly from #0E0E11 cards) */
+  html.dark .bg-slate-900:not(.keep-light):not(.keep-light *) {
+    background-color: #27272A;
+    color: #FAFAFA;
+    border-color: #3F3F46;
+  }
+
+  /* 2. Ultra-Clean Minimalist Hairline Borders & Subtle Shadows */
+  html.dark .border-slate-100:not(.keep-light):not(.keep-light *),
+  html.dark .divide-slate-100:not(.keep-light):not(.keep-light *) > :not([hidden]) ~ :not([hidden]) {
+    border-color: #18181D;
+  }
+
+  html.dark .border-slate-200:not(.keep-light):not(.keep-light *),
+  html.dark [class^="border-slate-200/"]:not(.keep-light):not(.keep-light *),
+  html.dark [class*=" border-slate-200/"]:not(.keep-light):not(.keep-light *),
+  html.dark .divide-slate-200:not(.keep-light):not(.keep-light *) > :not([hidden]) ~ :not([hidden]) {
+    border-color: #222228;
+  }
+
+  html.dark .border-slate-300:not(.keep-light):not(.keep-light *),
+  html.dark .hover\:border-slate-300:hover:not(.keep-light):not(.keep-light *),
+  html.dark .hover\:border-slate-400:hover:not(.keep-light):not(.keep-light *) {
+    border-color: #2E2E36;
+  }
+
+  html.dark .shadow-sm:not(.keep-light):not(.keep-light *),
+  html.dark .shadow-xs:not(.keep-light):not(.keep-light *) {
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
+  }
+
+  html.dark .shadow-lg:not(.keep-light):not(.keep-light *),
+  html.dark .shadow-xl:not(.keep-light):not(.keep-light *),
+  html.dark .shadow-2xl:not(.keep-light):not(.keep-light *) {
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.85), 0 0 0 1px #27272F;
+  }
+
+  /* 3. Crisp High-Contrast Neutral Typography */
+  html.dark .text-slate-950:not(.keep-light):not(.keep-light *),
+  html.dark .text-slate-900:not(.keep-light):not(.keep-light *),
+  html.dark .hover\:text-slate-900:hover:not(.keep-light):not(.keep-light *) {
+    color: #FAFAFA;
+  }
+
+  html.dark .text-slate-800:not(.keep-light):not(.keep-light *),
+  html.dark .text-slate-700:not(.keep-light):not(.keep-light *),
+  html.dark .hover\:text-slate-800:hover:not(.keep-light):not(.keep-light *),
+  html.dark .hover\:text-slate-700:hover:not(.keep-light):not(.keep-light *) {
+    color: #D4D4D8;
+  }
+
+  html.dark .text-slate-600:not(.keep-light):not(.keep-light *),
+  html.dark .text-slate-500:not(.keep-light):not(.keep-light *) {
+    color: #8E8E98;
+  }
+
+  html.dark .text-slate-400:not(.keep-light):not(.keep-light *) {
+    color: #5E5E68;
+  }
+
+  /* 4. Recessed Dark Inputs, Selects & Textareas */
+  html.dark input:not([type='checkbox']):not([type='radio']):not(.keep-light):not(.keep-light *),
+  html.dark select:not(.keep-light):not(.keep-light *),
+  html.dark textarea:not(.keep-light):not(.keep-light *) {
+    background-color: #070709;
+    border-color: #27272F;
+    color: #FAFAFA;
+  }
+
+  html.dark input:not([type='checkbox']):not([type='radio']):not(.keep-light):not(.keep-light *):hover,
+  html.dark select:not(.keep-light):not(.keep-light *):hover,
+  html.dark textarea:not(.keep-light):not(.keep-light *):hover {
+    border-color: #3A3A46;
+  }
+
+  html.dark input:not(.keep-light):not(.keep-light *)::placeholder,
+  html.dark textarea:not(.keep-light):not(.keep-light *)::placeholder {
+    color: #63636E;
+  }
+
+  html.dark input:not([type='checkbox']):not([type='radio']):not(.keep-light):not(.keep-light *):focus,
+  html.dark select:not(.keep-light):not(.keep-light *):focus,
+  html.dark textarea:not(.keep-light):not(.keep-light *):focus {
+    border-color: var(--brand-primary-hover);
+    box-shadow: 0 0 0 2px var(--brand-ring);
+  }
+
+  /* 5. Refined Minimalist Status & Brand Accents */
+  html.dark .text-brand:not(.keep-light):not(.keep-light *),
+  html.dark .text-\[\#7F1D1D\]:not(.keep-light):not(.keep-light *) {
+    color: var(--brand-accent);
+  }
+
+  html.dark .bg-brand\/10:not(.keep-light):not(.keep-light *),
+  html.dark .bg-\[\#7F1D1D\]\/10:not(.keep-light):not(.keep-light *) {
+    background-color: var(--brand-tint);
+  }
+
+  html.dark .border-\[\#7F1D1D\]:not(.keep-light):not(.keep-light *),
+  html.dark .border-brand:not(.keep-light):not(.keep-light *) {
+    border-color: var(--brand-accent);
+  }
+
+  /* Emerald */
+  html.dark .bg-emerald-50:not(.keep-light):not(.keep-light *),
+  html.dark [class^="bg-emerald-50/"]:not(.keep-light):not(.keep-light *),
+  html.dark [class*=" bg-emerald-50/"]:not(.keep-light):not(.keep-light *),
+  html.dark .bg-emerald-100:not(.keep-light):not(.keep-light *),
+  html.dark .hover\:bg-emerald-100:hover:not(.keep-light):not(.keep-light *) {
+    background-color: rgba(16, 185, 129, 0.12);
+  }
+
+  html.dark .border-emerald-200:not(.keep-light):not(.keep-light *),
+  html.dark [class^="border-emerald-200/"]:not(.keep-light):not(.keep-light *),
+  html.dark [class*=" border-emerald-200/"]:not(.keep-light):not(.keep-light *),
+  html.dark .border-emerald-300:not(.keep-light):not(.keep-light *),
+  html.dark .hover\:border-emerald-200:hover:not(.keep-light):not(.keep-light *) {
+    border-color: rgba(16, 185, 129, 0.26);
+  }
+
+  html.dark .text-emerald-600:not(.keep-light):not(.keep-light *),
+  html.dark .text-emerald-700:not(.keep-light):not(.keep-light *),
+  html.dark .text-emerald-800:not(.keep-light):not(.keep-light *),
+  html.dark .text-emerald-900:not(.keep-light):not(.keep-light *) {
+    color: #34D399;
+  }
+
+  /* Amber */
+  html.dark .bg-amber-50:not(.keep-light):not(.keep-light *),
+  html.dark [class^="bg-amber-50/"]:not(.keep-light):not(.keep-light *),
+  html.dark [class*=" bg-amber-50/"]:not(.keep-light):not(.keep-light *),
+  html.dark .bg-amber-100:not(.keep-light):not(.keep-light *),
+  html.dark [class*="hover:bg-amber-100/"]:hover:not(.keep-light):not(.keep-light *) {
+    background-color: rgba(245, 158, 11, 0.12);
+  }
+
+  html.dark .border-amber-200:not(.keep-light):not(.keep-light *),
+  html.dark [class^="border-amber-200/"]:not(.keep-light):not(.keep-light *),
+  html.dark [class*=" border-amber-200/"]:not(.keep-light):not(.keep-light *),
+  html.dark .border-amber-300:not(.keep-light):not(.keep-light *) {
+    border-color: rgba(245, 158, 11, 0.26);
+  }
+
+  html.dark .text-amber-600:not(.keep-light):not(.keep-light *),
+  html.dark .text-amber-700:not(.keep-light):not(.keep-light *),
+  html.dark .text-amber-800:not(.keep-light):not(.keep-light *),
+  html.dark .text-amber-900:not(.keep-light):not(.keep-light *),
+  html.dark .text-amber-950:not(.keep-light):not(.keep-light *) {
+    color: #FBBF24;
+  }
+
+  /* Rose / Red */
+  html.dark .bg-rose-50:not(.keep-light):not(.keep-light *),
+  html.dark [class^="bg-rose-50/"]:not(.keep-light):not(.keep-light *),
+  html.dark [class*=" bg-rose-50/"]:not(.keep-light):not(.keep-light *),
+  html.dark .bg-rose-100:not(.keep-light):not(.keep-light *),
+  html.dark .bg-red-50:not(.keep-light):not(.keep-light *),
+  html.dark .bg-red-100:not(.keep-light):not(.keep-light *),
+  html.dark .hover\:bg-rose-50:hover:not(.keep-light):not(.keep-light *),
+  html.dark .hover\:bg-red-50:hover:not(.keep-light):not(.keep-light *) {
+    background-color: rgba(244, 63, 94, 0.12);
+  }
+
+  html.dark .border-rose-200:not(.keep-light):not(.keep-light *),
+  html.dark .border-rose-300:not(.keep-light):not(.keep-light *),
+  html.dark .border-red-200:not(.keep-light):not(.keep-light *),
+  html.dark .hover\:border-rose-200:hover:not(.keep-light):not(.keep-light *) {
+    border-color: rgba(244, 63, 94, 0.26);
+  }
+
+  html.dark .text-rose-600:not(.keep-light):not(.keep-light *),
+  html.dark .text-rose-700:not(.keep-light):not(.keep-light *),
+  html.dark .text-rose-800:not(.keep-light):not(.keep-light *),
+  html.dark .text-rose-900:not(.keep-light):not(.keep-light *),
+  html.dark .text-red-600:not(.keep-light):not(.keep-light *),
+  html.dark .text-red-700:not(.keep-light):not(.keep-light *) {
+    color: #FB7185;
+  }
+
+  /* Blue / Sky / Indigo */
+  html.dark .bg-blue-50:not(.keep-light):not(.keep-light *),
+  html.dark .bg-blue-100:not(.keep-light):not(.keep-light *),
+  html.dark .bg-sky-100:not(.keep-light):not(.keep-light *),
+  html.dark .bg-indigo-100:not(.keep-light):not(.keep-light *) {
+    background-color: rgba(59, 130, 246, 0.12);
+  }
+
+  html.dark .border-blue-200:not(.keep-light):not(.keep-light *),
+  html.dark .border-sky-200:not(.keep-light):not(.keep-light *),
+  html.dark .border-indigo-200:not(.keep-light):not(.keep-light *) {
+    border-color: rgba(59, 130, 246, 0.26);
+  }
+
+  html.dark .text-blue-700:not(.keep-light):not(.keep-light *),
+  html.dark .text-blue-800:not(.keep-light):not(.keep-light *),
+  html.dark .text-sky-800:not(.keep-light):not(.keep-light *),
+  html.dark .text-indigo-800:not(.keep-light):not(.keep-light *) {
+    color: #60A5FA;
+  }
+
+  /* Purple */
+  html.dark .bg-purple-50:not(.keep-light):not(.keep-light *),
+  html.dark .bg-purple-100:not(.keep-light):not(.keep-light *) {
+    background-color: rgba(168, 85, 247, 0.12);
+  }
+
+  html.dark .border-purple-200:not(.keep-light):not(.keep-light *) {
+    border-color: rgba(168, 85, 247, 0.26);
+  }
+
+  html.dark .text-purple-700:not(.keep-light):not(.keep-light *),
+  html.dark .text-purple-800:not(.keep-light):not(.keep-light *),
+  html.dark .text-purple-900:not(.keep-light):not(.keep-light *) {
+    color: #C084FC;
+  }
+
+  /* Dark Scrollbars */
+  html.dark ::-webkit-scrollbar-thumb {
+    background: #27272F;
+  }
+
+  html.dark ::-webkit-scrollbar-thumb:hover {
+    background: #3A3A46;
+  }
+}
+
 /* Dedicated A4 Print Stylesheet */
 @media print {
   @page {
     size: A4 portrait;
-    margin: 12mm;
+    margin: 0;
   }
 
+  @page history-ledger {
+    size: A4 landscape;
+    margin: 10mm;
+  }
+
+  html,
   body {
     background: #ffffff !important;
+    color: #111111 !important;
+    color-scheme: light !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    --background: 0 0% 100% !important;
+    --foreground: 0 0% 7% !important;
+    --border: 214.3 31.8% 82% !important;
+    --text-primary: #111111 !important;
+    --text-secondary: #475569 !important;
+  }
+
+  .keep-light,
+  .keep-light *,
+  #printable-sheet,
+  #printable-sheet * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  .keep-light img,
+  #printable-sheet img {
+    filter: none !important;
+    mix-blend-mode: normal !important;
   }
 
   .no-print {
@@ -142,26 +594,66 @@
     width: 100% !important;
     max-width: none !important;
     margin: 0 !important;
+    padding: 12mm !important;
+    border: none !important;
+    box-shadow: none !important;
+    background: #ffffff !important;
+  }
+
+  #printable-sheet.print-history-ledger {
+    page: history-ledger;
     padding: 0 !important;
-    border: none !important;
-    box-shadow: none !important;
+  }
+
+  #printable-sheet thead {
+    display: table-header-group;
+  }
+
+  #printable-sheet tfoot {
+    display: table-footer-group;
+  }
+
+  #printable-sheet tr {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  html:has(body.printing-advice),
+  body.printing-advice {
+    margin: 0 !important;
+    padding: 0 !important;
+    height: 100% !important;
+    overflow: hidden !important;
     background: #ffffff !important;
   }
-  body.printing-advice * {
-    visibility: hidden !important;
+
+  body.printing-advice > *:not(#printable-advice-slip) {
+    display: none !important;
   }
-  body.printing-advice #printable-advice-slip,
-  body.printing-advice #printable-advice-slip * {
-    visibility: visible !important;
-  }
+
   body.printing-advice #printable-advice-slip {
-    position: fixed !important;
-    left: 0 !important;
+    display: block !important;
+    position: absolute !important;
     top: 0 !important;
-    width: 100% !important;
-    max-width: 100% !important;
+    left: 0 !important;
+    width: 210mm !important;
+    height: 297mm !important;
+    min-height: 0 !important;
+    padding: 15mm 20mm 15mm 20mm !important;
+    margin: 0 !important;
+    box-sizing: border-box !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+    overflow: hidden !important;
     border: none !important;
     box-shadow: none !important;
     background: #ffffff !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  body.printing-advice #printable-advice-slip * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
   }
 }

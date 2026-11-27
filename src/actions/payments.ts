@@ -1,6 +1,7 @@
 'use server';
 
 import { createClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/admin';
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import {
@@ -9,18 +10,105 @@ import {
   rejectPaymentSchema,
   switchBankSchema,
   markPaidSchema,
+  settlePaymentBatchSchema,
   type CreatePaymentInput,
   type UpdateDraftPaymentInput,
   type MarkPaidInput,
+  type SettlePaymentBatchInput,
 } from '@/lib/validators';
-import type { ActionResult, AuditLog, Database, PaymentItem } from '@/types/database';
+import type { ActionResult, AuditLog, Database, PaymentBatch, PaymentItem } from '@/types/database';
 import { getCurrentUserContext } from '@/lib/auth';
 import { dispatchWorkflowNotification } from '@/actions/notifications';
-import { formatINR } from '@/lib/format';
+import { sendPushToUsers } from '@/lib/push';
+import { formatINR, getCurrentISTInfo, getTodayISTDateString, round2 } from '@/lib/format';
 
 type PaymentItemUpdate = Database['public']['Tables']['payment_items']['Update'];
 
 const uuidSchema = z.string().uuid('Valid ID is required');
+
+async function ensureSavedPaymentPurpose(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  companyId: string,
+  userId: string,
+  purposeLabel: string
+): Promise<void> {
+  const cleanLabel = purposeLabel.trim().slice(0, 80);
+  if (!companyId || !cleanLabel) return;
+  try {
+    const { data: existing } = await supabase
+      .from('payment_purposes')
+      .select('id')
+      .eq('company_id', companyId)
+      .ilike('label', cleanLabel)
+      .limit(1);
+
+    if (existing && existing.length > 0) return;
+
+    await supabase.from('payment_purposes').insert({
+      company_id: companyId,
+      label: cleanLabel,
+      created_by: userId,
+    });
+  } catch {
+    // Non-blocking: never fail payment creation/update if purpose auto-save fails
+  }
+}
+
+async function syncReminderCompletionOnTransition(params: {
+  companyId: string;
+  reminderId: string | null | undefined;
+  action: 'MARK_DONE' | 'REOPEN_IF_NO_ACTIVE';
+}): Promise<void> {
+  const { companyId, reminderId, action } = params;
+  if (!companyId || !reminderId) return;
+
+  try {
+    const db =
+      process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY
+        ? createAdminClient()
+        : await createClient();
+
+    const { yearMonth, monthStartIso, nextMonthStartIso } = getCurrentISTInfo();
+
+    if (action === 'MARK_DONE') {
+      await db
+        .from('recurring_reminders')
+        .update({
+          last_completed_month: yearMonth,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', reminderId)
+        .eq('company_id', companyId);
+      revalidatePath('/reminders');
+      return;
+    }
+
+    const { data: activeSiblings } = await db
+      .from('payment_items')
+      .select('id')
+      .eq('company_id', companyId)
+      .eq('recurring_reminder_id', reminderId)
+      .gte('created_at', monthStartIso)
+      .lt('created_at', nextMonthStartIso)
+      .not('status', 'in', '("REJECTED","CANCELLED")')
+      .limit(1);
+
+    if (!activeSiblings || activeSiblings.length === 0) {
+      await db
+        .from('recurring_reminders')
+        .update({
+          last_completed_month: null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', reminderId)
+        .eq('company_id', companyId)
+        .eq('last_completed_month', yearMonth);
+      revalidatePath('/reminders');
+    }
+  } catch (err) {
+    console.warn('[Reminders] Sync completion transition failed:', err);
+  }
+}
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 MB
 const ALLOWED_MIME_TYPES = [
@@ -237,7 +325,22 @@ export async function createPayment(
     source_bank_id,
     remarks,
     invoice_file_path,
+    recurring_reminder_id,
   } = parsed.data;
+
+  // Validate reminder belongs to the active company if provided
+  let verifiedReminderId: string | null = null;
+  if (recurring_reminder_id) {
+    const { data: reminderCheck } = await supabase
+      .from('recurring_reminders')
+      .select('id')
+      .eq('id', recurring_reminder_id)
+      .eq('company_id', company_id)
+      .maybeSingle();
+    if (reminderCheck?.id) {
+      verifiedReminderId = reminderCheck.id;
+    }
+  }
 
   // Safe rounding to 2 decimal places
   const cleanAmount = Math.round(amount * 100) / 100;
@@ -262,6 +365,7 @@ export async function createPayment(
       source_bank_id,
       invoice_file_path: invoice_file_path || null,
       remarks: remarks?.trim() || null,
+      recurring_reminder_id: verifiedReminderId,
       status: initialStatus,
       created_by: user.id,
       submitted_at: isDirectSubmit ? nowIso : null,
@@ -278,13 +382,36 @@ export async function createPayment(
     };
   }
 
+  await ensureSavedPaymentPurpose(supabase, company_id, user.id, purpose);
+
+  if (isDirectSubmit && company_id && verifiedReminderId) {
+    await syncReminderCompletionOnTransition({
+      companyId: company_id,
+      reminderId: verifiedReminderId,
+      action: 'MARK_DONE',
+    });
+  } else if (verifiedReminderId) {
+    revalidatePath('/reminders');
+  }
+
   if (initialStatus === 'PENDING_VERIFICATION' && company_id) {
     const partyName =
       payment.vendor?.party_name || payment.vendor?.name || 'Vendor';
-    void dispatchWorkflowNotification({
+    await dispatchWorkflowNotification({
       companyId: company_id,
       paymentItemId: payment.id,
       eventType: 'SUBMITTED_FOR_VERIFICATION',
+      actorId: user.id,
+      partyName,
+      netPayable: Number(payment.net_payable || cleanAmount - cleanTds),
+    });
+  } else if (initialStatus === 'PENDING_APPROVAL' && company_id) {
+    const partyName =
+      payment.vendor?.party_name || payment.vendor?.name || 'Vendor';
+    await dispatchWorkflowNotification({
+      companyId: company_id,
+      paymentItemId: payment.id,
+      eventType: 'VERIFIED_FOR_APPROVAL',
       actorId: user.id,
       partyName,
       netPayable: Number(payment.net_payable || cleanAmount - cleanTds),
@@ -294,6 +421,7 @@ export async function createPayment(
   revalidatePath('/payments');
   revalidatePath('/verify');
   revalidatePath('/approvals');
+  revalidatePath('/tracker');
   return { success: true, data: payment };
 }
 
@@ -346,11 +474,14 @@ export async function updateDraftPayment(
     vendor_id,
     invoice_ref,
     purpose,
+    payment_type,
+    payment_mode,
     amount,
     tds = 0,
     source_bank_id,
     remarks,
     invoice_file_path,
+    recurring_reminder_id,
   } = parsed.data;
 
   // Verify payment exists and belongs to activeCompany in DRAFT status
@@ -361,7 +492,7 @@ export async function updateDraftPayment(
 
   const { data: existing, error: fetchError } = await supabase
     .from('payment_items')
-    .select('id, company_id, status')
+    .select('id, company_id, status, recurring_reminder_id')
     .eq('id', id)
     .eq('company_id', activeCompany.id)
     .single();
@@ -377,6 +508,21 @@ export async function updateDraftPayment(
     };
   }
 
+  let nextReminderId: string | null = existing.recurring_reminder_id ?? null;
+  if (recurring_reminder_id !== undefined) {
+    if (recurring_reminder_id) {
+      const { data: reminderCheck } = await supabase
+        .from('recurring_reminders')
+        .select('id')
+        .eq('id', recurring_reminder_id)
+        .eq('company_id', activeCompany.id)
+        .maybeSingle();
+      nextReminderId = reminderCheck?.id || null;
+    } else {
+      nextReminderId = null;
+    }
+  }
+
   const cleanAmount = Math.round(amount * 100) / 100;
   const cleanTds = Math.round((tds || 0) * 100) / 100;
 
@@ -386,11 +532,14 @@ export async function updateDraftPayment(
     vendor_id,
     invoice_ref: invoice_ref.trim(),
     purpose: purpose.trim(),
+    payment_type: payment_type || 'AGAINST_BILL',
+    payment_mode: payment_mode || 'NEFT_RTGS',
     amount: cleanAmount,
     tds: cleanTds,
     source_bank_id,
     invoice_file_path: invoice_file_path || null,
     remarks: remarks?.trim() || null,
+    recurring_reminder_id: nextReminderId,
     updated_at: new Date().toISOString(),
   };
 
@@ -418,7 +567,7 @@ export async function updateDraftPayment(
   if (targetStatus === 'PENDING_VERIFICATION' && updated.company_id) {
     const partyName =
       updated.vendor?.party_name || updated.vendor?.name || 'Vendor';
-    void dispatchWorkflowNotification({
+    await dispatchWorkflowNotification({
       companyId: updated.company_id,
       paymentItemId: updated.id,
       eventType: 'SUBMITTED_FOR_VERIFICATION',
@@ -426,11 +575,39 @@ export async function updateDraftPayment(
       partyName,
       netPayable: Number(updated.net_payable || cleanAmount - cleanTds),
     });
+  } else if (targetStatus === 'PENDING_APPROVAL' && updated.company_id) {
+    const partyName =
+      updated.vendor?.party_name || updated.vendor?.name || 'Vendor';
+    await dispatchWorkflowNotification({
+      companyId: updated.company_id,
+      paymentItemId: updated.id,
+      eventType: 'VERIFIED_FOR_APPROVAL',
+      actorId: user.id,
+      partyName,
+      netPayable: Number(updated.net_payable || cleanAmount - cleanTds),
+    });
+  }
+
+  await ensureSavedPaymentPurpose(supabase, activeCompany.id, user.id, purpose);
+
+  if (
+    (targetStatus === 'PENDING_VERIFICATION' || targetStatus === 'PENDING_APPROVAL') &&
+    updated.company_id &&
+    nextReminderId
+  ) {
+    await syncReminderCompletionOnTransition({
+      companyId: updated.company_id,
+      reminderId: nextReminderId,
+      action: 'MARK_DONE',
+    });
+  } else if (nextReminderId || existing.recurring_reminder_id) {
+    revalidatePath('/reminders');
   }
 
   revalidatePath('/payments');
   revalidatePath('/verify');
   revalidatePath('/approvals');
+  revalidatePath('/tracker');
   return { success: true, data: updated };
 }
 
@@ -479,7 +656,7 @@ export async function submitPayment(
 
   const { data: existing, error: fetchError } = await supabase
     .from('payment_items')
-    .select('id, company_id, status')
+    .select('id, company_id, status, recurring_reminder_id')
     .eq('id', paymentId)
     .eq('company_id', activeCompany.id)
     .single();
@@ -520,7 +697,7 @@ export async function submitPayment(
   if (updated.company_id) {
     const partyName =
       updated.vendor?.party_name || updated.vendor?.name || 'Vendor';
-    void dispatchWorkflowNotification({
+    await dispatchWorkflowNotification({
       companyId: updated.company_id,
       paymentItemId: updated.id,
       eventType: 'SUBMITTED_FOR_VERIFICATION',
@@ -530,9 +707,18 @@ export async function submitPayment(
     });
   }
 
+  if (updated.company_id && existing.recurring_reminder_id) {
+    await syncReminderCompletionOnTransition({
+      companyId: updated.company_id,
+      reminderId: existing.recurring_reminder_id,
+      action: 'MARK_DONE',
+    });
+  }
+
   revalidatePath('/payments');
   revalidatePath('/verify');
   revalidatePath('/approvals');
+  revalidatePath('/tracker');
   return { success: true, data: updated };
 }
 
@@ -571,7 +757,7 @@ export async function verifyPayment(
 
   const { data: existing, error: fetchError } = await supabase
     .from('payment_items')
-    .select('id, company_id, status')
+    .select('id, company_id, status, recurring_reminder_id')
     .eq('id', paymentId)
     .eq('company_id', activeCompany.id)
     .single();
@@ -613,7 +799,7 @@ export async function verifyPayment(
   if (updated.company_id) {
     const partyName =
       updated.vendor?.party_name || updated.vendor?.name || 'Vendor';
-    void dispatchWorkflowNotification({
+    await dispatchWorkflowNotification({
       companyId: updated.company_id,
       paymentItemId: updated.id,
       eventType: 'VERIFIED_FOR_APPROVAL',
@@ -623,10 +809,15 @@ export async function verifyPayment(
     });
   }
 
+  if (existing.recurring_reminder_id) {
+    revalidatePath('/reminders');
+  }
+
   revalidatePath('/verify');
   revalidatePath('/approvals');
   revalidatePath('/payments');
   revalidatePath('/history');
+  revalidatePath('/tracker');
   return { success: true, data: updated as PaymentItem };
 }
 
@@ -665,7 +856,7 @@ export async function deleteDraftPayment(
   ) {
     return {
       success: false,
-      error: 'Access denied: Only Accountants or Owners can delete drafts.',
+      error: 'Access denied: Only Accountants or Approvers can delete drafts.',
     };
   }
 
@@ -676,7 +867,7 @@ export async function deleteDraftPayment(
 
   const { data: existing, error: fetchError } = await supabase
     .from('payment_items')
-    .select('id, company_id, status')
+    .select('id, company_id, status, recurring_reminder_id')
     .eq('id', paymentId)
     .eq('company_id', activeCompany.id)
     .single();
@@ -704,8 +895,13 @@ export async function deleteDraftPayment(
     };
   }
 
+  if (existing.recurring_reminder_id) {
+    revalidatePath('/reminders');
+  }
+
   revalidatePath('/payments');
   revalidatePath('/approvals');
+  revalidatePath('/tracker');
   return { success: true, data: undefined };
 }
 
@@ -744,7 +940,7 @@ export async function cancelPayment(
   ) {
     return {
       success: false,
-      error: 'Access denied: Only Accountants or Owners can cancel payments.',
+      error: 'Access denied: Only Accountants or Approvers can cancel payments.',
     };
   }
 
@@ -755,7 +951,7 @@ export async function cancelPayment(
 
   const { data: existing, error: fetchError } = await supabase
     .from('payment_items')
-    .select('id, company_id, status')
+    .select('id, company_id, status, recurring_reminder_id')
     .eq('id', paymentId)
     .eq('company_id', activeCompany.id)
     .single();
@@ -792,8 +988,17 @@ export async function cancelPayment(
     };
   }
 
+  if (existing.recurring_reminder_id) {
+    await syncReminderCompletionOnTransition({
+      companyId: existing.company_id || activeCompany.id,
+      reminderId: existing.recurring_reminder_id,
+      action: 'REOPEN_IF_NO_ACTIVE',
+    });
+  }
+
   revalidatePath('/payments');
   revalidatePath('/approvals');
+  revalidatePath('/tracker');
   return { success: true, data: updated };
 }
 
@@ -831,7 +1036,7 @@ export async function ownerApprovePayment(
 
   const { data: existing, error: fetchError } = await supabase
     .from('payment_items')
-    .select('id, company_id, status')
+    .select('id, company_id, status, recurring_reminder_id')
     .eq('id', paymentId)
     .eq('company_id', activeCompany.id)
     .single();
@@ -877,7 +1082,7 @@ export async function ownerApprovePayment(
   if (updated.company_id) {
     const partyName =
       updated.vendor?.party_name || updated.vendor?.name || 'Vendor';
-    void dispatchWorkflowNotification({
+    await dispatchWorkflowNotification({
       companyId: updated.company_id,
       paymentItemId: updated.id,
       eventType: 'APPROVED',
@@ -888,10 +1093,15 @@ export async function ownerApprovePayment(
     });
   }
 
+  if (existing.recurring_reminder_id) {
+    revalidatePath('/reminders');
+  }
+
   revalidatePath('/approvals');
   revalidatePath('/verify');
   revalidatePath('/payments');
   revalidatePath('/history');
+  revalidatePath('/tracker');
   return { success: true, data: updated as PaymentItem };
 }
 
@@ -955,22 +1165,32 @@ export async function bulkApprovePayments(
     return { success: false, error: updateError.message || 'Failed to bulk approve payments.' };
   }
 
-  void dispatchWorkflowNotification({
+  const creatorIds = Array.from(
+    new Set(
+      eligibleItems
+        .map((item) => item.created_by)
+        .filter((id): id is string => Boolean(id))
+    )
+  );
+  const countLabel = `${eligibleIds.length} payment${eligibleIds.length === 1 ? '' : 's'}`;
+
+  await dispatchWorkflowNotification({
     companyId: activeCompany.id,
     paymentItemId: eligibleIds[0] || null,
     eventType: 'APPROVED',
     actorId: user.id,
-    partyName: `${eligibleIds.length} payments`,
+    partyName: countLabel,
     netPayable: totalApprovedNet,
-    customTitle: `[${activeCompany.code}] Batch Approved (${eligibleIds.length} payments)`,
-    customBody: `${eligibleIds.length} payment${eligibleIds.length === 1 ? '' : 's'
-      } totaling ${formatINR(totalApprovedNet)} approved and ready to pay.`,
+    createdByIds: creatorIds,
+    customTitle: `[${activeCompany.code}] ${countLabel} approved — Ready to Pay`,
+    customBody: `${countLabel} (${formatINR(totalApprovedNet)}) approved — Ready to Pay.`,
   });
 
   revalidatePath('/approvals');
   revalidatePath('/verify');
   revalidatePath('/payments');
   revalidatePath('/history');
+  revalidatePath('/tracker');
   return { success: true, data: { count: eligibleIds.length, approvedIds: eligibleIds } };
 }
 
@@ -1004,7 +1224,7 @@ export async function ownerHoldPayment(
 
   const { data: existing, error: fetchError } = await supabase
     .from('payment_items')
-    .select('id, company_id, status')
+    .select('id, company_id, status, recurring_reminder_id')
     .eq('id', paymentId)
     .eq('company_id', activeCompany.id)
     .single();
@@ -1045,7 +1265,7 @@ export async function ownerHoldPayment(
   if (newStatus === 'ON_HOLD' && updated.company_id) {
     const partyName =
       updated.vendor?.party_name || updated.vendor?.name || 'Vendor';
-    void dispatchWorkflowNotification({
+    await dispatchWorkflowNotification({
       companyId: updated.company_id,
       paymentItemId: updated.id,
       eventType: 'HELD',
@@ -1056,9 +1276,14 @@ export async function ownerHoldPayment(
     });
   }
 
+  if (existing.recurring_reminder_id) {
+    revalidatePath('/reminders');
+  }
+
   revalidatePath('/approvals');
   revalidatePath('/payments');
   revalidatePath('/history');
+  revalidatePath('/tracker');
   return { success: true, data: updated as PaymentItem };
 }
 
@@ -1106,7 +1331,7 @@ export async function ownerRejectPayment(
 
   const { data: existing, error: fetchError } = await supabase
     .from('payment_items')
-    .select('id, company_id, status')
+    .select('id, company_id, status, recurring_reminder_id')
     .eq('id', paymentId)
     .eq('company_id', activeCompany.id)
     .single();
@@ -1152,7 +1377,7 @@ export async function ownerRejectPayment(
   if (updated.company_id) {
     const partyName =
       updated.vendor?.party_name || updated.vendor?.name || 'Vendor';
-    void dispatchWorkflowNotification({
+    await dispatchWorkflowNotification({
       companyId: updated.company_id,
       paymentItemId: updated.id,
       eventType: 'REJECTED',
@@ -1164,10 +1389,19 @@ export async function ownerRejectPayment(
     });
   }
 
+  if (existing.recurring_reminder_id) {
+    await syncReminderCompletionOnTransition({
+      companyId: existing.company_id || activeCompany.id,
+      reminderId: existing.recurring_reminder_id,
+      action: 'REOPEN_IF_NO_ACTIVE',
+    });
+  }
+
   revalidatePath('/approvals');
   revalidatePath('/verify');
   revalidatePath('/payments');
   revalidatePath('/history');
+  revalidatePath('/tracker');
   return { success: true, data: updated as PaymentItem };
 }
 
@@ -1208,7 +1442,7 @@ export async function ownerSwitchBank(
 
   const { data: existing, error: fetchError } = await supabase
     .from('payment_items')
-    .select('id, company_id, status')
+    .select('id, company_id, status, recurring_reminder_id')
     .eq('id', paymentId)
     .eq('company_id', activeCompany.id)
     .single();
@@ -1260,10 +1494,15 @@ export async function ownerSwitchBank(
     };
   }
 
+  if (existing.recurring_reminder_id) {
+    revalidatePath('/reminders');
+  }
+
   revalidatePath('/approvals');
   revalidatePath('/verify');
   revalidatePath('/payments');
   revalidatePath('/history');
+  revalidatePath('/tracker');
   return { success: true, data: updated as PaymentItem };
 }
 
@@ -1416,7 +1655,7 @@ export async function markPaymentPaid(
 
   const { data: existing, error: fetchError } = await supabase
     .from('payment_items')
-    .select('id, company_id, status, payment_mode, remarks')
+    .select('id, company_id, status, payment_mode, remarks, recurring_reminder_id')
     .eq('id', payment_id)
     .eq('company_id', activeCompany.id)
     .single();
@@ -1434,6 +1673,7 @@ export async function markPaymentPaid(
 
   const mode = (existing.payment_mode || parsed.data.payment_mode || 'NEFT_RTGS') as
     | 'NEFT_RTGS'
+    | 'IMPS'
     | 'CHEQUE';
 
   const nowIso = new Date().toISOString();
@@ -1445,19 +1685,20 @@ export async function markPaymentPaid(
     updated_at: nowIso,
   };
 
-  if (mode === 'NEFT_RTGS') {
+  if (mode === 'NEFT_RTGS' || mode === 'IMPS') {
+    const modeText = mode === 'IMPS' ? 'IMPS' : 'NEFT/RTGS';
     const cleanUtr = (utr_number || '').trim().toUpperCase();
     if (!cleanUtr) {
       return {
         success: false,
-        error: 'UTR / Payment Reference Number is required for NEFT/RTGS payments.',
+        error: `UTR / Payment Reference Number is required for ${modeText} payments.`,
       };
     }
 
     if (!receipt_file_path || !receipt_file_path.trim()) {
       return {
         success: false,
-        error: 'Bank Acknowledgement PDF / Receipt upload is required for NEFT/RTGS payments.',
+        error: `Bank Acknowledgement PDF / Receipt upload is required for ${modeText} payments.`,
       };
     }
 
@@ -1542,8 +1783,17 @@ export async function markPaymentPaid(
     return { success: false, error: 'Failed to mark payment as Paid.' };
   }
 
+  if (existing.recurring_reminder_id) {
+    await syncReminderCompletionOnTransition({
+      companyId: existing.company_id || activeCompany.id,
+      reminderId: existing.recurring_reminder_id,
+      action: 'MARK_DONE',
+    });
+  }
+
   revalidatePath('/payments');
   revalidatePath('/approvals');
+  revalidatePath('/tracker');
   revalidatePath('/audit');
   revalidatePath('/history');
   revalidatePath('/print');
@@ -1551,6 +1801,366 @@ export async function markPaymentPaid(
 }
 
 export const markPaidWithUtr = markPaymentPaid;
+
+/**
+ * Batch-settle multiple APPROVED payments with a single combined Bank Receipt PDF/Image.
+ * Creates a public.payment_batches record (e.g., BATCH-20261127-01), validates all UTRs/Cheques
+ * in pre-flight before mutating, transitions all items to PAID linked via batch_id,
+ * records audit logs, and dispatches grouped notifications + Web Push to Approver/Verifier/Auditor.
+ */
+export async function settlePaymentBatch(
+  input: SettlePaymentBatchInput
+): Promise<ActionResult<{ batch: PaymentBatch; payments: PaymentItem[] }>> {
+  const parsed = settlePaymentBatchSchema.safeParse(input);
+  if (!parsed.success) {
+    return {
+      success: false,
+      error: parsed.error.issues[0]?.message || 'Invalid batch settlement data.',
+    };
+  }
+
+  const supabase = await createClient();
+  const { user, profile, activeCompany } = await getCurrentUserContext();
+
+  if (!user || !profile || !profile.is_active) {
+    return { success: false, error: 'Unauthorized. Please sign in.' };
+  }
+
+  if (profile.role !== 'PREPARER' && !profile.is_admin) {
+    return {
+      success: false,
+      error: 'Access denied: Only Preparers or Administrators can settle payment batches.',
+    };
+  }
+
+  if (!activeCompany) {
+    return { success: false, error: 'Active company workspace could not be determined.' };
+  }
+
+  const batchDate = parsed.data.batch_date || getTodayISTDateString();
+  const receiptFilePath = parsed.data.receipt_file_path.trim();
+  const labelNote = parsed.data.batch_label?.trim() || '';
+  const bodyNote = parsed.data.notes?.trim() || '';
+  const combinedNotes =
+    labelNote && bodyNote
+      ? `${labelNote} — ${bodyNote}`
+      : labelNote || bodyNote || null;
+
+  const requestedItems = parsed.data.items;
+  const requestedIds = requestedItems.map((i) => i.payment_id);
+
+  if (new Set(requestedIds).size !== requestedIds.length) {
+    return { success: false, error: 'Duplicate payment items found in batch selection.' };
+  }
+
+  // 1. Pre-flight: Fetch & verify every requested payment belongs to activeCompany and is APPROVED
+  const { data: fetchedItems, error: fetchError } = await supabase
+    .from('payment_items')
+    .select(
+      'id, company_id, status, payment_mode, source_bank_id, net_payable, invoice_ref, remarks, recurring_reminder_id'
+    )
+    .eq('company_id', activeCompany.id)
+    .in('id', requestedIds);
+
+  if (fetchError) {
+    return { success: false, error: fetchError.message || 'Failed to validate batch items.' };
+  }
+
+  if (!fetchedItems || fetchedItems.length !== requestedItems.length) {
+    return {
+      success: false,
+      error: 'One or more selected payments could not be found in the active company.',
+    };
+  }
+
+  const itemById = new Map(fetchedItems.map((p) => [p.id, p]));
+  const seenBatchUtrs = new Map<string, string>();
+  const resolvedItemUpdates: Array<{
+    payment_id: string;
+    payment_mode: 'NEFT_RTGS' | 'IMPS' | 'CHEQUE';
+    utr_number: string | null;
+    cheque_number: string | null;
+    cheque_date: string | null;
+    existing_remarks: string | null;
+    recurring_reminder_id: string | null;
+  }> = [];
+
+  for (const itemInput of requestedItems) {
+    const dbItem = itemById.get(itemInput.payment_id);
+    if (!dbItem) {
+      return { success: false, error: 'Invalid payment item in batch.' };
+    }
+    if (dbItem.status !== 'APPROVED') {
+      return {
+        success: false,
+        error: `Payment "${dbItem.invoice_ref}" is in '${dbItem.status}' status. Only APPROVED payments can be batch-settled.`,
+      };
+    }
+
+    const mode = (dbItem.payment_mode || 'NEFT_RTGS') as 'NEFT_RTGS' | 'IMPS' | 'CHEQUE';
+
+    if (mode === 'NEFT_RTGS' || mode === 'IMPS') {
+      const cleanUtr = (itemInput.utr_number || '').trim().toUpperCase();
+      if (!cleanUtr) {
+        return {
+          success: false,
+          error: `UTR / Reference Number is required for invoice "${dbItem.invoice_ref}".`,
+        };
+      }
+      if (seenBatchUtrs.has(cleanUtr)) {
+        return {
+          success: false,
+          error: `Duplicate UTR "${cleanUtr}" entered within this batch (invoices "${seenBatchUtrs.get(cleanUtr)}" and "${dbItem.invoice_ref}").`,
+        };
+      }
+      seenBatchUtrs.set(cleanUtr, dbItem.invoice_ref || dbItem.id);
+
+      resolvedItemUpdates.push({
+        payment_id: dbItem.id,
+        payment_mode: mode,
+        utr_number: cleanUtr,
+        cheque_number: null,
+        cheque_date: null,
+        existing_remarks: dbItem.remarks ?? null,
+        recurring_reminder_id: dbItem.recurring_reminder_id ?? null,
+      });
+    } else {
+      const cleanChequeNo = (itemInput.cheque_number || '').trim();
+      const cleanChequeDate = (itemInput.cheque_date || '').trim() || batchDate;
+      if (!cleanChequeNo) {
+        return {
+          success: false,
+          error: `Cheque Number is required for invoice "${dbItem.invoice_ref}".`,
+        };
+      }
+      resolvedItemUpdates.push({
+        payment_id: dbItem.id,
+        payment_mode: mode,
+        utr_number: null,
+        cheque_number: cleanChequeNo,
+        cheque_date: cleanChequeDate,
+        existing_remarks: dbItem.remarks ?? null,
+        recurring_reminder_id: dbItem.recurring_reminder_id ?? null,
+      });
+    }
+  }
+
+  // 2. Pre-flight: Check database for any existing duplicate UTRs across all payments
+  const batchUtrList = Array.from(seenBatchUtrs.keys());
+  if (batchUtrList.length > 0) {
+    const { data: existingUtrRows, error: utrCheckError } = await supabase
+      .from('payment_items')
+      .select('id, utr_number, invoice_ref')
+      .in('utr_number', batchUtrList);
+
+    if (utrCheckError) {
+      return { success: false, error: utrCheckError.message || 'Failed to validate UTR uniqueness.' };
+    }
+
+    const conflicting = (existingUtrRows || []).find(
+      (row) => !requestedIds.includes(row.id)
+    );
+    if (conflicting) {
+      return {
+        success: false,
+        error: `UTR "${conflicting.utr_number}" is already recorded on invoice "${conflicting.invoice_ref}". Please enter unique UTRs.`,
+      };
+    }
+  }
+
+  // 3. Compute auto-incrementing unique batch_code: BATCH-YYYYMMDD-01, -02, ...
+  const dateCompact = batchDate.replace(/-/g, '');
+  const codePrefix = `BATCH-${dateCompact}-`;
+  const { data: existingBatches } = await supabase
+    .from('payment_batches')
+    .select('batch_code')
+    .eq('company_id', activeCompany.id)
+    .like('batch_code', `${codePrefix}%`);
+
+  let maxSeq = 0;
+  for (const row of existingBatches || []) {
+    const suffix = row.batch_code.slice(codePrefix.length);
+    const num = parseInt(suffix, 10);
+    if (Number.isFinite(num) && num > maxSeq) {
+      maxSeq = num;
+    }
+  }
+  const batchCode = `${codePrefix}${String(maxSeq + 1).padStart(2, '0')}`;
+
+  // Determine shared source_bank_id (or null if multi-bank)
+  const bankIds = Array.from(new Set(fetchedItems.map((p) => p.source_bank_id).filter(Boolean)));
+  const sharedSourceBankId = bankIds.length === 1 ? bankIds[0] : null;
+  const totalAmount = round2(
+    fetchedItems.reduce((sum, p) => sum + Number(p.net_payable || 0), 0)
+  );
+
+  // 4. Create the payment_batches record
+  const { data: createdBatch, error: batchInsertError } = await supabase
+    .from('payment_batches')
+    .insert({
+      company_id: activeCompany.id,
+      batch_code: batchCode,
+      batch_date: batchDate,
+      source_bank_id: sharedSourceBankId,
+      receipt_file_path: receiptFilePath,
+      item_count: fetchedItems.length,
+      total_amount: totalAmount,
+      notes: combinedNotes,
+      audit_status: 'PENDING',
+      created_by: user.id,
+    })
+    .select('*, source_bank:company_banks(*), creator:profiles!created_by(id, full_name, role)')
+    .single();
+
+  if (batchInsertError || !createdBatch) {
+    return {
+      success: false,
+      error: batchInsertError?.message || 'Failed to create batch settlement record.',
+    };
+  }
+
+  // 5. Transition every item in the batch to PAID linked to createdBatch.id
+  const nowIso = new Date().toISOString();
+  const updatedPayments: PaymentItem[] = [];
+
+  for (const upd of resolvedItemUpdates) {
+    const { data: updatedItem, error: itemError } = await supabase
+      .from('payment_items')
+      .update({
+        status: 'PAID',
+        batch_id: createdBatch.id,
+        utr_number: upd.utr_number,
+        cheque_number: upd.cheque_number,
+        cheque_date: upd.cheque_date,
+        receipt_file_path: receiptFilePath,
+        paid_by: user.id,
+        paid_at: nowIso,
+        updated_at: nowIso,
+      })
+      .eq('id', upd.payment_id)
+      .eq('company_id', activeCompany.id)
+      .eq('status', 'APPROVED')
+      .select(
+        '*, vendor:vendors(id, name, party_name, beneficiary_name, account_number, ifsc_code, whatsapp_number, remarks), source_bank:company_banks(id, short_name, full_name, short_code, bank_name, account_number_masked, account_mask), payer:profiles!paid_by(id, full_name, role), batch:payment_batches(*)'
+      )
+      .single();
+
+    if (itemError || !updatedItem) {
+      const msg =
+        itemError?.code === '23505' || itemError?.message?.toLowerCase().includes('utr')
+          ? `Duplicate UTR "${upd.utr_number}" detected during settlement.`
+          : itemError?.message || 'Failed to settle one of the items in the batch.';
+      return { success: false, error: msg };
+    }
+
+    updatedPayments.push(updatedItem as PaymentItem);
+  }
+
+  // 6. Sync any linked recurring reminders
+  const reminderIds = Array.from(
+    new Set(
+      resolvedItemUpdates
+        .map((r) => r.recurring_reminder_id)
+        .filter((id): id is string => Boolean(id))
+    )
+  );
+  await Promise.all(
+    reminderIds.map((reminderId) =>
+      syncReminderCompletionOnTransition({
+        companyId: activeCompany.id,
+        reminderId,
+        action: 'MARK_DONE',
+      })
+    )
+  );
+
+  // 7. Insert batch audit log + dispatch grouped notifications & Web Push
+  try {
+    const db =
+      process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY
+        ? createAdminClient()
+        : supabase;
+
+    await db.from('audit_logs').insert({
+      table_name: 'payment_batches',
+      record_id: createdBatch.id,
+      company_id: activeCompany.id,
+      action: 'BATCH_SETTLED',
+      new_data: {
+        batch_code: createdBatch.batch_code,
+        batch_date: createdBatch.batch_date,
+        item_count: createdBatch.item_count,
+        total_amount: createdBatch.total_amount,
+        payment_ids: requestedIds,
+      },
+      changed_by: user.id,
+    });
+
+    if (process.env.SUPABASE_SERVICE_ROLE_KEY) {
+      const admin = createAdminClient();
+      const [profilesRes, accessRes] = await Promise.all([
+        admin
+          .from('profiles')
+          .select('id, role, is_admin, is_active')
+          .eq('is_active', true),
+        admin
+          .from('user_company_access')
+          .select('user_id')
+          .eq('company_id', activeCompany.id),
+      ]);
+
+      const companyUserIds = new Set((accessRes.data || []).map((r) => r.user_id));
+      const recipientIds = (profilesRes.data || [])
+        .filter((p) => {
+          if (p.id === user.id) return false;
+          if (!['APPROVER', 'VERIFIER', 'AUDITOR'].includes(p.role)) return false;
+          return p.is_admin || companyUserIds.has(p.id);
+        })
+        .map((p) => p.id);
+
+      if (recipientIds.length > 0) {
+        const companyCode = activeCompany.code || 'DESK';
+        const title = `[${companyCode}] Batch ${createdBatch.batch_code} Settled`;
+        const body = `Batch ${createdBatch.batch_code} Settled: ${createdBatch.item_count} payment${createdBatch.item_count === 1 ? '' : 's'} (${formatINR(createdBatch.total_amount)})`;
+        const actionUrl = `/audit?batch=${encodeURIComponent(createdBatch.id)}`;
+
+        await admin.from('notifications').insert(
+          recipientIds.map((recipientId) => ({
+            company_id: activeCompany.id,
+            recipient_user_id: recipientId,
+            payment_item_id: updatedPayments[0]?.id || null,
+            action_url: actionUrl,
+            event_type: 'BATCH_SETTLED' as const,
+            title,
+            body,
+            is_read: false,
+          }))
+        );
+
+        await Promise.race([
+          sendPushToUsers(recipientIds, { title, body, url: actionUrl }),
+          new Promise<void>((resolve) => setTimeout(resolve, 2500)),
+        ]);
+      }
+    }
+  } catch (err) {
+    console.warn('[BatchSettlement] Non-blocking audit/notification error:', err);
+  }
+
+  revalidatePath('/payments');
+  revalidatePath('/tracker');
+  revalidatePath('/history');
+  revalidatePath('/audit');
+  revalidatePath('/print');
+
+  return {
+    success: true,
+    data: {
+      batch: createdBatch as PaymentBatch,
+      payments: updatedPayments,
+    },
+  };
+}
 
 /**
  * Mark a PAID payment as Audited (AUDITOR or Admin strictly verified).
@@ -1635,4 +2245,117 @@ export async function markPaymentAudited(
   revalidatePath('/history');
   revalidatePath('/print');
   return { success: true, data: updated as PaymentItem };
+}
+
+const markReceiptSentSchema = z.object({
+  paymentId: z.string().uuid('Valid payment ID is required.'),
+  sent: z.boolean().optional().default(true),
+});
+
+/**
+ * Stamp or clear receipt_sent_at / receipt_sent_by on a PAID payment that has a recorded UTR or Cheque reference.
+ * Marking sent is allowed for PREPARER, VERIFIER, APPROVER, or Admin; clearing (undo) is restricted to PREPARER or Admin.
+ */
+export async function markReceiptSent(input: {
+  paymentId: string;
+  sent?: boolean;
+}): Promise<ActionResult<{ paymentId: string; receipt_sent_at: string | null }>> {
+  const parsed = markReceiptSentSchema.safeParse(input);
+  if (!parsed.success) {
+    return {
+      success: false,
+      error: parsed.error.issues[0]?.message || 'Invalid receipt tracking parameters.',
+    };
+  }
+
+  const { paymentId, sent } = parsed.data;
+  const supabase = await createClient();
+  const { user, profile, activeCompany } = await getCurrentUserContext();
+
+  if (!user || !profile || !profile.is_active) {
+    return { success: false, error: 'Unauthorized. Please sign in.' };
+  }
+
+  if (!activeCompany) {
+    return { success: false, error: 'Active company workspace could not be determined.' };
+  }
+
+  if (sent) {
+    const allowedRoles = ['PREPARER', 'VERIFIER', 'APPROVER'];
+    if (!profile.is_admin && !allowedRoles.includes(profile.role)) {
+      return {
+        success: false,
+        error: 'Access denied: Only Preparers, Verifiers, Approvers, or Admins can mark receipt sent.',
+      };
+    }
+  } else if (profile.role !== 'PREPARER' && !profile.is_admin) {
+    return {
+      success: false,
+      error: 'Access denied: Only Preparers or Administrators can undo receipt sent confirmation.',
+    };
+  }
+
+  // Verify payment belongs to activeCompany, is PAID, and has a settlement reference
+  const { data: existing, error: fetchError } = await supabase
+    .from('payment_items')
+    .select('id, company_id, status, utr_number, cheque_number, receipt_sent_at')
+    .eq('id', paymentId)
+    .eq('company_id', activeCompany.id)
+    .single();
+
+  if (fetchError || !existing) {
+    return { success: false, error: 'Payment item not found in the active company.' };
+  }
+
+  if (existing.status !== 'PAID') {
+    return {
+      success: false,
+      error: `Cannot track receipt on '${existing.status}' payment. Only PAID payments are eligible.`,
+    };
+  }
+
+  const hasSettlementRef = Boolean(
+    (existing.utr_number || existing.cheque_number || '').trim()
+  );
+  if (!hasSettlementRef) {
+    return {
+      success: false,
+      error: 'Cannot mark receipt sent without a recorded UTR or Cheque reference.',
+    };
+  }
+
+  const nextSentAt = sent ? existing.receipt_sent_at || new Date().toISOString() : null;
+  const nextSentBy = sent ? user.id : null;
+
+  const writer =
+    process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY
+      ? createAdminClient()
+      : supabase;
+
+  const { error: updateError } = await writer
+    .from('payment_items')
+    .update({
+      receipt_sent_at: nextSentAt,
+      receipt_sent_by: nextSentBy,
+    })
+    .eq('id', paymentId)
+    .eq('company_id', activeCompany.id)
+    .eq('status', 'PAID');
+
+  if (updateError) {
+    return {
+      success: false,
+      error: updateError.message || 'Failed to update receipt sent status.',
+    };
+  }
+
+  revalidatePath('/history');
+  revalidatePath('/print');
+  return {
+    success: true,
+    data: {
+      paymentId,
+      receipt_sent_at: nextSentAt,
+    },
+  };
 }

@@ -4,6 +4,9 @@ import { getCurrentUserContext } from '@/lib/auth';
 import { AppShell } from '@/components/layout/app-shell';
 import type { Notification, PaymentStatus } from '@/types/database';
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 export default async function DashboardLayout({
   children,
 }: {
@@ -38,15 +41,19 @@ export default async function DashboardLayout({
     .select('id', { count: 'exact', head: true })
     .eq('status', statusFilter);
 
+  let reqCountQuery = supabase
+    .from('payment_requests')
+    .select('id', { count: 'exact', head: true })
+    .eq('status', 'PENDING');
+
   if (activeCompany) {
     countQuery = countQuery.eq('company_id', activeCompany.id);
+    reqCountQuery = reqCountQuery.eq('company_id', activeCompany.id);
   }
 
   const notificationsListQuery = supabase
     .from('notifications')
-    .select(
-      'id, company_id, recipient_user_id, payment_item_id, event_type, title, body, is_read, created_at'
-    )
+    .select('*')
     .eq('recipient_user_id', user.id)
     .order('created_at', { ascending: false })
     .limit(25);
@@ -57,13 +64,15 @@ export default async function DashboardLayout({
     .eq('recipient_user_id', user.id)
     .eq('is_read', false);
 
-  const [countRes, notifRes, unreadRes] = await Promise.all([
+  const [countRes, reqCountRes, notifRes, unreadRes] = await Promise.all([
     countQuery,
+    reqCountQuery,
     notificationsListQuery,
     unreadCountQuery,
   ]);
 
   const pendingCount = countRes.count || 0;
+  const pendingRequestsCount = reqCountRes.count || 0;
   const initialNotifications = (notifRes.data || []) as Notification[];
   const initialUnreadCount = unreadRes.count || 0;
 
@@ -71,6 +80,7 @@ export default async function DashboardLayout({
     <AppShell
       profile={profile}
       pendingCount={pendingCount}
+      pendingRequestsCount={pendingRequestsCount}
       allowedCompanies={allowedCompanies}
       activeCompany={activeCompany}
       initialNotifications={initialNotifications}

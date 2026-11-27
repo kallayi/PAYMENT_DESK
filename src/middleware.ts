@@ -126,9 +126,9 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(redirectUrl);
   }
 
-  // Guard /reminders: Strictly requires PREPARER role
+  // Guard /reminders: Requires PREPARER or VERIFIER role
   if (pathname === '/reminders' || pathname.startsWith('/reminders/')) {
-    if (role !== 'PREPARER') {
+    if (role !== 'PREPARER' && role !== 'VERIFIER') {
       const redirectUrl = request.nextUrl.clone();
       redirectUrl.pathname = landingRoute;
       return NextResponse.redirect(redirectUrl);

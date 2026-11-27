@@ -2,9 +2,11 @@ import * as React from 'react';
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import { getCurrentUserContext } from '@/lib/auth';
+import { checkAndDispatchDueReminders } from '@/actions/reminders';
+import { getCurrentISTInfo } from '@/lib/format';
 import { RemindersView } from '@/components/reminders/reminders-view';
 import { Loader2 } from 'lucide-react';
-import type { RecurringReminder, Vendor } from '@/types/database';
+import type { RecurringReminder, ReminderLinkedPayment, Vendor } from '@/types/database';
 
 export const metadata = {
   title: 'Monthly Reminders | Payment Desk',
@@ -27,12 +29,18 @@ export default async function RemindersPage() {
     redirect('/login');
   }
 
-  // Strictly Preparer or Admin
-  if (profile.role !== 'PREPARER' && !profile.is_admin) {
+  // Preparer, Verifier, or Admin
+  if (profile.role !== 'PREPARER' && profile.role !== 'VERIFIER' && !profile.is_admin) {
     redirect('/approvals');
   }
 
   const supabase = await createClient();
+  const { yearMonth, monthLabel, monthStartIso, nextMonthStartIso } = getCurrentISTInfo();
+
+  // On-visit non-blocking check ensures due-day alerts fire immediately if morning cron hasn't run yet
+  if (activeCompany) {
+    void checkAndDispatchDueReminders(activeCompany.id).catch(() => { });
+  }
 
   let remindersQuery = supabase
     .from('recurring_reminders')
@@ -45,18 +53,47 @@ export default async function RemindersPage() {
     .eq('is_active', true)
     .order('party_name', { ascending: true });
 
+  let linkedPaymentsQuery = supabase
+    .from('payment_items')
+    .select(
+      'id, recurring_reminder_id, status, net_payable, utr_number, cheque_number, paid_at, rejection_reason, updated_at'
+    )
+    .not('recurring_reminder_id', 'is', null)
+    .gte('created_at', monthStartIso)
+    .lt('created_at', nextMonthStartIso)
+    .order('created_at', { ascending: false });
+
   if (activeCompany) {
     remindersQuery = remindersQuery.eq('company_id', activeCompany.id);
     vendorsQuery = vendorsQuery.eq('company_id', activeCompany.id);
+    linkedPaymentsQuery = linkedPaymentsQuery.eq('company_id', activeCompany.id);
   }
 
-  const [remindersRes, vendorsRes] = await Promise.all([
+  const [remindersRes, vendorsRes, linkedPaymentsRes] = await Promise.all([
     remindersQuery,
     vendorsQuery,
+    linkedPaymentsQuery,
   ]);
 
   const reminders = (remindersRes.data || []) as RecurringReminder[];
   const vendors = (vendorsRes.data || []) as Vendor[];
+
+  const linkedPaymentsByReminder: Record<string, ReminderLinkedPayment> = {};
+  for (const row of (linkedPaymentsRes.data || []) as ReminderLinkedPayment[]) {
+    const rid = row.recurring_reminder_id;
+    if (!rid) continue;
+    const existing = linkedPaymentsByReminder[rid];
+    if (!existing) {
+      linkedPaymentsByReminder[rid] = row;
+    } else {
+      const existingInactive =
+        existing.status === 'REJECTED' || existing.status === 'CANCELLED';
+      const rowActive = row.status !== 'REJECTED' && row.status !== 'CANCELLED';
+      if (existingInactive && rowActive) {
+        linkedPaymentsByReminder[rid] = row;
+      }
+    }
+  }
 
   return (
     <React.Suspense fallback={<RemindersLoadingSkeleton />}>
@@ -64,6 +101,10 @@ export default async function RemindersPage() {
         initialReminders={reminders}
         vendors={vendors}
         companyName={activeCompany?.name || 'INDFURN'}
+        linkedPaymentsByReminder={linkedPaymentsByReminder}
+        currentMonthKey={yearMonth}
+        currentMonthLabel={monthLabel}
+        canCreatePayment={profile.role === 'PREPARER' || profile.is_admin}
       />
     </React.Suspense>
   );

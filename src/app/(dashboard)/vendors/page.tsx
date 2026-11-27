@@ -33,7 +33,8 @@ export default async function VendorsPage() {
 
   const { data: vendors } = await query;
 
-  const canManage = profile.role === 'PREPARER' || profile.is_admin;
+  const canManage =
+    profile.role === 'PREPARER' || profile.role === 'VERIFIER' || profile.is_admin;
 
   return (
     <VendorManagement

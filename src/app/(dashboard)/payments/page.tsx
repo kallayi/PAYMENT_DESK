@@ -2,9 +2,19 @@ import * as React from 'react';
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import { getCurrentUserContext } from '@/lib/auth';
+import { checkAndDispatchDueReminders } from '@/actions/reminders';
 import { PaymentsWorkspace } from '@/components/payments/payments-workspace';
 import { Loader2 } from 'lucide-react';
-import type { CompanyBank, PaymentItem, Vendor, RecurringReminder } from '@/types/database';
+import type {
+  CompanyBank,
+  PaymentItem,
+  PaymentPurpose,
+  RecurringReminder,
+  Vendor,
+} from '@/types/database';
+
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 export const metadata = {
   title: 'Payments | Payment Desk',
@@ -47,6 +57,11 @@ export default async function PaymentsPage({ searchParams }: PaymentsPageProps) 
   const resolvedParams = searchParams ? await searchParams : {};
   const fromReminderId = resolvedParams.fromReminder;
 
+  // On-visit non-blocking fallback: ensure due monthly reminders trigger immediately for Accounts
+  if (activeCompany && (profile.role === 'PREPARER' || profile.is_admin)) {
+    void checkAndDispatchDueReminders(activeCompany.id).catch(() => { });
+  }
+
   const supabase = await createClient();
 
   // Concurrently fetch active vendors, banks, and payment ledger in parallel
@@ -85,17 +100,39 @@ export default async function PaymentsPage({ searchParams }: PaymentsPageProps) 
       .maybeSingle() as unknown as Promise<{ data: RecurringReminder | null }>;
   }
 
-  const [vendorsRes, banksRes, paymentsRes, reminderRes] = await Promise.all([
-    vendorsQuery,
-    banksQuery,
-    paymentsQuery,
-    reminderPromise,
-  ]);
+  let activeRemindersPromise: Promise<{ data: RecurringReminder[] | null }> = Promise.resolve({ data: [] });
+  let purposesPromise: Promise<{ data: PaymentPurpose[] | null }> = Promise.resolve({ data: [] });
+  if (activeCompany && (profile.role === 'PREPARER' || profile.is_admin)) {
+    activeRemindersPromise = supabase
+      .from('recurring_reminders')
+      .select('*')
+      .eq('company_id', activeCompany.id)
+      .eq('is_active', true)
+      .order('due_day_of_month', { ascending: true }) as unknown as Promise<{ data: RecurringReminder[] | null }>;
+
+    purposesPromise = supabase
+      .from('payment_purposes')
+      .select('*')
+      .eq('company_id', activeCompany.id)
+      .order('label', { ascending: true }) as unknown as Promise<{ data: PaymentPurpose[] | null }>;
+  }
+
+  const [vendorsRes, banksRes, paymentsRes, reminderRes, activeRemindersRes, purposesRes] =
+    await Promise.all([
+      vendorsQuery,
+      banksQuery,
+      paymentsQuery,
+      reminderPromise,
+      activeRemindersPromise,
+      purposesPromise,
+    ]);
 
   const vendors = (vendorsRes.data || []) as Vendor[];
   const banks = (banksRes.data || []) as CompanyBank[];
   const payments = (paymentsRes.data || []) as PaymentItem[];
   const initialReminder = reminderRes.data;
+  const activeReminders = (activeRemindersRes.data || []) as RecurringReminder[];
+  const purposes = (purposesRes.data || []) as PaymentPurpose[];
 
   return (
     <React.Suspense fallback={<PaymentsLoadingSkeleton />}>
@@ -103,6 +140,8 @@ export default async function PaymentsPage({ searchParams }: PaymentsPageProps) 
         initialPayments={payments}
         vendors={vendors}
         banks={banks}
+        reminders={activeReminders}
+        initialPurposes={purposes}
         companyCode={activeCompany?.code || 'INDFURN'}
         activeCompany={activeCompany}
         currentUserName={profile.full_name || 'Accounts Team'}

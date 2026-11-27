@@ -6,9 +6,12 @@ import { OwnerApprovalsView } from '@/components/payments/owner-approvals-view';
 import { Loader2 } from 'lucide-react';
 import type { CompanyBank, PaymentItem } from '@/types/database';
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 export const metadata = {
   title: 'Approvals | Payment Desk',
-  description: 'Owner authorization portal for vendor payments and bank disbursements.',
+  description: 'Approver authorization portal for vendor payments and bank disbursements.',
 };
 
 function ApprovalsLoadingSkeleton() {

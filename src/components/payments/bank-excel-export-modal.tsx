@@ -22,7 +22,7 @@ import { toast } from 'sonner';
 import { splitRowsByIfsc } from '@/lib/excel/ifsc';
 import type { BankBatchType, BulkExportRow } from '@/lib/excel/types';
 import { formatINR } from '@/lib/format';
-import type { CompanyBank, PaymentItem } from '@/types/database';
+import type { CompanyBank, PaymentItem, PaymentMode } from '@/types/database';
 
 interface BankExcelExportModalProps {
   open: boolean;
@@ -32,6 +32,17 @@ interface BankExcelExportModalProps {
   companyCode?: string;
 }
 
+function isAxisBank(bank: CompanyBank): boolean {
+  return (
+    (bank.ifsc_prefix || '').toUpperCase().startsWith('UTIB') ||
+    (bank.short_code || bank.short_name || '').toUpperCase().includes('AXIS') ||
+    (bank.bank_name || bank.full_name || '').toUpperCase().includes('AXIS')
+  );
+}
+
+const isSalaryPayment = (p: { purpose?: string | null }) =>
+  (p.purpose || '').toLowerCase().includes('salary');
+
 export function BankExcelExportModal({
   open,
   onOpenChange,
@@ -39,38 +50,102 @@ export function BankExcelExportModal({
   banks,
   companyCode = 'INDFURN',
 }: BankExcelExportModalProps) {
-  const activeBanks = React.useMemo(
-    () => banks.filter((b) => b.is_active),
+  const axisBanks = React.useMemo(
+    () => banks.filter((b) => b.is_active && isAxisBank(b)),
     [banks]
   );
 
-  // Determine default bank based on items present
+  const axisBankIds = React.useMemo(
+    () => new Set(axisBanks.map((b) => b.id)),
+    [axisBanks]
+  );
+
+  // Determine default Axis bank & smart template category when modal opens
   const [selectedBankId, setSelectedBankId] = React.useState<string>('');
-  const [downloadingType, setDownloadingType] = React.useState<BankBatchType | null>(null);
+  const [templateCategory, setTemplateCategory] = React.useState<'vendor' | 'salary'>('vendor');
+  const [autoDetectedSalary, setAutoDetectedSalary] = React.useState<boolean>(false);
+  const [downloadingType, setDownloadingType] = React.useState<BankBatchType | 'both' | null>(null);
 
   React.useEffect(() => {
     if (!open) return;
 
-    // Pick the first bank that has items in readyToPayItems, or fallback to first active bank
-    const bankWithItems = activeBanks.find((b) =>
-      readyToPayItems.some((item) => item.source_bank_id === b.id)
+    const bankWithItems = axisBanks.find((b) =>
+      readyToPayItems.some(
+        (item) => item.status === 'APPROVED' && item.source_bank_id === b.id
+      )
     );
-    setSelectedBankId(bankWithItems?.id || activeBanks[0]?.id || '');
-  }, [open, activeBanks, readyToPayItems]);
+    const defaultBankId = bankWithItems?.id || axisBanks[0]?.id || '';
+    setSelectedBankId(defaultBankId);
 
-  const selectedBank = activeBanks.find((b) => b.id === selectedBankId) || null;
-  const bankShortCode = (selectedBank?.short_code || selectedBank?.short_name || 'BANK').toUpperCase();
-  const bankIfscPrefix = (selectedBank?.ifsc_prefix || '').toUpperCase();
+    const eligibleForBank = readyToPayItems.filter(
+      (item) =>
+        item.status === 'APPROVED' &&
+        item.payment_mode !== 'CHEQUE' &&
+        (defaultBankId ? item.source_bank_id === defaultBankId : axisBankIds.has(item.source_bank_id))
+    );
+    const defaultSalaryCount = eligibleForBank.filter(isSalaryPayment).length;
+    const defaultVendorCount = eligibleForBank.length - defaultSalaryCount;
 
-  // Filter readyToPayItems to the selected source bank
+    const shouldDefaultSalary = defaultVendorCount === 0 && defaultSalaryCount > 0;
+    setTemplateCategory(shouldDefaultSalary ? 'salary' : 'vendor');
+    setAutoDetectedSalary(shouldDefaultSalary);
+  }, [open, axisBanks, axisBankIds, readyToPayItems]);
+
+  const selectedBank = axisBanks.find((b) => b.id === selectedBankId) || null;
+  const bankShortCode = (selectedBank?.short_code || selectedBank?.short_name || 'AXIS').toUpperCase();
+  const bankIfscPrefix = (selectedBank?.ifsc_prefix || 'UTIB').toUpperCase();
+
+  // Count non-Axis items excluded from Axis bulk export
+  const nonAxisSkippedCount = React.useMemo(
+    () =>
+      readyToPayItems.filter(
+        (item) =>
+          item.status === 'APPROVED' &&
+          (!item.source_bank_id || !axisBankIds.has(item.source_bank_id))
+      ).length,
+    [readyToPayItems, axisBankIds]
+  );
+
+  // Filter readyToPayItems to APPROVED items matching the selected Axis Bank account
   const bankItems = React.useMemo(() => {
     if (!selectedBankId) return [];
-    return readyToPayItems.filter((item) => item.source_bank_id === selectedBankId);
+    return readyToPayItems.filter(
+      (item) =>
+        item.status === 'APPROVED' &&
+        item.source_bank_id === selectedBankId
+    );
   }, [readyToPayItems, selectedBankId]);
 
-  // Convert to BulkExportRow and run IFSC auto-split
+  const skippedChequeCount = React.useMemo(
+    () => bankItems.filter((item) => item.payment_mode === 'CHEQUE').length,
+    [bankItems]
+  );
+
+  const axisEligiblePayments = React.useMemo(
+    () => bankItems.filter((item) => item.payment_mode !== 'CHEQUE'),
+    [bankItems]
+  );
+
+  // Strictly disjoint Vendor vs Salary buckets
+  const salaryPayments = React.useMemo(
+    () => axisEligiblePayments.filter(isSalaryPayment),
+    [axisEligiblePayments]
+  );
+
+  const vendorPayments = React.useMemo(
+    () => axisEligiblePayments.filter((p) => !isSalaryPayment(p)),
+    [axisEligiblePayments]
+  );
+
+  // Active bucket drives all counts, totals, preview rows, and API paymentIds
+  const activeExportPayments = React.useMemo(
+    () => (templateCategory === 'salary' ? salaryPayments : vendorPayments),
+    [templateCategory, salaryPayments, vendorPayments]
+  );
+
+  // Convert activeExportPayments to BulkExportRow and run IFSC auto-split
   const splitResult = React.useMemo(() => {
-    const rows: BulkExportRow[] = bankItems.map((item) => {
+    const rows: BulkExportRow[] = activeExportPayments.map((item) => {
       const v = item.vendor;
       const partyName = v?.party_name || v?.name || 'Unknown Party';
       const beneficiaryName = v?.beneficiary_name || partyName;
@@ -87,59 +162,89 @@ export function BankExcelExportModal({
         sourceBankShortCode: bankShortCode,
         sourceBankIfscPrefix: bankIfscPrefix,
         companyCode,
-        paymentMode: (item.payment_mode || 'NEFT_RTGS') as 'NEFT_RTGS' | 'CHEQUE',
+        paymentMode: (item.payment_mode || 'NEFT_RTGS') as PaymentMode,
       };
     });
 
     return splitRowsByIfsc(rows, bankIfscPrefix);
-  }, [bankItems, bankShortCode, bankIfscPrefix, companyCode]);
+  }, [activeExportPayments, bankShortCode, bankIfscPrefix, companyCode]);
+
+  const triggerSingleDownload = async (batchType: BankBatchType): Promise<boolean> => {
+    const targetRows =
+      batchType === 'same_bank'
+        ? splitResult.sameBankRows
+        : splitResult.otherBankRows;
+
+    if (targetRows.length === 0 || !selectedBankId) return false;
+
+    const res = await fetch('/api/export/bank-excel', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        paymentIds: targetRows.map((r) => r.paymentId),
+        bankId: selectedBankId,
+        batchType,
+        templateCategory,
+      }),
+    });
+
+    if (!res.ok) {
+      const errJson = await res.json().catch(() => ({ error: 'Export failed' }));
+      toast.error(errJson.error || 'Failed to generate Excel workbook.');
+      return false;
+    }
+
+    const blob = await res.blob();
+    const contentDisposition = res.headers.get('Content-Disposition') || '';
+    const filenameMatch = contentDisposition.match(/filename="?([^"]+)"?/i);
+    const fallbackName =
+      templateCategory === 'salary'
+        ? `${companyCode}_Axis_Salary_${batchType === 'same_bank' ? 'WithinAxis' : 'AcrossAllBanks'}.xlsx`
+        : `${companyCode}_${bankShortCode}_${batchType.toUpperCase()}.xlsx`;
+    const filename = filenameMatch?.[1] || fallbackName;
+
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    toast.success(`Downloaded ${filename} (${targetRows.length} entries)`);
+    return true;
+  };
 
   const handleDownload = async (batchType: BankBatchType) => {
-    const targetRows =
-      batchType === 'combined'
-        ? [...splitResult.sameBankRows, ...splitResult.otherBankRows]
-        : batchType === 'same_bank'
-          ? splitResult.sameBankRows
-          : splitResult.otherBankRows;
-
-    if (targetRows.length === 0 || !selectedBankId) return;
-
     setDownloadingType(batchType);
     try {
-      const res = await fetch('/api/export/bank-excel', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          paymentIds: targetRows.map((r) => r.paymentId),
-          bankId: selectedBankId,
-          batchType,
-        }),
-      });
-
-      if (!res.ok) {
-        const errJson = await res.json().catch(() => ({ error: 'Export failed' }));
-        toast.error(errJson.error || 'Failed to generate Excel workbook.');
-        return;
-      }
-
-      const blob = await res.blob();
-      const contentDisposition = res.headers.get('Content-Disposition') || '';
-      const filenameMatch = contentDisposition.match(/filename="?([^"]+)"?/i);
-      const fallbackName = `${companyCode}_${bankShortCode}_${batchType.toUpperCase()}.xlsx`;
-      const filename = filenameMatch?.[1] || fallbackName;
-
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = filename;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-
-      toast.success(`Downloaded ${filename} (${targetRows.length} entries)`);
+      await triggerSingleDownload(batchType);
     } catch {
       toast.error('Network error while downloading Excel file.');
+    } finally {
+      setDownloadingType(null);
+    }
+  };
+
+  const handleDownloadBothSeparate = async () => {
+    if (
+      splitResult.sameBankRows.length === 0 ||
+      splitResult.otherBankRows.length === 0 ||
+      !selectedBankId
+    ) {
+      return;
+    }
+
+    setDownloadingType('both');
+    try {
+      const okFirst = await triggerSingleDownload('same_bank');
+      if (okFirst) {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        await triggerSingleDownload('other_bank');
+      }
+    } catch {
+      toast.error('Network error while downloading Excel files.');
     } finally {
       setDownloadingType(null);
     }
@@ -165,78 +270,169 @@ export function BankExcelExportModal({
         </DialogHeader>
 
         <div className="flex-1 overflow-y-auto space-y-4 py-2 pr-1">
-          {/* SOURCE BANK SELECTOR */}
-          <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div className="flex items-center gap-2 text-xs font-semibold text-slate-700">
-              <Landmark className="w-4 h-4 text-slate-500" />
-              <span>Disbursing Source Bank:</span>
+          {/* TEMPLATE CATEGORY SWITCHER */}
+          <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <span className="text-xs font-semibold text-slate-700">
+                Axis Neo Template Format:
+              </span>
+              <div className="grid grid-cols-2 gap-1 p-1 rounded-lg bg-slate-100 border border-slate-200 w-full sm:w-auto">
+                <button
+                  type="button"
+                  onClick={() => setTemplateCategory('vendor')}
+                  className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+                    templateCategory === 'vendor'
+                      ? 'bg-white text-slate-900 shadow-sm'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  Vendor Payments ({vendorPayments.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTemplateCategory('salary')}
+                  className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+                    templateCategory === 'salary'
+                      ? 'bg-white text-slate-900 shadow-sm'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  Salary Payments ({salaryPayments.length})
+                </button>
+              </div>
             </div>
-            <select
-              value={selectedBankId}
-              onChange={(e) => setSelectedBankId(e.target.value)}
-              className="min-h-[38px] px-3 rounded-lg border border-slate-300 bg-white text-xs font-semibold text-slate-900 outline-none focus:border-brand"
-            >
-              {activeBanks.map((b) => {
-                const count = readyToPayItems.filter((p) => p.source_bank_id === b.id).length;
-                return (
-                  <option key={b.id} value={b.id}>
-                    {b.bank_name || b.full_name} ({b.short_code || b.short_name} · Prefix: {b.ifsc_prefix || 'NA'}) — {count} item{count === 1 ? '' : 's'}
-                  </option>
-                );
-              })}
-            </select>
+            {autoDetectedSalary && templateCategory === 'salary' && (
+              <p className="text-[11px] text-emerald-700 font-medium">
+                Auto-selected Salary template (only Salary payments found in queue)
+              </p>
+            )}
+            {templateCategory === 'salary' && vendorPayments.length > 0 && (
+              <p className="text-[11px] text-slate-500">
+                {vendorPayments.length} non-salary vendor payment(s) excluded from Salary export.
+              </p>
+            )}
+            {templateCategory === 'vendor' && salaryPayments.length > 0 && (
+              <p className="text-[11px] text-slate-500">
+                {salaryPayments.length} Salary payment(s) excluded — switch to Salary Payments tab to export.
+              </p>
+            )}
           </div>
 
-          {/* CHEQUE EXCLUSION NOTICE */}
-          {splitResult.skippedChequeCount > 0 && (
-            <div className="p-2.5 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-800 flex items-center gap-2">
-              <Info className="w-4 h-4 text-amber-600 shrink-0" />
-              <span>
-                <strong>{splitResult.skippedChequeCount} Cheque payment{splitResult.skippedChequeCount === 1 ? '' : 's'}</strong> automatically excluded from bank bulk Excel export. Mark them paid manually with Cheque Number & Date.
-              </span>
+          {/* SOURCE BANK SELECTOR (Axis Bank Only) */}
+          <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-2 text-xs font-semibold text-slate-700">
+              <Landmark className="w-4 h-4 text-slate-500 shrink-0" />
+              <span>Disbursing Source Bank:</span>
+            </div>
+
+            {axisBanks.length === 0 ? (
+              <div className="text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                No active Axis Bank account configured for this company.
+              </div>
+            ) : axisBanks.length === 1 ? (
+              <div className="px-3 py-2 rounded-lg border border-slate-200 bg-white text-xs flex items-center gap-2.5 flex-wrap">
+                <span className="font-bold text-slate-900">
+                  {axisBanks[0].bank_name || axisBanks[0].full_name}
+                </span>
+                {(axisBanks[0].account_number_masked || axisBanks[0].account_mask) && (
+                  <span className="font-mono text-[11px] text-slate-500">
+                    {axisBanks[0].account_number_masked || axisBanks[0].account_mask}
+                  </span>
+                )}
+                <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 text-[10px] font-bold">
+                  {axisBanks[0].short_code || axisBanks[0].short_name}
+                </span>
+              </div>
+            ) : (
+              <select
+                value={selectedBankId}
+                onChange={(e) => setSelectedBankId(e.target.value)}
+                className="min-h-[38px] px-3 rounded-lg border border-slate-300 bg-white text-xs font-semibold text-slate-900 outline-none focus:border-brand"
+              >
+                {axisBanks.map((b) => {
+                  const count = readyToPayItems.filter(
+                    (p) => p.status === 'APPROVED' && p.source_bank_id === b.id
+                  ).length;
+                  return (
+                    <option key={b.id} value={b.id}>
+                      {b.bank_name || b.full_name} ({b.short_code || b.short_name} · Prefix: {b.ifsc_prefix || 'UTIB'}) — {count} item{count === 1 ? '' : 's'}
+                    </option>
+                  );
+                })}
+              </select>
+            )}
+          </div>
+
+          {/* CHEQUE & NON-AXIS EXCLUSION NOTICES */}
+          {(skippedChequeCount > 0 || nonAxisSkippedCount > 0) && (
+            <div className="space-y-2">
+              {nonAxisSkippedCount > 0 && (
+                <div className="p-2.5 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-800 flex items-center gap-2">
+                  <Info className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span>
+                    <strong>
+                      {nonAxisSkippedCount} non-Axis bank payment{nonAxisSkippedCount === 1 ? '' : 's'} skipped
+                    </strong>{' '}
+                    — Bulk Excel export is configured for Axis Bank only.
+                  </span>
+                </div>
+              )}
+              {skippedChequeCount > 0 && (
+                <div className="p-2.5 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-800 flex items-center gap-2">
+                  <Info className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span>
+                    <strong>{skippedChequeCount} Cheque payment{skippedChequeCount === 1 ? '' : 's'}</strong> automatically excluded from bank bulk Excel export. Mark them paid manually with Cheque Number & Date.
+                  </span>
+                </div>
+              )}
             </div>
           )}
 
-          {/* COMBINED ALL-BANKS DOWNLOAD BANNER */}
+          {/* SEPARATE TEMPLATE NOTICE & SEQUENTIAL DUAL DOWNLOAD */}
           {(() => {
-            const combinedCount =
-              splitResult.sameBankRows.length + splitResult.otherBankRows.length;
-            const combinedTotal =
-              splitResult.sameBankTotal + splitResult.otherBankTotal;
-            const hasDebitAccount = Boolean(selectedBank?.full_debit_account_number?.trim());
+            const hasBothBuckets =
+              splitResult.sameBankRows.length > 0 &&
+              splitResult.otherBankRows.length > 0;
+            const hasDebitAccount = Boolean(
+              selectedBank?.full_debit_account_number?.trim()
+            );
+            const isAxisBankSelected =
+              bankShortCode === 'AXIS' || bankIfscPrefix === 'UTIB';
+            const acrossColLabel =
+              templateCategory === 'salary' ? '29-Col' : '31-Col';
 
             return (
-              <div className="p-4 rounded-xl border border-brand/25 bg-brand/5 space-y-2.5">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-bold text-slate-900">
-                        Combined Bulk Upload (All Banks · {bankShortCode} Neo 31-Col Format)
-                      </span>
-                      <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-white border border-brand/20 text-brand tabular-nums">
-                        {combinedCount} item{combinedCount === 1 ? '' : 's'}
-                      </span>
+              <div className="space-y-2.5">
+                {hasBothBuckets && (
+                  <div className="p-3.5 rounded-xl border border-brand/25 bg-brand/5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-bold text-slate-900">
+                        Separate Axis Neo Templates Required
+                      </p>
+                      <p className="text-[11px] text-slate-600 mt-0.5">
+                        {isAxisBankSelected
+                          ? `Same-Bank (${bankIfscPrefix} 8-Col) and Other-Bank (NEFT/RTGS/IMPS ${acrossColLabel}) are never merged into one broken file — download both cleanly as two separate .xlsx workbooks.`
+                          : 'Same-Bank and Other-Bank transfers download cleanly as separate .xlsx workbooks.'}
+                      </p>
                     </div>
-                    <p className="text-[11px] text-slate-600 mt-0.5">
-                      Downloads IFT (Mode &lsquo;I&rsquo;) + NEFT + RTGS rows together in the official &ldquo;Default - Across All Banks&rdquo; template — {formatINR(combinedTotal)}
-                    </p>
+                    <Button
+                      type="button"
+                      size="sm"
+                      disabled={downloadingType !== null}
+                      onClick={handleDownloadBothSeparate}
+                      className="bg-brand hover:bg-brand-hover text-white text-xs font-semibold shrink-0"
+                    >
+                      {downloadingType === 'both' ? (
+                        <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                      ) : (
+                        <Download className="w-3.5 h-3.5 mr-1.5" />
+                      )}
+                      <span>Download Both Separate Files</span>
+                    </Button>
                   </div>
-                  <Button
-                    type="button"
-                    size="sm"
-                    disabled={combinedCount === 0 || downloadingType !== null}
-                    onClick={() => handleDownload('combined')}
-                    className="bg-brand hover:bg-brand-hover text-white text-xs font-semibold shrink-0"
-                  >
-                    {downloadingType === 'combined' ? (
-                      <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
-                    ) : (
-                      <Download className="w-3.5 h-3.5 mr-1.5" />
-                    )}
-                    <span>Download Combined (All Banks)</span>
-                  </Button>
-                </div>
-                {!hasDebitAccount && (
+                )}
+
+                {selectedBank && !hasDebitAccount && (
                   <p className="text-[11px] text-amber-700 bg-amber-50/90 border border-amber-200 rounded-md px-2.5 py-1.5">
                     Note: Full Corporate Debit A/C is not set for {bankShortCode} in Settings; column 1 will be left blank so you can fill it or set it once in Settings → Company Banks.
                   </p>
@@ -259,7 +455,11 @@ export function BankExcelExportModal({
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-500 mt-0.5">
-                  Vendors matching {bankIfscPrefix || bankShortCode} IFSC prefix (Internal Transfer).
+                  {bankShortCode === 'AXIS' || bankIfscPrefix === 'UTIB'
+                    ? templateCategory === 'salary'
+                      ? 'Axis Salary "Default - Within Axis Bank" 8-column template (UTIB only).'
+                      : 'Axis "Default - Within Axis Bank" 8-column template (UTIB only).'
+                    : `Vendors matching ${bankIfscPrefix || bankShortCode} IFSC prefix (Internal Transfer).`}
                 </p>
                 <div className="text-lg font-bold text-slate-900 tabular-nums mt-2">
                   {formatINR(splitResult.sameBankTotal)}
@@ -278,7 +478,13 @@ export function BankExcelExportModal({
                 ) : (
                   <Download className="w-3.5 h-3.5 mr-1.5" />
                 )}
-                <span>Download Same-Bank Excel</span>
+                <span>
+                  {bankShortCode === 'AXIS' || bankIfscPrefix === 'UTIB'
+                    ? templateCategory === 'salary'
+                      ? 'Download Salary — Within Axis Bank (8-Col)'
+                      : 'Download Axis Same-Bank (.xlsx)'
+                    : 'Download Same-Bank Excel'}
+                </span>
               </Button>
             </div>
 
@@ -287,14 +493,18 @@ export function BankExcelExportModal({
               <div>
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold text-slate-900">
-                    Other-Bank (NEFT / RTGS)
+                    Other-Bank (NEFT / RTGS / IMPS)
                   </span>
                   <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-slate-100 text-slate-700 tabular-nums">
                     {splitResult.otherBankRows.length} item{splitResult.otherBankRows.length === 1 ? '' : 's'}
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-500 mt-0.5">
-                  Non-{bankIfscPrefix || bankShortCode} vendors (auto-routed NEFT &lt; ₹2L / RTGS ≥ ₹2L).
+                  {bankShortCode === 'AXIS' || bankIfscPrefix === 'UTIB'
+                    ? templateCategory === 'salary'
+                      ? 'Axis Salary "Default - Across All Banks" 29-column template (IMPS / NEFT < ₹2L / RTGS ≥ ₹2L).'
+                      : 'Axis "Default - Across All Banks" 31-column template (IMPS / NEFT < ₹2L / RTGS ≥ ₹2L).'
+                    : `Non-${bankIfscPrefix || bankShortCode} vendors (IMPS / NEFT < ₹2L / RTGS ≥ ₹2L).`}
                 </p>
                 <div className="text-lg font-bold text-slate-900 tabular-nums mt-2">
                   {formatINR(splitResult.otherBankTotal)}
@@ -313,7 +523,13 @@ export function BankExcelExportModal({
                 ) : (
                   <Download className="w-3.5 h-3.5 mr-1.5" />
                 )}
-                <span>Download Other-Bank Excel</span>
+                <span>
+                  {bankShortCode === 'AXIS' || bankIfscPrefix === 'UTIB'
+                    ? templateCategory === 'salary'
+                      ? 'Download Salary — Across All Banks (29-Col)'
+                      : 'Download Other-Bank NEFT/RTGS/IMPS (.xlsx)'
+                    : 'Download Other-Bank Excel'}
+                </span>
               </Button>
             </div>
           </div>
@@ -323,17 +539,21 @@ export function BankExcelExportModal({
             <div className="p-8 rounded-xl border border-slate-200 bg-slate-50 text-center">
               <AlertCircle className="w-6 h-6 text-slate-400 mx-auto mb-1.5" />
               <p className="text-xs font-semibold text-slate-700">
-                No eligible NEFT/RTGS rows for {bankShortCode}
+                {templateCategory === 'salary'
+                  ? 'No approved Axis NEFT/RTGS/IMPS payments with a Salary purpose found.'
+                  : 'No approved Axis NEFT/RTGS/IMPS vendor payments found.'}
               </p>
               <p className="text-[11px] text-slate-400 mt-0.5">
-                Select another disbursing bank or select approved NEFT/RTGS payments.
+                {templateCategory === 'salary'
+                  ? 'Switch to Vendor Payments tab or approve payments with a Salary purpose.'
+                  : 'Switch to Salary Payments tab or approve non-salary vendor payments.'}
               </p>
             </div>
           ) : (
             <div className="space-y-3">
               {[
                 { title: `Same-Bank Batch (${bankIfscPrefix || bankShortCode})`, rows: splitResult.sameBankRows },
-                { title: 'Other-Bank Batch (NEFT / RTGS)', rows: splitResult.otherBankRows },
+                { title: 'Other-Bank Batch (NEFT / RTGS / IMPS)', rows: splitResult.otherBankRows },
               ].map(
                 (group) =>
                   group.rows.length > 0 && (

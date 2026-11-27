@@ -4,7 +4,10 @@ import { createClient } from '@/lib/supabase/server';
 import { getCurrentUserContext } from '@/lib/auth';
 import { AuditorWorkspace } from '@/components/audit/auditor-workspace';
 import { Loader2 } from 'lucide-react';
-import type { CompanyBank, PaymentItem } from '@/types/database';
+import type { CompanyBank, PaymentBatch, PaymentItem } from '@/types/database';
+
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 export const metadata = {
   title: 'Audit Workspace | Payment Desk',
@@ -47,17 +50,30 @@ export default async function AuditPage() {
   let paymentsQuery = supabase
     .from('payment_items')
     .select(
-      '*, vendor:vendors(*), source_bank:company_banks(*), creator:profiles!created_by(id, full_name, role), verifier:profiles!verified_by(id, full_name, role), approver:profiles!approved_by(id, full_name, role), payer:profiles!paid_by(id, full_name, role), auditor:profiles!audited_by(id, full_name, role)'
+      '*, vendor:vendors(*), source_bank:company_banks(*), batch:payment_batches(*), creator:profiles!created_by(id, full_name, role), verifier:profiles!verified_by(id, full_name, role), approver:profiles!approved_by(id, full_name, role), payer:profiles!paid_by(id, full_name, role), auditor:profiles!audited_by(id, full_name, role)'
     )
     .eq('status', 'PAID')
     .order('paid_at', { ascending: false });
 
+  let batchesQuery = supabase
+    .from('payment_batches')
+    .select(
+      '*, source_bank:company_banks(*), creator:profiles!created_by(id, full_name, role), auditor:profiles!audited_by(id, full_name, role)'
+    )
+    .order('batch_date', { ascending: false })
+    .order('created_at', { ascending: false });
+
   if (activeCompany) {
     banksQuery = banksQuery.eq('company_id', activeCompany.id);
     paymentsQuery = paymentsQuery.eq('company_id', activeCompany.id);
+    batchesQuery = batchesQuery.eq('company_id', activeCompany.id);
   }
 
-  const [banksRes, paymentsRes] = await Promise.all([banksQuery, paymentsQuery]);
+  const [banksRes, paymentsRes, batchesRes] = await Promise.all([
+    banksQuery,
+    paymentsQuery,
+    batchesQuery,
+  ]);
 
   const canSeeFullDebitAc = profile.is_admin;
   const banks = ((banksRes.data || []) as CompanyBank[]).map((b) =>
@@ -74,11 +90,23 @@ export default async function AuditPage() {
         },
       }
   );
+  const batches = ((batchesRes.data || []) as PaymentBatch[]).map((b) =>
+    canSeeFullDebitAc || !b.source_bank
+      ? b
+      : {
+        ...b,
+        source_bank: {
+          ...b.source_bank,
+          full_debit_account_number: null,
+        },
+      }
+  );
 
   return (
     <React.Suspense fallback={<AuditLoadingSkeleton />}>
       <AuditorWorkspace
         initialPayments={payments}
+        initialBatches={batches}
         banks={banks}
         companyName={activeCompany?.name || 'INDFURN'}
         canAudit={profile.role === 'AUDITOR' || profile.is_admin}

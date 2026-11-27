@@ -3,6 +3,7 @@
  * Strictly prevents CSV Formula Injection (CWE-1236) by neutralizing formula prefixes.
  */
 
+import { formatPaymentMode } from '@/lib/format';
 import type { PaymentItem } from '@/types/database';
 
 /**
@@ -40,7 +41,6 @@ export function generatePaymentsCSV(items: PaymentItem[]): string {
     'IFSC Code',
     'Invoice / Ref No',
     'Purpose',
-    'Payment Type',
     'Payment Mode',
     'Gross Amount (INR)',
     'TDS (INR)',
@@ -77,8 +77,7 @@ export function generatePaymentsCSV(items: PaymentItem[]): string {
       sanitizeCSVCell(item.vendor?.ifsc_code || ''),
       sanitizeCSVCell(item.invoice_ref),
       sanitizeCSVCell(item.purpose),
-      sanitizeCSVCell(item.payment_type === 'ON_ACCOUNT' ? 'On Account' : 'Against Bill'),
-      sanitizeCSVCell(item.payment_mode === 'CHEQUE' ? 'Cheque' : 'NEFT/RTGS'),
+      sanitizeCSVCell(formatPaymentMode(item.payment_mode, true)),
       sanitizeCSVCell(Number(item.amount || 0).toFixed(2)),
       sanitizeCSVCell(Number(item.tds || 0) > 0 ? Number(item.tds).toFixed(2) : 'NA'),
       sanitizeCSVCell(Number(item.net_payable || 0).toFixed(2)),

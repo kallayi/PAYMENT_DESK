@@ -4,7 +4,10 @@ import { createClient } from '@/lib/supabase/server';
 import { getCurrentUserContext } from '@/lib/auth';
 import { VerifierQueueView } from '@/components/verify/verifier-queue-view';
 import { Loader2 } from 'lucide-react';
-import type { PaymentItem } from '@/types/database';
+import type { PaymentItem, CompanyBank } from '@/types/database';
+
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 export const metadata = {
   title: 'Verification Queue | Payment Desk',
@@ -34,7 +37,7 @@ export default async function VerifyPage() {
 
   const supabase = await createClient();
 
-  let query = supabase
+  let paymentsQuery = supabase
     .from('payment_items')
     .select(
       '*, vendor:vendors(*), source_bank:company_banks(*), creator:profiles!created_by(id, full_name, role)'
@@ -42,18 +45,30 @@ export default async function VerifyPage() {
     .eq('status', 'PENDING_VERIFICATION')
     .order('due_date', { ascending: true });
 
+  let banksQuery = supabase
+    .from('company_banks')
+    .select(
+      'id, company_id, bank_name, full_name, short_code, short_name, account_number_masked, account_mask, available_balance, balance_updated_at, is_active, balance_updater:profiles!balance_updated_by(full_name)'
+    )
+    .eq('is_active', true)
+    .order('short_code', { ascending: true });
+
   if (activeCompany) {
-    query = query.eq('company_id', activeCompany.id);
+    paymentsQuery = paymentsQuery.eq('company_id', activeCompany.id);
+    banksQuery = banksQuery.eq('company_id', activeCompany.id);
   }
 
-  const { data: payments, error } = await query;
+  const [paymentsRes, banksRes] = await Promise.all([paymentsQuery, banksQuery]);
 
-  if (error) {
-    console.error('Error fetching verification queue:', error);
+  if (paymentsRes.error) {
+    console.error('Error fetching verification queue:', paymentsRes.error);
+  }
+  if (banksRes.error) {
+    console.error('Error fetching company banks:', banksRes.error);
   }
 
   const canSeeFullDebitAc = profile.is_admin;
-  const sanitizedPayments = ((payments || []) as PaymentItem[]).map((p) =>
+  const sanitizedPayments = ((paymentsRes.data || []) as PaymentItem[]).map((p) =>
     canSeeFullDebitAc || !p.source_bank
       ? p
       : {
@@ -70,6 +85,7 @@ export default async function VerifyPage() {
       <VerifierQueueView
         initialPayments={sanitizedPayments}
         companyName={activeCompany?.name || 'INDFURN'}
+        banks={(banksRes.data || []) as unknown as CompanyBank[]}
       />
     </React.Suspense>
   );

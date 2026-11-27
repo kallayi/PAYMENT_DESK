@@ -1,10 +1,9 @@
 'use client';
 
 import * as React from 'react';
-import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import {
   Plus,
-  Printer,
   Paperclip,
   Trash2,
   Send,
@@ -20,15 +19,18 @@ import {
   Info,
   FileSpreadsheet,
   MessageCircle,
+  Layers,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { PaymentFormSheet } from '@/components/payments/payment-form-sheet';
 import { PaymentDetailDrawer } from '@/components/payments/payment-detail-drawer';
 import { MarkPaidModal } from '@/components/payments/mark-paid-modal';
+import { BatchSettlementModal } from '@/components/payments/batch-settlement-modal';
 import { PaymentAcknowledgementModal } from '@/components/payments/payment-acknowledgement-modal';
 import { UpdateBalancesModal } from '@/components/payments/update-balances-modal';
 import { BankExcelExportModal } from '@/components/payments/bank-excel-export-modal';
-import { PaymentStatusBadge, BankBadge } from '@/components/payments/payment-status-badge';
+import { PaymentStatusBadge, BankBadge, PaymentModeBadge } from '@/components/payments/payment-status-badge';
+import { PaymentUrlSync, usePaymentHighlight } from '@/components/layout/payment-url-sync';
 import { deleteDraftPayment, submitPayment } from '@/actions/payments';
 import { getSignedFileUrl } from '@/actions/storage';
 import { formatHumanDate, formatShortDate, formatINR } from '@/lib/format';
@@ -36,7 +38,10 @@ import type {
   Company,
   CompanyBank,
   PaymentItem,
+  PaymentMode,
+  PaymentPurpose,
   PaymentStatus,
+  RecurringReminder,
   Vendor,
 } from '@/types/database';
 
@@ -44,6 +49,8 @@ interface PaymentsWorkspaceProps {
   initialPayments: PaymentItem[];
   vendors: Vendor[];
   banks: CompanyBank[];
+  reminders?: RecurringReminder[];
+  initialPurposes?: PaymentPurpose[];
   companyCode?: string;
   activeCompany?: Company | null;
   currentUserName?: string;
@@ -74,17 +81,29 @@ export function PaymentsWorkspace({
   initialPayments,
   vendors: initialVendors,
   banks: initialBanks,
+  reminders = [],
+  initialPurposes = [],
   companyCode = 'INDFURN',
   activeCompany,
   currentUserName = 'Accounts Team',
   initialFromReminder,
 }: PaymentsWorkspaceProps) {
+  const router = useRouter();
+  const [, startRefreshTransition] = React.useTransition();
+  const refreshServerState = React.useCallback(() => {
+    startRefreshTransition(() => {
+      router.refresh();
+    });
+  }, [router]);
+
   const [payments, setPayments] = React.useState<PaymentItem[]>(initialPayments);
   const [vendors, setVendors] = React.useState<Vendor[]>(initialVendors);
   const [banks, setBanks] = React.useState<CompanyBank[]>(initialBanks);
+  const [purposes, setPurposes] = React.useState<PaymentPurpose[]>(initialPurposes);
 
   // Active Tab: Defaults to DRAFT
   const [activeTab, setActiveTab] = React.useState<PreparerTab>('DRAFT');
+  const [modeFilter, setModeFilter] = React.useState<'ALL' | PaymentMode>('ALL');
 
   // Ready-to-Pay Excel Export Selection State
   const [selectedApprovedIds, setSelectedApprovedIds] = React.useState<Set<string>>(new Set());
@@ -97,11 +116,50 @@ export function PaymentsWorkspace({
   const [detailPayment, setDetailPayment] = React.useState<PaymentItem | null>(null);
   const [utrPayment, setUtrPayment] = React.useState<PaymentItem | null>(null);
   const [advicePayment, setAdvicePayment] = React.useState<PaymentItem | null>(null);
+  const [isBatchModalOpen, setIsBatchModalOpen] = React.useState<boolean>(false);
 
   // Action loading states
   const [submittingPaymentId, setSubmittingPaymentId] = React.useState<string | null>(null);
   const [deletingPaymentId, setDeletingPaymentId] = React.useState<string | null>(null);
   const [viewingFileId, setViewingFileId] = React.useState<string | null>(null);
+
+  const { highlightedId, triggerHighlight } = usePaymentHighlight();
+  const paymentsRef = React.useRef(payments);
+  paymentsRef.current = payments;
+
+  const handleUrlParams = React.useCallback(
+    ({ tab, highlightId }: { tab: string | null; highlightId: string | null }) => {
+      const normalizedTab = tab?.toUpperCase() || null;
+      if (normalizedTab === 'ON_HOLD') {
+        setActiveTab('PENDING_APPROVAL');
+      } else if (
+        normalizedTab &&
+        ['DRAFT', 'PENDING_VERIFICATION', 'PENDING_APPROVAL', 'APPROVED', 'PAID', 'REJECTED'].includes(
+          normalizedTab
+        )
+      ) {
+        setActiveTab(normalizedTab as PreparerTab);
+      } else if (highlightId) {
+        const target = paymentsRef.current.find((p) => p.id === highlightId);
+        if (target) {
+          if (target.status === 'ON_HOLD') {
+            setActiveTab('PENDING_APPROVAL');
+          } else if (
+            ['DRAFT', 'PENDING_VERIFICATION', 'PENDING_APPROVAL', 'APPROVED', 'PAID', 'REJECTED'].includes(
+              target.status
+            )
+          ) {
+            setActiveTab(target.status as PreparerTab);
+          }
+        }
+      }
+
+      if (highlightId) {
+        triggerHighlight(highlightId);
+      }
+    },
+    [triggerHighlight]
+  );
 
   // Synchronize when initial props change
   React.useEffect(() => {
@@ -109,8 +167,16 @@ export function PaymentsWorkspace({
   }, [initialPayments]);
 
   React.useEffect(() => {
+    setVendors(initialVendors);
+  }, [initialVendors]);
+
+  React.useEffect(() => {
     setBanks(initialBanks);
   }, [initialBanks]);
+
+  React.useEffect(() => {
+    setPurposes(initialPurposes);
+  }, [initialPurposes]);
 
   React.useEffect(() => {
     setSelectedApprovedIds(new Set());
@@ -120,6 +186,61 @@ export function PaymentsWorkspace({
     () => payments.filter((p) => p.status === 'APPROVED'),
     [payments]
   );
+
+  // Prune any selected IDs that are no longer in APPROVED after a live update
+  React.useEffect(() => {
+    const validIds = new Set(approvedItemsList.map((p) => p.id));
+    setSelectedApprovedIds((prev) => {
+      if (prev.size === 0) return prev;
+      let changed = false;
+      const next = new Set<string>();
+      for (const id of prev) {
+        if (validIds.has(id)) {
+          next.add(id);
+        } else {
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [approvedItemsList]);
+
+  const approvedBankGroups = React.useMemo(() => {
+    const map = new Map<
+      string,
+      { bankId: string; label: string; itemIds: string[] }
+    >();
+    for (const p of approvedItemsList) {
+      if (!p.source_bank_id) continue;
+      const label =
+        p.source_bank?.short_code ||
+        p.source_bank?.short_name ||
+        p.source_bank?.bank_name ||
+        p.source_bank?.full_name ||
+        'Bank';
+      const existing = map.get(p.source_bank_id);
+      if (existing) {
+        existing.itemIds.push(p.id);
+      } else {
+        map.set(p.source_bank_id, {
+          bankId: p.source_bank_id,
+          label,
+          itemIds: [p.id],
+        });
+      }
+    }
+    return Array.from(map.values());
+  }, [approvedItemsList]);
+
+  const toggleSelectBankApproved = (itemIds: string[]) => {
+    const allSelected =
+      itemIds.length > 0 && itemIds.every((id) => selectedApprovedIds.has(id));
+    if (allSelected) {
+      setSelectedApprovedIds(new Set());
+    } else {
+      setSelectedApprovedIds(new Set(itemIds));
+    }
+  };
 
   const toggleSelectApproved = (id: string) => {
     setSelectedApprovedIds((prev) => {
@@ -208,6 +329,7 @@ export function PaymentsWorkspace({
     } else if (savedPayment.status === 'DRAFT') {
       setActiveTab('DRAFT');
     }
+    refreshServerState();
   };
 
   // Submit draft payment directly from table row (Optimistic UI)
@@ -234,6 +356,7 @@ export function PaymentsWorkspace({
       setPayments((prev) =>
         prev.map((p) => (p.id === paymentId ? res.data : p))
       );
+      refreshServerState();
     } catch {
       setPayments(previousPayments);
       toast.error('Failed to submit payment. Rolled back.');
@@ -260,6 +383,7 @@ export function PaymentsWorkspace({
         toast.error(res.error || 'Failed to delete draft payment.');
         return;
       }
+      refreshServerState();
     } catch {
       setPayments(previousPayments);
       toast.error('Failed to delete draft payment. Rolled back.');
@@ -289,15 +413,18 @@ export function PaymentsWorkspace({
     }
   };
 
-  // Filter payment items according to the active tab
-  let filteredRows: PaymentItem[] = [];
-  if (activeTab === 'PENDING_APPROVAL') {
-    filteredRows = payments.filter(
-      (p) => p.status === 'PENDING_APPROVAL' || p.status === 'ON_HOLD'
-    );
-  } else {
-    filteredRows = payments.filter((p) => p.status === activeTab);
-  }
+  // Filter payment items according to the active tab and mode filter
+  const tabRows =
+    activeTab === 'PENDING_APPROVAL'
+      ? payments.filter(
+          (p) => p.status === 'PENDING_APPROVAL' || p.status === 'ON_HOLD'
+        )
+      : payments.filter((p) => p.status === activeTab);
+
+  const filteredRows =
+    modeFilter === 'ALL'
+      ? tabRows
+      : tabRows.filter((p) => (p.payment_mode || 'NEFT_RTGS') === modeFilter);
 
   // Calculate sum of net payable for visible items
   const totalVisibleNet = filteredRows.reduce(
@@ -309,14 +436,15 @@ export function PaymentsWorkspace({
 
   return (
     <div className="w-full max-w-7xl mx-auto space-y-4 sm:space-y-5 pb-12">
+      <PaymentUrlSync onParams={handleUrlParams} />
       {/* TOP BANK BALANCE STRIP & ACTION HEADER */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 sm:gap-4 p-3.5 sm:p-4 rounded-xl border border-slate-200 bg-white shadow-sm">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 sm:gap-4 p-3 sm:p-4 rounded-xl border border-slate-200 bg-white shadow-sm">
         <div className="space-y-2 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
+          <div className="hidden sm:flex items-center gap-2 flex-wrap">
             <h1 className="text-lg sm:text-xl font-bold tracking-tight text-slate-900">
               Payments Ledger
             </h1>
-            <span className="text-xs text-slate-400 font-medium hidden sm:inline">
+            <span className="text-xs text-slate-400 font-medium">
               • Prepare, verify, and track disbursements
             </span>
           </div>
@@ -353,20 +481,10 @@ export function PaymentsWorkspace({
             <span>Update Balances</span>
           </button>
 
-          <Link href="/print" className="flex-1 sm:flex-initial">
-            <button
-              type="button"
-              className="w-full min-h-[40px] sm:min-h-[36px] px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs font-medium text-slate-700 inline-flex items-center justify-center gap-1.5 transition-colors shadow-sm cursor-pointer"
-            >
-              <Printer className="w-4 h-4 text-slate-500 shrink-0" />
-              <span>Print Voucher</span>
-            </button>
-          </Link>
-
           <button
             type="button"
             onClick={handleOpenNewEntry}
-            className="w-full sm:w-auto min-h-[42px] sm:min-h-[36px] px-4 py-1.5 rounded-lg bg-brand hover:bg-brand-hover text-white text-xs font-semibold inline-flex items-center justify-center gap-1.5 transition-colors shadow-sm cursor-pointer"
+            className="min-h-[40px] sm:min-h-[36px] flex-1 sm:flex-initial px-4 py-1.5 rounded-lg bg-brand hover:bg-brand-hover text-white text-xs font-semibold inline-flex items-center justify-center gap-1.5 transition-colors shadow-sm cursor-pointer"
           >
             <Plus className="w-4 h-4 shrink-0" />
             <span>New Entry</span>
@@ -403,6 +521,43 @@ export function PaymentsWorkspace({
         })}
       </div>
 
+      {/* MODE FILTER PILLS */}
+      {tabRows.length > 0 && (
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="text-[11px] font-semibold text-slate-500 mr-1">Mode:</span>
+          {(
+            [
+              { id: 'ALL', label: `All (${tabRows.length})` },
+              {
+                id: 'NEFT_RTGS',
+                label: `NEFT / RTGS (${tabRows.filter((p) => (p.payment_mode || 'NEFT_RTGS') === 'NEFT_RTGS').length})`,
+              },
+              {
+                id: 'IMPS',
+                label: `IMPS (${tabRows.filter((p) => p.payment_mode === 'IMPS').length})`,
+              },
+              {
+                id: 'CHEQUE',
+                label: `Cheque (${tabRows.filter((p) => p.payment_mode === 'CHEQUE').length})`,
+              },
+            ] as const
+          ).map((pill) => (
+            <button
+              key={pill.id}
+              type="button"
+              onClick={() => setModeFilter(pill.id)}
+              className={`min-h-[32px] px-2.5 py-1 rounded-full border text-[11px] font-semibold tabular-nums transition-colors cursor-pointer ${
+                modeFilter === pill.id
+                  ? 'bg-slate-900 text-white border-slate-900 shadow-xs'
+                  : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+              }`}
+            >
+              {pill.label}
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* TAB CONTENT: PAYMENTS TABLE / CARDS */}
       <div>
         {filteredRows.length === 0 ? (
@@ -426,11 +581,11 @@ export function PaymentsWorkspace({
           </div>
         ) : (
           <div className="space-y-3">
-            {/* READY TO PAY: BANK BULK EXCEL EXPORT TOOLBAR */}
+            {/* READY TO PAY: BATCH SETTLEMENT & BANK BULK EXCEL EXPORT TOOLBAR */}
             {activeTab === 'APPROVED' && (
-              <div className="p-3.5 rounded-xl bg-white border border-slate-200 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="p-3.5 rounded-xl bg-white border border-slate-200 shadow-sm flex flex-col lg:flex-row lg:items-center justify-between gap-3">
                 <div className="flex items-center gap-3 flex-wrap">
-                  <label className="inline-flex items-center gap-2 text-xs font-semibold text-slate-700 cursor-pointer">
+                  <label className="inline-flex items-center gap-2 text-xs font-semibold text-slate-700 cursor-pointer min-h-[32px]">
                     <input
                       type="checkbox"
                       checked={
@@ -442,6 +597,36 @@ export function PaymentsWorkspace({
                     />
                     <span>Select All ({approvedItemsList.length})</span>
                   </label>
+
+                  {approvedBankGroups.length >= 2 && (
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      {approvedBankGroups.map((group) => {
+                        const isGroupActive =
+                          group.itemIds.length > 0 &&
+                          group.itemIds.every((id) =>
+                            selectedApprovedIds.has(id)
+                          ) &&
+                          selectedApprovedIds.size === group.itemIds.length;
+                        return (
+                          <button
+                            key={group.bankId}
+                            type="button"
+                            onClick={() =>
+                              toggleSelectBankApproved(group.itemIds)
+                            }
+                            className={`px-2.5 py-1 rounded-md text-[11px] font-semibold border transition-colors cursor-pointer ${
+                              isGroupActive
+                                ? 'bg-brand-tint text-brand border-brand/40'
+                                : 'bg-slate-50 hover:bg-slate-100 text-slate-600 border-slate-200'
+                            }`}
+                          >
+                            {group.label} ({group.itemIds.length})
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+
                   <span className="text-xs text-slate-500">
                     {selectedApprovedIds.size > 0 ? (
                       <>
@@ -456,22 +641,39 @@ export function PaymentsWorkspace({
                         </strong>
                       </>
                     ) : (
-                      <span>Select specific rows or export all Ready-to-Pay items</span>
+                      <span>Select payments to settle as a Day Batch or export Axis Excel</span>
                     )}
                   </span>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={() => setIsExcelModalOpen(true)}
-                  className="min-h-[40px] sm:min-h-[38px] px-3.5 py-1.5 rounded-lg bg-brand hover:bg-brand-hover text-white text-xs font-semibold inline-flex items-center justify-center gap-1.5 shadow-sm transition-colors cursor-pointer"
-                >
-                  <FileSpreadsheet className="w-4 h-4" />
-                  <span>
-                    Export Bank Bulk Excel
-                    {selectedApprovedIds.size > 0 ? ` (${selectedApprovedIds.size})` : ''}
-                  </span>
-                </button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={selectedApprovedIds.size === 0}
+                    onClick={() => setIsBatchModalOpen(true)}
+                    className="min-h-[40px] sm:min-h-[38px] px-3.5 py-1.5 rounded-lg bg-brand hover:bg-brand-hover disabled:opacity-45 disabled:cursor-not-allowed text-white text-xs font-semibold inline-flex items-center justify-center gap-1.5 shadow-sm transition-colors cursor-pointer"
+                  >
+                    <Layers className="w-4 h-4" />
+                    <span>
+                      Settle as Day Batch
+                      {selectedApprovedIds.size > 0
+                        ? ` (${selectedApprovedIds.size})`
+                        : ''}
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setIsExcelModalOpen(true)}
+                    className="min-h-[40px] sm:min-h-[38px] px-3.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold inline-flex items-center justify-center gap-1.5 shadow-sm transition-colors cursor-pointer"
+                  >
+                    <FileSpreadsheet className="w-4 h-4" />
+                    <span>
+                      Export Axis Excel
+                      {selectedApprovedIds.size > 0 ? ` (${selectedApprovedIds.size})` : ''}
+                    </span>
+                  </button>
+                </div>
               </div>
             )}
 
@@ -515,10 +717,13 @@ export function PaymentsWorkspace({
                     return (
                       <tr
                         key={item.id}
+                        data-payment-id={item.id}
                         onClick={() => setDetailPayment(item)}
-                        className={`hover:bg-slate-50/60 transition-colors cursor-pointer group ${activeTab === 'APPROVED' && selectedApprovedIds.has(item.id)
-                          ? 'bg-brand/5'
-                          : ''
+                        className={`hover:bg-slate-50/60 transition-colors cursor-pointer group ${highlightedId === item.id
+                          ? 'ring-2 ring-inset ring-brand bg-brand-tint/60 animate-pulse'
+                          : activeTab === 'APPROVED' && selectedApprovedIds.has(item.id)
+                            ? 'bg-brand/5'
+                            : ''
                           }`}
                       >
                         {activeTab === 'APPROVED' && (
@@ -557,17 +762,12 @@ export function PaymentsWorkspace({
                           <div className="font-semibold text-slate-900 truncate">
                             {vendorDisplayName}
                           </div>
-                          <div className="flex items-center gap-1 mt-0.5">
-                            {item.payment_type === 'ON_ACCOUNT' && (
-                              <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-purple-100 text-purple-800">
-                                On Account
-                              </span>
-                            )}
-                            {item.payment_mode === 'CHEQUE' && (
-                              <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-blue-100 text-blue-800">
-                                Cheque {item.cheque_number ? `#${item.cheque_number}` : ''}
-                              </span>
-                            )}
+                          <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                            <PaymentModeBadge
+                              mode={item.payment_mode}
+                              chequeNumber={item.cheque_number}
+                              compact
+                            />
                             {item.vendor?.account_number && (
                               <span className="text-[10px] text-slate-400 font-mono">
                                 A/C: {item.vendor.account_number}
@@ -786,8 +986,12 @@ export function PaymentsWorkspace({
                 return (
                   <div
                     key={item.id}
+                    data-payment-id={item.id}
                     onClick={() => setDetailPayment(item)}
-                    className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm space-y-3 cursor-pointer active:scale-[0.99] transition-transform"
+                    className={`bg-white rounded-xl border p-4 shadow-sm space-y-3 cursor-pointer active:scale-[0.99] transition-all ${highlightedId === item.id
+                      ? 'border-brand ring-2 ring-brand animate-pulse'
+                      : 'border-slate-200'
+                      }`}
                   >
                     {/* Header Row: Vendor Name + Net Amount */}
                     <div className="flex items-start justify-between gap-2">
@@ -836,10 +1040,13 @@ export function PaymentsWorkspace({
                     {/* Purpose and Bank */}
                     <div className="flex items-center justify-between gap-2 text-xs text-slate-600 bg-slate-50/70 p-2 rounded-lg border border-slate-100">
                       <span className="truncate min-w-0 flex-1">{item.purpose}</span>
-                      <BankBadge
-                        shortName={item.source_bank?.short_code || item.source_bank?.short_name}
-                        fullName={item.source_bank?.bank_name || item.source_bank?.full_name}
-                      />
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <PaymentModeBadge mode={item.payment_mode} compact />
+                        <BankBadge
+                          shortName={item.source_bank?.short_code || item.source_bank?.short_name}
+                          fullName={item.source_bank?.bank_name || item.source_bank?.full_name}
+                        />
+                      </div>
                     </div>
 
                     {/* Mobile Action Buttons */}
@@ -928,6 +1135,7 @@ export function PaymentsWorkspace({
         banks={banks}
         onSuccess={(updated) => {
           setBanks(updated);
+          refreshServerState();
         }}
       />
 
@@ -937,6 +1145,9 @@ export function PaymentsWorkspace({
         onOpenChange={setIsDrawerOpen}
         vendors={vendors}
         banks={banks}
+        reminders={reminders}
+        purposes={purposes}
+        onPurposesChange={setPurposes}
         editPayment={selectedEditPayment}
         initialFromReminder={initialFromReminder}
         onSuccess={handleDrawerSuccess}
@@ -972,8 +1183,69 @@ export function PaymentsWorkspace({
             next.delete(paidItem.id);
             return next;
           });
+          refreshServerState();
         }}
       />
+
+      {/* BATCH SETTLEMENT MODAL */}
+      <BatchSettlementModal
+        open={isBatchModalOpen}
+        onOpenChange={setIsBatchModalOpen}
+        selectedItems={itemsForExcelModal}
+        activeCompany={activeCompany}
+        fallbackUserName={currentUserName}
+        onSuccess={({ payments: settledItems }) => {
+          const settledMap = new Map(settledItems.map((item) => [item.id, item]));
+          setPayments((prev) =>
+            prev.map((p) => settledMap.get(p.id) || p)
+          );
+          setSelectedApprovedIds((prev) => {
+            const next = new Set(prev);
+            for (const item of settledItems) {
+              next.delete(item.id);
+            }
+            return next;
+          });
+          refreshServerState();
+        }}
+      />
+
+      {/* STICKY MOBILE BATCH ACTION BAR */}
+      {activeTab === 'APPROVED' && selectedApprovedIds.size > 0 && (
+        <div className="md:hidden sticky bottom-3 z-20 mx-auto max-w-md rounded-xl border border-slate-200 bg-white/95 backdrop-blur px-3.5 py-2.5 shadow-lg flex items-center justify-between gap-2">
+          <div className="min-w-0">
+            <p className="text-xs font-bold text-slate-900">
+              {selectedApprovedIds.size} selected
+            </p>
+            <p className="text-[11px] font-semibold text-slate-500 tabular-nums">
+              {formatINR(
+                itemsForExcelModal.reduce(
+                  (sum, p) => sum + Number(p.net_payable || 0),
+                  0
+                )
+              )}
+            </p>
+          </div>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              type="button"
+              onClick={() => setIsExcelModalOpen(true)}
+              className="min-h-[40px] px-2.5 rounded-lg border border-slate-200 bg-white text-slate-700 text-xs font-semibold inline-flex items-center gap-1 cursor-pointer"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5" />
+              <span>Excel</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsBatchModalOpen(true)}
+              className="min-h-[40px] px-3 rounded-lg bg-brand hover:bg-brand-hover text-white text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
+            >
+              <Layers className="w-3.5 h-3.5" />
+              <span>Settle Batch</span>
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* PAYMENT ACKNOWLEDGEMENT / WHATSAPP MODAL */}
       <PaymentAcknowledgementModal

@@ -1,12 +1,29 @@
 'use client';
 
 import * as React from 'react';
-import { UserPlus, Plus, Loader2, Edit2, Shield, Building2, Check, Star } from 'lucide-react';
+import {
+  UserPlus,
+  Plus,
+  Loader2,
+  Edit2,
+  Shield,
+  Building2,
+  Check,
+  Star,
+  Save,
+  Trash2,
+  AlertTriangle,
+  Eye,
+  EyeOff,
+} from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { toast } from 'sonner';
 import { createUser, updateUser, toggleUserActive } from '@/actions/auth';
 import { createCompanyBank, updateCompanyBank, toggleCompanyBankActive } from '@/actions/banks';
+import { updateCompanyProfile } from '@/actions/company';
+import { deleteCompanyBank, deleteStaffUser } from '@/actions/settings';
+import { ThemeSegmentedControl, useTheme } from '@/components/layout/theme-provider';
 import {
   createUserSchema,
   updateUserSchema,
@@ -49,8 +66,30 @@ export function SettingsManagement({
   allCompanies,
 }: SettingsManagementProps) {
   const [activeTab, setActiveTab] = React.useState<'users' | 'banks'>('users');
+  const [mobileSection, setMobileSection] = React.useState<'company' | 'team' | 'banks' | 'theme'>('company');
   const [users, setUsers] = React.useState<EnrichedProfile[]>(initialUsers);
   const [banks, setBanks] = React.useState<CompanyBank[]>(initialBanks);
+  const [savedCompanyOverride, setSavedCompanyOverride] = React.useState<Company | null>(null);
+  const activeCompanyId = activeCompany?.id ?? null;
+  const activeCompanyName = activeCompany?.name ?? '';
+  const activeCompanyEmail = activeCompany?.contact_email ?? '';
+  const activeCompanyPhone = activeCompany?.contact_phone ?? '';
+
+  const [companyDraft, setCompanyDraft] = React.useState<{
+    name: string;
+    contact_email: string;
+    contact_phone: string;
+  }>({
+    name: activeCompanyName,
+    contact_email: activeCompanyEmail,
+    contact_phone: activeCompanyPhone,
+  });
+  const [isSavingCompany, setIsSavingCompany] = React.useState<boolean>(false);
+
+  const displayedCompany =
+    savedCompanyOverride && savedCompanyOverride.id === activeCompanyId
+      ? savedCompanyOverride
+      : activeCompany;
 
   // Dialog visibility
   const [isAddUserOpen, setIsAddUserOpen] = React.useState(false);
@@ -59,7 +98,25 @@ export function SettingsManagement({
   const [isAddBankOpen, setIsAddBankOpen] = React.useState(false);
   const [editingBank, setEditingBank] = React.useState<CompanyBank | null>(null);
 
+  // Permanent deletion modal state
+  type DeleteTarget =
+    | { kind: 'bank'; id: string; title: string; subtitle: string }
+    | { kind: 'user'; id: string; title: string; subtitle: string };
+  const [deleteTarget, setDeleteTarget] = React.useState<DeleteTarget | null>(null);
+  const [adminPassword, setAdminPassword] = React.useState<string>('');
+  const [showDeletePassword, setShowDeletePassword] = React.useState<boolean>(false);
+  const [deleteError, setDeleteError] = React.useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = React.useState<boolean>(false);
+
   const [isPending, startTransition] = React.useTransition();
+  const { theme, resolvedTheme, mounted } = useTheme();
+  const activeThemeLabel = !mounted
+    ? 'Light'
+    : theme === 'system'
+      ? `System (${resolvedTheme === 'dark' ? 'Dark' : 'Light'})`
+      : theme === 'dark'
+        ? 'Dark'
+        : 'Light';
 
   React.useEffect(() => {
     setUsers(initialUsers);
@@ -69,6 +126,15 @@ export function SettingsManagement({
     setBanks(initialBanks);
   }, [initialBanks]);
 
+  React.useEffect(() => {
+    setSavedCompanyOverride(null);
+    setCompanyDraft({
+      name: activeCompanyName,
+      contact_email: activeCompanyEmail,
+      contact_phone: activeCompanyPhone,
+    });
+  }, [activeCompanyId, activeCompanyName, activeCompanyEmail, activeCompanyPhone]);
+
   // React Hook Form for Add User
   const addUserForm = useForm<CreateUserInput>({
     resolver: zodResolver(createUserSchema),
@@ -77,7 +143,6 @@ export function SettingsManagement({
       email: '',
       password: '',
       role: 'PREPARER',
-      is_admin: false,
       company_ids: allCompanies.map((c) => c.id),
     },
   });
@@ -89,7 +154,6 @@ export function SettingsManagement({
       user_id: '',
       full_name: '',
       role: 'PREPARER',
-      is_admin: false,
       is_active: true,
       company_ids: [],
     },
@@ -129,7 +193,6 @@ export function SettingsManagement({
       email: '',
       password: '',
       role: 'PREPARER',
-      is_admin: false,
       company_ids: allCompanies.map((c) => c.id),
     });
     setIsAddUserOpen(true);
@@ -142,7 +205,6 @@ export function SettingsManagement({
       user_id: user.id,
       full_name: user.full_name,
       role: user.role,
-      is_admin: user.is_admin,
       is_active: user.is_active,
       company_ids: assignedIds.length > 0 ? assignedIds : allCompanies.map((c) => c.id),
     });
@@ -279,21 +341,112 @@ export function SettingsManagement({
     });
   }
 
+  // Save Active Company Profile & Slip Details
+  async function handleSaveCompanyProfile(e: React.FormEvent) {
+    e.preventDefault();
+    if (!displayedCompany) return;
+
+    setIsSavingCompany(true);
+    try {
+      const res = await updateCompanyProfile({
+        companyId: displayedCompany.id,
+        name: companyDraft.name,
+        contact_email: companyDraft.contact_email,
+        contact_phone: companyDraft.contact_phone,
+      });
+
+      if (!res.success) {
+        toast.error(res.error);
+        return;
+      }
+
+      setSavedCompanyOverride(res.data);
+      setCompanyDraft({
+        name: res.data.name || '',
+        contact_email: res.data.contact_email || '',
+        contact_phone: res.data.contact_phone || '',
+      });
+      toast.success(`Saved ${displayedCompany.code} details`);
+    } catch {
+      toast.error(`Failed to update ${displayedCompany.code} details.`);
+    } finally {
+      setIsSavingCompany(false);
+    }
+  }
+
+  function openDeleteModal(target: DeleteTarget) {
+    setDeleteTarget(target);
+    setAdminPassword('');
+    setShowDeletePassword(false);
+    setDeleteError(null);
+  }
+
+  function closeDeleteModal() {
+    if (isDeleting) return;
+    setDeleteTarget(null);
+    setAdminPassword('');
+    setShowDeletePassword(false);
+    setDeleteError(null);
+  }
+
+  async function handleConfirmDelete(e: React.FormEvent) {
+    e.preventDefault();
+    if (!deleteTarget || !adminPassword.trim()) return;
+
+    setIsDeleting(true);
+    setDeleteError(null);
+
+    try {
+      if (deleteTarget.kind === 'bank') {
+        const res = await deleteCompanyBank({
+          bankId: deleteTarget.id,
+          adminPassword,
+        });
+        if (!res.success) {
+          setDeleteError(res.error);
+          return;
+        }
+        setBanks((prev) => prev.filter((b) => b.id !== deleteTarget.id));
+        toast.success(`Permanently deleted "${deleteTarget.title}".`);
+      } else {
+        const res = await deleteStaffUser({
+          targetUserId: deleteTarget.id,
+          adminPassword,
+        });
+        if (!res.success) {
+          setDeleteError(res.error);
+          return;
+        }
+        setUsers((prev) => prev.filter((u) => u.id !== deleteTarget.id));
+        toast.success(`Permanently deleted user "${deleteTarget.title}".`);
+      }
+
+      setDeleteTarget(null);
+      setAdminPassword('');
+      setShowDeletePassword(false);
+      setDeleteError(null);
+    } catch {
+      setDeleteError('Network error while attempting deletion. Please try again.');
+    } finally {
+      setIsDeleting(false);
+    }
+  }
+
   return (
     <div>
-      {/* Top Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5 sm:mb-6">
+      {/* Top Header (Desktop >= 640px) */}
+      <div className="hidden sm:flex sm:items-center justify-between gap-3 mb-6">
         <div className="min-w-0">
-          <h1 className="text-lg sm:text-xl font-bold tracking-tight text-slate-900">Admin Settings</h1>
+          <h1 className="text-xl font-bold tracking-tight text-slate-900">Admin Settings</h1>
           <p className="text-xs text-slate-500 mt-0.5">
-            Manage team accounts, multi-company access, and company disbursement banks.
+            Manage company slip details, team accounts, multi-company access, and disbursement banks.
           </p>
         </div>
         {activeTab === 'users' ? (
           <Button
             type="button"
             onClick={openAddUser}
-            className="w-full sm:w-auto min-h-[42px] px-4 rounded-lg bg-[#7F1D1D] hover:bg-[#991B1B] text-white text-xs font-semibold inline-flex items-center justify-center gap-1.5 shadow-sm transition-colors cursor-pointer shrink-0"
+            className="w-auto min-h-[38px] px-4 rounded-lg bg-[#7F1D1D] hover:bg-[#991B1B] text-white text-xs font-semibold inline-flex items-center justify-center gap-1.5 shadow-sm transition-colors cursor-pointer shrink-0"
           >
             <UserPlus className="w-4 h-4" />
             <span>Add Team Member</span>
@@ -302,7 +455,7 @@ export function SettingsManagement({
           <Button
             type="button"
             onClick={openAddBank}
-            className="w-full sm:w-auto min-h-[42px] px-4 rounded-lg bg-[#7F1D1D] hover:bg-[#991B1B] text-white text-xs font-semibold inline-flex items-center justify-center gap-1.5 shadow-sm transition-colors cursor-pointer shrink-0"
+            className="w-auto min-h-[38px] px-4 rounded-lg bg-[#7F1D1D] hover:bg-[#991B1B] text-white text-xs font-semibold inline-flex items-center justify-center gap-1.5 shadow-sm transition-colors cursor-pointer shrink-0"
           >
             <Plus className="w-4 h-4" />
             <span>Add Bank</span>
@@ -310,12 +463,203 @@ export function SettingsManagement({
         )}
       </div>
 
-      {/* 2-Tab Pill Switcher */}
-      <div className="grid grid-cols-2 sm:inline-flex items-center p-1 rounded-lg bg-slate-100 border border-slate-200/80 mb-5 sm:mb-6 select-none w-full sm:w-auto">
+      {/* Mobile Section Pill Switcher (< 640px) */}
+      <div className="grid grid-cols-4 sm:hidden p-1 rounded-lg bg-slate-100 border border-slate-200/80 mb-4 select-none">
+        {(
+          [
+            { id: 'company', label: 'Company' },
+            { id: 'team', label: 'Team' },
+            { id: 'banks', label: 'Banks' },
+            { id: 'theme', label: 'Theme' },
+          ] as const
+        ).map((tab) => {
+          const isActive = mobileSection === tab.id;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => {
+                setMobileSection(tab.id);
+                if (tab.id === 'team') setActiveTab('users');
+                if (tab.id === 'banks') setActiveTab('banks');
+              }}
+              className={`min-h-[36px] px-2 rounded-md text-xs font-semibold transition-all cursor-pointer truncate ${
+                isActive
+                  ? 'bg-white text-slate-900 shadow-sm'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              {tab.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Active Company Profile & Slip Details */}
+      {displayedCompany && (
+        <section className={`${mobileSection === 'company' ? 'block' : 'hidden sm:block'} mb-5 space-y-3`}>
+          <div className="hidden sm:block">
+            <h2 className="text-sm font-bold text-slate-900">
+              Company Details (Acknowledgement &amp; Print Sheets)
+            </h2>
+            <p className="text-[11px] text-slate-500">
+              Used on Payment Acknowledgement slips and Print Vouchers.
+            </p>
+          </div>
+
+          <form
+            key={displayedCompany.id}
+            onSubmit={handleSaveCompanyProfile}
+            className="bg-white rounded-xl border border-slate-200 p-4 sm:p-5 shadow-sm space-y-3.5"
+          >
+            <div className="flex items-start justify-between gap-2 pb-2.5 border-b border-slate-100">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="px-2 py-0.5 rounded bg-slate-900 text-white text-[10px] font-bold uppercase tracking-wider">
+                    {displayedCompany.code}
+                  </span>
+                  <span className="text-xs font-semibold text-slate-700">
+                    Slip &amp; Voucher Details
+                  </span>
+                </div>
+                <p className="hidden sm:block text-[11px] text-slate-500 mt-1">
+                  Editing active company — switch company in the header to edit another.
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div>
+                <Label
+                  htmlFor={`company-name-${displayedCompany.id}`}
+                  className="block text-xs font-semibold text-slate-700 mb-1"
+                >
+                  Display / Signature Name <span className="text-rose-600">*</span>
+                </Label>
+                <Input
+                  id={`company-name-${displayedCompany.id}`}
+                  value={companyDraft.name}
+                  onChange={(e) =>
+                    setCompanyDraft((prev) => ({ ...prev, name: e.target.value }))
+                  }
+                  placeholder={
+                    displayedCompany.code.toUpperCase() === 'VINMORE'
+                      ? 'e.g., Vinmore'
+                      : 'e.g., Indfurn'
+                  }
+                  required
+                  minLength={2}
+                  maxLength={80}
+                  disabled={isSavingCompany}
+                  className="w-full min-h-[40px] text-sm"
+                />
+              </div>
+
+              <div>
+                <Label
+                  htmlFor={`company-email-${displayedCompany.id}`}
+                  className="block text-xs font-semibold text-slate-700 mb-1"
+                >
+                  Contact Email
+                </Label>
+                <Input
+                  id={`company-email-${displayedCompany.id}`}
+                  type="email"
+                  value={companyDraft.contact_email}
+                  onChange={(e) =>
+                    setCompanyDraft((prev) => ({
+                      ...prev,
+                      contact_email: e.target.value,
+                    }))
+                  }
+                  placeholder={
+                    displayedCompany.code.toUpperCase() === 'VINMORE'
+                      ? 'e.g., accounts@vinmore.in'
+                      : 'e.g., info@indfurn.in'
+                  }
+                  disabled={isSavingCompany}
+                  className="w-full min-h-[40px] text-sm"
+                />
+              </div>
+
+              <div>
+                <Label
+                  htmlFor={`company-phone-${displayedCompany.id}`}
+                  className="block text-xs font-semibold text-slate-700 mb-1"
+                >
+                  Contact Phone
+                </Label>
+                <Input
+                  id={`company-phone-${displayedCompany.id}`}
+                  type="text"
+                  value={companyDraft.contact_phone}
+                  onChange={(e) =>
+                    setCompanyDraft((prev) => ({
+                      ...prev,
+                      contact_phone: e.target.value,
+                    }))
+                  }
+                  placeholder="e.g., 9539 661 661"
+                  maxLength={30}
+                  disabled={isSavingCompany}
+                  className="w-full min-h-[40px] text-sm tabular-nums"
+                />
+              </div>
+            </div>
+
+            <div className="pt-1 flex justify-end">
+              <Button
+                type="submit"
+                size="sm"
+                disabled={isSavingCompany}
+                className="min-h-[38px] px-3.5 bg-[#7F1D1D] hover:bg-[#991B1B] text-white text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
+              >
+                {isSavingCompany ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>Saving...</span>
+                  </>
+                ) : (
+                  <>
+                    <Save className="w-3.5 h-3.5" />
+                    <span>Save Details</span>
+                  </>
+                )}
+              </Button>
+            </div>
+          </form>
+        </section>
+      )}
+
+      {/* Appearance Settings Card */}
+      <section className={`${mobileSection === 'theme' ? 'block' : 'hidden sm:block'} mb-6`}>
+        <div className="bg-white rounded-xl border border-slate-200 p-4 sm:p-5 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              <h2 className="text-sm font-bold text-slate-900">Appearance</h2>
+              <span className="px-2 py-0.5 rounded-full bg-brand-tint text-brand text-[10px] font-bold">
+                Active: {activeThemeLabel}
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-500">
+              Changes apply immediately. Printed vouchers and Payment Advice slips always stay pure white paper.
+            </p>
+          </div>
+          <div className="w-full sm:w-72 shrink-0">
+            <ThemeSegmentedControl />
+          </div>
+        </div>
+      </section>
+
+      {/* 2-Tab Pill Switcher (Desktop >= 640px) */}
+      <div className="hidden sm:inline-flex items-center p-1 rounded-lg bg-slate-100 border border-slate-200/80 mb-6 select-none">
         <button
           type="button"
-          onClick={() => setActiveTab('users')}
-          className={`min-h-[38px] px-3 sm:px-4 rounded-md text-xs font-semibold transition-all cursor-pointer truncate ${activeTab === 'users'
+          onClick={() => {
+            setActiveTab('users');
+            setMobileSection('team');
+          }}
+          className={`min-h-[38px] px-4 rounded-md text-xs font-semibold transition-all cursor-pointer truncate ${activeTab === 'users'
             ? 'bg-white text-slate-900 shadow-sm'
             : 'text-slate-600 hover:text-slate-900'
             }`}
@@ -324,8 +668,11 @@ export function SettingsManagement({
         </button>
         <button
           type="button"
-          onClick={() => setActiveTab('banks')}
-          className={`min-h-[38px] px-3 sm:px-4 rounded-md text-xs font-semibold transition-all cursor-pointer truncate ${activeTab === 'banks'
+          onClick={() => {
+            setActiveTab('banks');
+            setMobileSection('banks');
+          }}
+          className={`min-h-[38px] px-4 rounded-md text-xs font-semibold transition-all cursor-pointer truncate ${activeTab === 'banks'
             ? 'bg-white text-slate-900 shadow-sm'
             : 'text-slate-600 hover:text-slate-900'
             }`}
@@ -336,7 +683,21 @@ export function SettingsManagement({
 
       {/* TAB 1: USERS & ACCESS */}
       {activeTab === 'users' && (
-        <div className="space-y-4">
+        <div className={`${mobileSection === 'team' ? 'block' : 'hidden sm:block'} space-y-4`}>
+          <div className="flex sm:hidden items-center justify-between gap-2">
+            <span className="text-xs font-semibold text-slate-600">
+              {users.length} team member{users.length === 1 ? '' : 's'}
+            </span>
+            <Button
+              type="button"
+              size="sm"
+              onClick={openAddUser}
+              className="min-h-[36px] px-3 rounded-lg bg-[#7F1D1D] hover:bg-[#991B1B] text-white text-xs font-semibold inline-flex items-center gap-1.5 shadow-sm cursor-pointer"
+            >
+              <UserPlus className="w-3.5 h-3.5" />
+              <span>Add Member</span>
+            </Button>
+          </div>
           {/* Desktop Table (md+) */}
           <div className="hidden md:block bg-white rounded-xl border border-slate-200 overflow-hidden shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
             <table className="w-full text-left border-collapse">
@@ -428,7 +789,12 @@ export function SettingsManagement({
                             <Edit2 className="w-3.5 h-3.5" />
                             <span>Edit</span>
                           </button>
-                          {isSelf ? (
+                          {u.is_admin ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-slate-100 border border-slate-200 text-[11px] font-semibold text-slate-600">
+                              <Shield className="w-3 h-3 text-slate-500" />
+                              <span>Protected Admin</span>
+                            </span>
+                          ) : isSelf ? (
                             <span className="text-xs text-slate-400 italic px-2">Locked</span>
                           ) : (
                             <button
@@ -441,6 +807,25 @@ export function SettingsManagement({
                                 }`}
                             >
                               {u.is_active ? 'Disable' : 'Enable'}
+                            </button>
+                          )}
+                          {!isSelf && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                openDeleteModal({
+                                  kind: 'user',
+                                  id: u.id,
+                                  title: u.full_name,
+                                  subtitle: `${u.email || 'No email'} · ${u.role}`,
+                                })
+                              }
+                              disabled={isPending}
+                              title="Permanently delete user"
+                              className="px-2.5 py-1.5 rounded-lg border border-rose-200 bg-white hover:bg-rose-50 text-rose-700 text-xs font-medium inline-flex items-center gap-1 transition-colors cursor-pointer"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                              <span>Delete</span>
                             </button>
                           )}
                         </div>
@@ -523,7 +908,12 @@ export function SettingsManagement({
                         <Edit2 className="w-3.5 h-3.5" />
                         <span>Edit</span>
                       </button>
-                      {!isSelf && (
+                      {u.is_admin ? (
+                        <span className="min-h-[40px] px-2.5 py-1.5 rounded-lg bg-slate-100 border border-slate-200 text-[11px] font-semibold text-slate-600 inline-flex items-center gap-1">
+                          <Shield className="w-3.5 h-3.5 text-slate-500" />
+                          <span>Protected Admin</span>
+                        </span>
+                      ) : !isSelf && (
                         <button
                           type="button"
                           onClick={() => handleToggleUserActive(u.id)}
@@ -534,6 +924,25 @@ export function SettingsManagement({
                             }`}
                         >
                           {u.is_active ? 'Disable' : 'Enable'}
+                        </button>
+                      )}
+                      {!isSelf && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            openDeleteModal({
+                              kind: 'user',
+                              id: u.id,
+                              title: u.full_name,
+                              subtitle: `${u.email || 'No email'} · ${u.role}`,
+                            })
+                          }
+                          disabled={isPending}
+                          aria-label={`Delete ${u.full_name}`}
+                          className="min-h-[40px] px-3 py-1.5 rounded-lg border border-rose-200 bg-white hover:bg-rose-50 text-rose-700 text-xs font-medium inline-flex items-center gap-1 cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Delete</span>
                         </button>
                       )}
                     </div>
@@ -547,7 +956,21 @@ export function SettingsManagement({
 
       {/* TAB 2: COMPANY BANKS */}
       {activeTab === 'banks' && (
-        <div className="space-y-4">
+        <div className={`${mobileSection === 'banks' ? 'block' : 'hidden sm:block'} space-y-4`}>
+          <div className="flex sm:hidden items-center justify-between gap-2">
+            <span className="text-xs font-semibold text-slate-600">
+              {banks.length} bank account{banks.length === 1 ? '' : 's'}
+            </span>
+            <Button
+              type="button"
+              size="sm"
+              onClick={openAddBank}
+              className="min-h-[36px] px-3 rounded-lg bg-[#7F1D1D] hover:bg-[#991B1B] text-white text-xs font-semibold inline-flex items-center gap-1.5 shadow-sm cursor-pointer"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Add Bank</span>
+            </Button>
+          </div>
           {activeCompany && (
             <div className="p-3 rounded-lg bg-slate-50 border border-slate-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
               <div className="flex items-center gap-2 min-w-0">
@@ -617,6 +1040,22 @@ export function SettingsManagement({
                       }`}
                   >
                     {b.is_active ? 'Disable' : 'Enable'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      openDeleteModal({
+                        kind: 'bank',
+                        id: b.id,
+                        title: b.bank_name || b.full_name,
+                        subtitle: `${b.short_code || b.short_name} · ${b.account_number_masked || b.account_mask || 'No masked A/C'}`,
+                      })
+                    }
+                    disabled={isPending}
+                    className="min-h-[40px] px-3.5 rounded-lg border border-rose-200 bg-white hover:bg-rose-50 text-rose-700 text-xs font-semibold inline-flex items-center gap-1 transition-colors cursor-pointer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Delete</span>
                   </button>
                 </div>
               </div>
@@ -700,25 +1139,13 @@ export function SettingsManagement({
                 id="au-role"
                 {...addUserForm.register('role')}
                 disabled={isPending}
-                className="w-full min-h-[42px] px-3 rounded-lg border border-slate-200 bg-white text-sm outline-none focus:border-[#7F1D1D] cursor-pointer"
+                className="w-full min-h-[42px] px-3 rounded-lg border border-slate-300 bg-white text-sm text-slate-950 font-medium shadow-sm hover:border-slate-400 outline-none focus:border-[#7F1D1D] focus:ring-2 focus:ring-[#7F1D1D]/15 cursor-pointer transition-colors"
               >
                 <option value="PREPARER">Preparer (Accounts Executive — Prepares & Executes)</option>
                 <option value="VERIFIER">Verifier (Senior Accountant — First Review)</option>
-                <option value="APPROVER">Approver (Owner / Final Authority — Approves Dues)</option>
+                <option value="APPROVER">Approver (Final Authority — Approves Dues)</option>
                 <option value="AUDITOR">Auditor (Internal/External Auditor — Read-Only Audit)</option>
               </select>
-            </div>
-
-            <div className="flex items-center gap-2 p-2.5 rounded-lg bg-slate-50 border border-slate-200/80">
-              <input
-                id="au-admin"
-                type="checkbox"
-                {...addUserForm.register('is_admin')}
-                className="w-4 h-4 text-[#7F1D1D] rounded border-slate-300 focus:ring-[#7F1D1D]"
-              />
-              <Label htmlFor="au-admin" className="text-xs font-medium text-slate-800 cursor-pointer">
-                Grant Admin Privileges (Can manage users & banks)
-              </Label>
             </div>
 
             {/* Company Access Checkboxes */}
@@ -806,7 +1233,7 @@ export function SettingsManagement({
           <DialogHeader>
             <DialogTitle>Edit Team Member</DialogTitle>
             <DialogDescription>
-              Update role, admin privilege, company scoping, and active status.
+              Update operational role, company scoping, and active status.
             </DialogDescription>
           </DialogHeader>
 
@@ -836,45 +1263,34 @@ export function SettingsManagement({
                 id="eu-role"
                 {...editUserForm.register('role')}
                 disabled={isPending}
-                className="w-full min-h-[42px] px-3 rounded-lg border border-slate-200 bg-white text-sm outline-none focus:border-[#7F1D1D] cursor-pointer"
+                className="w-full min-h-[42px] px-3 rounded-lg border border-slate-300 bg-white text-sm text-slate-950 font-medium shadow-sm hover:border-slate-400 outline-none focus:border-[#7F1D1D] focus:ring-2 focus:ring-[#7F1D1D]/15 cursor-pointer transition-colors"
               >
                 <option value="PREPARER">Preparer (Accounts Executive)</option>
                 <option value="VERIFIER">Verifier (Senior Accountant)</option>
-                <option value="APPROVER">Approver (Owner / Final Authority)</option>
+                <option value="APPROVER">Approver (Final Authority)</option>
                 <option value="AUDITOR">Auditor (Internal / External Auditor)</option>
               </select>
             </div>
 
-            {/* Self-Lockout Protection Notice */}
-            {editingUser?.id === currentUserId ? (
-              <div className="p-2.5 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-800">
-                You are currently editing your own administrator account. Admin privilege and active status are locked for safety.
+            {/* Admin Protection / Active Status */}
+            {editingUser?.is_admin || editingUser?.id === currentUserId ? (
+              <div className="p-2.5 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-800 flex items-center gap-2">
+                <Shield className="w-4 h-4 text-amber-700 shrink-0" />
+                <span>
+                  Protected Administrator account: Admin privileges and active status are locked and cannot be disabled.
+                </span>
               </div>
             ) : (
-              <div className="space-y-2">
-                <div className="flex items-center gap-2 p-2.5 rounded-lg bg-slate-50 border border-slate-200/80">
-                  <input
-                    id="eu-admin"
-                    type="checkbox"
-                    {...editUserForm.register('is_admin')}
-                    className="w-4 h-4 text-[#7F1D1D] rounded border-slate-300 focus:ring-[#7F1D1D]"
-                  />
-                  <Label htmlFor="eu-admin" className="text-xs font-medium text-slate-800 cursor-pointer">
-                    Grant Admin Privileges
-                  </Label>
-                </div>
-
-                <div className="flex items-center gap-2 p-2.5 rounded-lg bg-slate-50 border border-slate-200/80">
-                  <input
-                    id="eu-active"
-                    type="checkbox"
-                    {...editUserForm.register('is_active')}
-                    className="w-4 h-4 text-emerald-600 rounded border-slate-300 focus:ring-emerald-600"
-                  />
-                  <Label htmlFor="eu-active" className="text-xs font-medium text-slate-800 cursor-pointer">
-                    Account Active (User can log in)
-                  </Label>
-                </div>
+              <div className="flex items-center gap-2 p-2.5 rounded-lg bg-slate-50 border border-slate-200/80">
+                <input
+                  id="eu-active"
+                  type="checkbox"
+                  {...editUserForm.register('is_active')}
+                  className="w-4 h-4 text-emerald-600 rounded border-slate-300 focus:ring-emerald-600"
+                />
+                <Label htmlFor="eu-active" className="text-xs font-medium text-slate-800 cursor-pointer">
+                  Account Active (User can log in)
+                </Label>
               </div>
             )}
 
@@ -1230,6 +1646,120 @@ export function SettingsManagement({
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* MODAL: CONFIRM PERMANENT DELETION (ADMIN PASSWORD PROTECTED) */}
+      <Dialog
+        open={Boolean(deleteTarget)}
+        onOpenChange={(open) => {
+          if (!open) closeDeleteModal();
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-base font-bold text-rose-700 flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+              <span>
+                {deleteTarget?.kind === 'bank'
+                  ? 'Permanently Delete Bank'
+                  : 'Permanently Delete User'}
+              </span>
+            </DialogTitle>
+            <DialogDescription className="text-xs text-slate-500">
+              Admin password verification is required before permanent deletion.
+            </DialogDescription>
+          </DialogHeader>
+
+          {deleteTarget && (
+            <form onSubmit={handleConfirmDelete} className="space-y-4">
+              <div className="p-3 rounded-lg bg-slate-50 border border-slate-200 space-y-0.5">
+                <div className="text-xs font-bold text-slate-900 break-words">
+                  {deleteTarget.title}
+                </div>
+                <div className="text-[11px] text-slate-500 break-words">
+                  {deleteTarget.subtitle}
+                </div>
+              </div>
+
+              <div className="p-2.5 rounded-lg bg-rose-50 border border-rose-200 text-xs text-rose-800 flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                <span>
+                  This action cannot be undone. Items with existing payment history cannot be deleted and must be disabled instead.
+                </span>
+              </div>
+
+              <div>
+                <Label
+                  htmlFor="delete-admin-password"
+                  className="block text-xs font-semibold text-slate-700 mb-1"
+                >
+                  Confirm Admin Password <span className="text-rose-600">*</span>
+                </Label>
+                <div className="relative">
+                  <Input
+                    id="delete-admin-password"
+                    type={showDeletePassword ? 'text' : 'password'}
+                    autoFocus
+                    autoComplete="current-password"
+                    required
+                    value={adminPassword}
+                    onChange={(e) => {
+                      setAdminPassword(e.target.value);
+                      if (deleteError) setDeleteError(null);
+                    }}
+                    placeholder="Enter your admin password"
+                    disabled={isDeleting}
+                    className="w-full min-h-[42px] pr-10"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowDeletePassword((prev) => !prev)}
+                    aria-label={showDeletePassword ? 'Hide password' : 'Show password'}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-700 cursor-pointer"
+                  >
+                    {showDeletePassword ? (
+                      <EyeOff className="w-4 h-4" />
+                    ) : (
+                      <Eye className="w-4 h-4" />
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {deleteError && (
+                <div className="p-2.5 rounded-lg bg-rose-50 border border-rose-200 text-xs font-medium text-rose-700">
+                  {deleteError}
+                </div>
+              )}
+
+              <DialogFooter className="pt-1">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={closeDeleteModal}
+                  disabled={isDeleting}
+                  className="min-h-[40px] cursor-pointer"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={isDeleting || !adminPassword.trim()}
+                  className="min-h-[40px] bg-rose-600 hover:bg-rose-700 text-white font-semibold cursor-pointer"
+                >
+                  {isDeleting ? (
+                    <span className="inline-flex items-center gap-1.5">
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Deleting...</span>
+                    </span>
+                  ) : (
+                    'Confirm Delete'
+                  )}
+                </Button>
+              </DialogFooter>
+            </form>
+          )}
         </DialogContent>
       </Dialog>
     </div>

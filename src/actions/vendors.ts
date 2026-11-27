@@ -2,9 +2,20 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
-import { vendorSchema, type VendorInput } from '@/lib/validators';
+import {
+  leanVendorSchema,
+  vendorSchema,
+  type LeanVendorInput,
+  type VendorInput,
+} from '@/lib/validators';
 import { getCurrentUserContext } from '@/lib/auth';
-import type { ActionResult, Vendor } from '@/types/database';
+import { getBankNameFromIfsc } from '@/lib/bank-names';
+import type { ActionResult, Profile, Vendor } from '@/types/database';
+
+function canManageVendors(profile: Profile | null): boolean {
+  if (!profile || !profile.is_active) return false;
+  return profile.role === 'PREPARER' || profile.role === 'VERIFIER' || profile.is_admin;
+}
 
 export async function createVendor(
   input: VendorInput
@@ -20,9 +31,12 @@ export async function createVendor(
     return { success: false, error: 'Account is disabled or profile not found.' };
   }
 
-  // Mutations restricted to PREPARER or is_admin
-  if (profile.role !== 'PREPARER' && !profile.is_admin) {
-    return { success: false, error: 'Only an Accounts Preparer or Admin can add vendors.' };
+  // Mutations restricted to PREPARER, VERIFIER, or is_admin
+  if (!canManageVendors(profile)) {
+    return {
+      success: false,
+      error: 'Only an Accounts Preparer, Verifier, or Admin can add vendors.',
+    };
   }
 
   // Validate with Zod
@@ -43,9 +57,29 @@ export async function createVendor(
     return { success: false, error: 'Vendor party name is required.' };
   }
 
-  const beneficiaryName = (vendorData.beneficiary_name || partyName).trim();
-  const accountNumber = (vendorData.account_number || vendorData.bank_account_no || '000000000000').trim();
-  const ifscCode = (vendorData.ifsc_code || 'UTIB0000000').trim().toUpperCase();
+  const beneficiaryName = (vendorData.beneficiary_name || '').trim();
+  const accountNumber = (vendorData.account_number || vendorData.bank_account_no || '').trim();
+  const ifscCode = (vendorData.ifsc_code || '').trim().toUpperCase();
+
+  const strictParsed = leanVendorSchema.safeParse({
+    party_name: partyName,
+    beneficiary_name: beneficiaryName,
+    account_number: accountNumber,
+    ifsc_code: ifscCode,
+    whatsapp_number: vendorData.whatsapp_number ?? null,
+    remarks: vendorData.remarks ?? vendorData.notes ?? null,
+  });
+
+  if (!strictParsed.success) {
+    return {
+      success: false,
+      error: strictParsed.error.issues[0]?.message || 'Complete vendor banking details are required.',
+    };
+  }
+
+  // Resolve bank name via IFSC prefix to verify formatting before insert
+  getBankNameFromIfsc(strictParsed.data.ifsc_code);
+
   const whatsappNumber = vendorData.whatsapp_number?.replace(/[\s-]/g, '').trim() || null;
   const remarks = vendorData.remarks?.trim() || vendorData.notes?.trim() || null;
 
@@ -54,13 +88,13 @@ export async function createVendor(
     .from('vendors')
     .select('id, party_name, name')
     .eq('company_id', companyId)
-    .ilike('party_name', partyName)
+    .ilike('party_name', strictParsed.data.party_name)
     .maybeSingle();
 
   if (existing) {
     return {
       success: false,
-      error: `A vendor with the trade name "${partyName}" already exists in ${activeCompany?.name || 'this company'}.`,
+      error: `A vendor with the trade name "${strictParsed.data.party_name}" already exists in ${activeCompany?.name || 'this company'}.`,
     };
   }
 
@@ -68,15 +102,15 @@ export async function createVendor(
     .from('vendors')
     .insert({
       company_id: companyId,
-      party_name: partyName,
-      beneficiary_name: beneficiaryName,
-      account_number: accountNumber,
-      ifsc_code: ifscCode,
+      party_name: strictParsed.data.party_name,
+      beneficiary_name: strictParsed.data.beneficiary_name,
+      account_number: strictParsed.data.account_number,
+      ifsc_code: strictParsed.data.ifsc_code,
       whatsapp_number: whatsappNumber,
       remarks: remarks,
       // Backward compatibility columns
-      name: partyName,
-      bank_account_no: accountNumber,
+      name: strictParsed.data.party_name,
+      bank_account_no: strictParsed.data.account_number,
       notes: remarks,
       is_active: true,
       created_by: user.id,
@@ -90,6 +124,7 @@ export async function createVendor(
 
   revalidatePath('/vendors');
   revalidatePath('/payments');
+  revalidatePath('/requests');
   return { success: true, data: created as Vendor };
 }
 
@@ -108,9 +143,12 @@ export async function updateVendor(
     return { success: false, error: 'Account is disabled or profile not found.' };
   }
 
-  // Mutations restricted to PREPARER or is_admin
-  if (profile.role !== 'PREPARER' && !profile.is_admin) {
-    return { success: false, error: 'Only an Accounts Preparer or Admin can edit vendors.' };
+  // Mutations restricted to PREPARER, VERIFIER, or is_admin
+  if (!canManageVendors(profile)) {
+    return {
+      success: false,
+      error: 'Only an Accounts Preparer, Verifier, or Admin can edit vendors.',
+    };
   }
 
   const parsed = vendorSchema.safeParse(input);
@@ -212,8 +250,11 @@ export async function toggleVendorActive(
     return { success: false, error: 'Account is disabled or profile not found.' };
   }
 
-  if (profile.role !== 'PREPARER' && !profile.is_admin) {
-    return { success: false, error: 'Only an Accounts Preparer or Admin can change vendor status.' };
+  if (!canManageVendors(profile)) {
+    return {
+      success: false,
+      error: 'Only an Accounts Preparer, Verifier, or Admin can change vendor status.',
+    };
   }
 
   if (!activeCompany) {
@@ -250,4 +291,153 @@ export async function toggleVendorActive(
   revalidatePath('/vendors');
   revalidatePath('/payments');
   return { success: true, data: updated as Vendor };
+}
+
+export async function bulkCreateVendors(
+  rows: LeanVendorInput[]
+): Promise<ActionResult<{ insertedCount: number; skippedDuplicates: number }>> {
+  const supabase = await createClient();
+  const { user, profile, activeCompany } = await getCurrentUserContext();
+
+  if (!user) {
+    return { success: false, error: 'Unauthorized. Please sign in.' };
+  }
+
+  if (!profile || !profile.is_active) {
+    return { success: false, error: 'Account is disabled or profile not found.' };
+  }
+
+  if (!canManageVendors(profile)) {
+    return {
+      success: false,
+      error: 'Only an Accounts Preparer, Verifier, or Admin can bulk import vendors.',
+    };
+  }
+
+  if (!activeCompany) {
+    return {
+      success: false,
+      error: 'A company workspace must be active to import vendors.',
+    };
+  }
+
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return { success: false, error: 'No vendor rows provided for import.' };
+  }
+
+  if (rows.length > 500) {
+    return {
+      success: false,
+      error: 'Maximum 500 vendors can be imported per batch.',
+    };
+  }
+
+  // Validate every row server-side with leanVendorSchema
+  const validatedRows: LeanVendorInput[] = [];
+  for (let i = 0; i < rows.length; i += 1) {
+    const parsed = leanVendorSchema.safeParse(rows[i]);
+    if (!parsed.success) {
+      return {
+        success: false,
+        error: `Row ${i + 1} invalid: ${parsed.error.issues[0]?.message || 'Validation failed'}`,
+      };
+    }
+    validatedRows.push(parsed.data);
+  }
+
+  // Fetch existing party_name records within activeCompany for strict deduplication
+  const { data: existingVendors, error: existingError } = await supabase
+    .from('vendors')
+    .select('party_name, name')
+    .eq('company_id', activeCompany.id);
+
+  if (existingError) {
+    return {
+      success: false,
+      error: existingError.message || 'Failed to check existing company vendors.',
+    };
+  }
+
+  const existingPartySet = new Set<string>(
+    (existingVendors || [])
+      .map((v) => (v.party_name || v.name || '').trim().toLowerCase())
+      .filter(Boolean)
+  );
+
+  const seenBatch = new Set<string>();
+  let skippedDuplicates = 0;
+
+  const rowsToInsert: Array<{
+    company_id: string;
+    party_name: string;
+    beneficiary_name: string;
+    account_number: string;
+    ifsc_code: string;
+    remarks: string | null;
+    name: string;
+    bank_account_no: string;
+    notes: string | null;
+    is_active: boolean;
+    created_by: string;
+  }> = [];
+
+  for (const r of validatedRows) {
+    const partyName = r.party_name.trim();
+    const key = partyName.toLowerCase();
+
+    if (existingPartySet.has(key) || seenBatch.has(key)) {
+      skippedDuplicates += 1;
+      continue;
+    }
+
+    seenBatch.add(key);
+
+    const beneficiaryName = (r.beneficiary_name || partyName).trim();
+    const accountNumber = r.account_number.replace(/[\s-]+/g, '').trim();
+    const ifscCode = r.ifsc_code.trim().toUpperCase();
+    const remarks = r.remarks?.trim() || null;
+
+    rowsToInsert.push({
+      company_id: activeCompany.id,
+      party_name: partyName,
+      beneficiary_name: beneficiaryName,
+      account_number: accountNumber,
+      ifsc_code: ifscCode,
+      remarks,
+      // Backward compatibility columns
+      name: partyName,
+      bank_account_no: accountNumber,
+      notes: remarks,
+      is_active: true,
+      created_by: user.id,
+    });
+  }
+
+  if (rowsToInsert.length === 0) {
+    return {
+      success: true,
+      data: { insertedCount: 0, skippedDuplicates },
+    };
+  }
+
+  const { error: insertError } = await supabase
+    .from('vendors')
+    .insert(rowsToInsert);
+
+  if (insertError) {
+    return {
+      success: false,
+      error: insertError.message || 'Failed to bulk insert vendors.',
+    };
+  }
+
+  revalidatePath('/vendors');
+  revalidatePath('/payments');
+  return {
+    success: true,
+    data: {
+      insertedCount: rowsToInsert.length,
+      skippedDuplicates,
+    },
+  };
 }

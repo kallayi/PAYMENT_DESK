@@ -15,7 +15,9 @@ export type PaymentStatus =
   | 'REJECTED'
   | 'CANCELLED';
 
-export type PaymentMode = 'NEFT_RTGS' | 'CHEQUE';
+export type PaymentMode = 'NEFT_RTGS' | 'IMPS' | 'CHEQUE';
+
+export type DisbursementMode = PaymentMode;
 
 export type PaymentType = 'AGAINST_BILL' | 'ON_ACCOUNT';
 
@@ -24,7 +26,16 @@ export type NotificationEvent =
   | 'VERIFIED_FOR_APPROVAL'
   | 'APPROVED'
   | 'HELD'
-  | 'REJECTED';
+  | 'REJECTED'
+  | 'REMINDER_DUE'
+  | 'PAYMENT_REQUEST_CREATED'
+  | 'PAYMENT_REQUEST_SUBMITTED'
+  | 'PAYMENT_REQUEST_DECLINED'
+  | 'BATCH_SETTLED';
+
+export type AuditStatus = 'PENDING' | 'AUDITED' | 'FLAGGED';
+
+export type PaymentRequestStatus = 'PENDING' | 'SUBMITTED' | 'DECLINED' | 'CANCELLED';
 
 export type Company = {
   id: string;
@@ -128,6 +139,12 @@ export type PaymentItem = {
   paid_at: string | null;
   audited_by?: string | null;
   audited_at?: string | null;
+  audit_status?: AuditStatus;
+  audit_note?: string | null;
+  batch_id?: string | null;
+  receipt_sent_at?: string | null;
+  receipt_sent_by?: string | null;
+  recurring_reminder_id?: string | null;
   created_at: string;
   updated_at: string;
 
@@ -140,6 +157,31 @@ export type PaymentItem = {
   payer?: Profile | null;
   auditor?: Profile | null;
   company?: Company;
+  batch?: PaymentBatch | null;
+};
+
+export type PaymentBatch = {
+  id: string;
+  company_id: string;
+  batch_code: string;
+  batch_date: string;
+  source_bank_id: string | null;
+  receipt_file_path: string;
+  item_count: number;
+  total_amount: number;
+  notes: string | null;
+  audit_status?: AuditStatus;
+  audit_note?: string | null;
+  created_by: string;
+  audited_at: string | null;
+  audited_by: string | null;
+  created_at: string;
+  updated_at: string;
+
+  // Joined relations
+  source_bank?: CompanyBank | null;
+  creator?: Profile | null;
+  auditor?: Profile | null;
 };
 
 export type Notification = {
@@ -147,6 +189,8 @@ export type Notification = {
   company_id: string;
   recipient_user_id: string;
   payment_item_id: string | null;
+  payment_request_id?: string | null;
+  action_url?: string | null;
   event_type: NotificationEvent;
   title: string;
   body: string;
@@ -155,6 +199,33 @@ export type Notification = {
 
   // Joined relations
   payment_item?: PaymentItem | null;
+};
+
+export type PaymentRequest = {
+  id: string;
+  company_id: string;
+  vendor_id: string | null;
+  unlisted_vendor_name: string | null;
+  gross_amount: number;
+  invoice_ref: string | null;
+  purpose: string;
+  due_date: string | null;
+  remarks: string | null;
+  bill_file_path: string | null;
+  status: PaymentRequestStatus;
+  requested_by: string;
+  requested_role: string;
+  processed_by: string | null;
+  processed_at: string | null;
+  decline_reason: string | null;
+  converted_payment_id: string | null;
+  created_at: string;
+  updated_at: string;
+
+  // Joined relations
+  vendor?: Vendor | null;
+  requester?: Profile | null;
+  processor?: Profile | null;
 };
 
 export type PushSubscription = {
@@ -175,6 +246,7 @@ export type RecurringReminder = {
   vendor_id: string | null;
   remarks: string | null;
   last_completed_month: string | null;
+  last_notified_month?: string | null;
   is_active: boolean;
   created_by: string | null;
   created_at: string;
@@ -182,6 +254,26 @@ export type RecurringReminder = {
 
   // Joined relations
   vendor?: Vendor | null;
+};
+
+export type ReminderLinkedPayment = {
+  id: string;
+  recurring_reminder_id: string | null;
+  status: PaymentStatus;
+  net_payable: number;
+  utr_number: string | null;
+  cheque_number?: string | null;
+  paid_at: string | null;
+  rejection_reason: string | null;
+  updated_at: string;
+};
+
+export type PaymentPurpose = {
+  id: string;
+  company_id: string;
+  label: string;
+  created_by: string | null;
+  created_at: string;
 };
 
 export type AuditLog = {
@@ -307,10 +399,39 @@ export type Database = {
           paid_at?: string | null;
           audited_by?: string | null;
           audited_at?: string | null;
+          audit_status?: AuditStatus;
+          audit_note?: string | null;
+          batch_id?: string | null;
+          receipt_sent_at?: string | null;
+          receipt_sent_by?: string | null;
+          recurring_reminder_id?: string | null;
           created_at?: string;
           updated_at?: string;
         };
         Update: Partial<Omit<PaymentItem, 'id' | 'net_payable'>>;
+        Relationships: [];
+      };
+      payment_batches: {
+        Row: PaymentBatch;
+        Insert: {
+          id?: string;
+          company_id: string;
+          batch_code: string;
+          batch_date?: string;
+          source_bank_id?: string | null;
+          receipt_file_path: string;
+          item_count: number;
+          total_amount: number;
+          notes?: string | null;
+          audit_status?: AuditStatus;
+          audit_note?: string | null;
+          created_by: string;
+          audited_at?: string | null;
+          audited_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Omit<PaymentBatch, 'id'>>;
         Relationships: [];
       };
       notifications: {
@@ -320,6 +441,8 @@ export type Database = {
           company_id: string;
           recipient_user_id: string;
           payment_item_id?: string | null;
+          payment_request_id?: string | null;
+          action_url?: string | null;
           event_type: NotificationEvent;
           title: string;
           body: string;
@@ -327,6 +450,32 @@ export type Database = {
           created_at?: string;
         };
         Update: Partial<Omit<Notification, 'id'>>;
+        Relationships: [];
+      };
+      payment_requests: {
+        Row: PaymentRequest;
+        Insert: {
+          id?: string;
+          company_id: string;
+          vendor_id?: string | null;
+          unlisted_vendor_name?: string | null;
+          gross_amount: number;
+          invoice_ref?: string | null;
+          purpose: string;
+          due_date?: string | null;
+          remarks?: string | null;
+          bill_file_path?: string | null;
+          status?: PaymentRequestStatus;
+          requested_by: string;
+          requested_role: string;
+          processed_by?: string | null;
+          processed_at?: string | null;
+          decline_reason?: string | null;
+          converted_payment_id?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Omit<PaymentRequest, 'id'>>;
         Relationships: [];
       };
       push_subscriptions: {
@@ -353,12 +502,25 @@ export type Database = {
           vendor_id?: string | null;
           remarks?: string | null;
           last_completed_month?: string | null;
+          last_notified_month?: string | null;
           is_active?: boolean;
           created_by?: string | null;
           created_at?: string;
           updated_at?: string;
         };
         Update: Partial<Omit<RecurringReminder, 'id'>>;
+        Relationships: [];
+      };
+      payment_purposes: {
+        Row: PaymentPurpose;
+        Insert: {
+          id?: string;
+          company_id: string;
+          label: string;
+          created_by?: string | null;
+          created_at?: string;
+        };
+        Update: Partial<Omit<PaymentPurpose, 'id'>>;
         Relationships: [];
       };
       audit_logs: {

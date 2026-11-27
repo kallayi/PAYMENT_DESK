@@ -1,8 +1,8 @@
-// Payment Desk Lightweight PWA Service Worker
+// Payment Desk Lightweight PWA Service Worker (v5 — Payment Desk folder icon)
 // No aggressive HTML caching (preserves Next.js SSR & auth isolation).
 // Handles Web Push workflow notifications and deep-link navigation.
 
-const CACHE_NAME = 'payment-desk-static-v2';
+const CACHE_NAME = 'payment-desk-static-v5';
 
 self.addEventListener('install', () => {
   self.skipWaiting();
@@ -78,7 +78,7 @@ self.addEventListener('push', (event) => {
       payload = {
         title: parsed.title || 'Payment Desk',
         body: parsed.body || payload.body,
-        url: parsed.url || '/',
+        url: parsed.action_url || parsed.url || '/',
       };
     } catch {
       const text = event.data.text();
@@ -90,10 +90,13 @@ self.addEventListener('push', (event) => {
     self.registration.showNotification(payload.title, {
       body: payload.body,
       icon: '/icon-192.png',
-      badge: '/icon-192.png',
-      data: { url: payload.url },
+      badge: '/badge-72.png',
+      silent: false,
+      data: { url: payload.url, action_url: payload.url },
       tag: `payment-desk-${Date.now()}`,
       renotify: true,
+      vibrate: [250, 100, 250],
+      requireInteraction: false,
     })
   );
 });
@@ -101,7 +104,11 @@ self.addEventListener('push', (event) => {
 // Notification Click Deep-Link Handler
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const targetUrl = (event.notification.data && event.notification.data.url) || '/';
+  const rawUrl =
+    (event.notification.data &&
+      (event.notification.data.action_url || event.notification.data.url)) ||
+    '/';
+  const targetUrl = new URL(rawUrl, self.location.origin).href;
 
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {

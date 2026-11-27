@@ -1,5 +1,5 @@
 import * as React from 'react';
-import type { PaymentStatus } from '@/types/database';
+import type { PaymentMode, PaymentStatus } from '@/types/database';
 
 interface PaymentStatusBadgeProps {
   status: PaymentStatus;
@@ -77,6 +77,38 @@ export function BankBadge({ shortName = 'Bank', fullName }: BankBadgeProps) {
     >
       <span className={`w-1.5 h-1.5 rounded-full ${dotColor}`} />
       <span>{name}</span>
+    </span>
+  );
+}
+
+interface PaymentModeBadgeProps {
+  mode?: PaymentMode | string | null;
+  chequeNumber?: string | null;
+  compact?: boolean;
+}
+
+export function PaymentModeBadge({
+  mode,
+  chequeNumber,
+  compact = false,
+}: PaymentModeBadgeProps) {
+  if (mode === 'CHEQUE') {
+    return (
+      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200 whitespace-nowrap">
+        Cheque{chequeNumber ? ` #${chequeNumber}` : ''}
+      </span>
+    );
+  }
+  if (mode === 'IMPS') {
+    return (
+      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-50 text-purple-700 border border-purple-200 whitespace-nowrap">
+        IMPS
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-700 border border-slate-200 whitespace-nowrap">
+      {compact ? 'NEFT/RTGS' : 'NEFT / RTGS'}
     </span>
   );
 }

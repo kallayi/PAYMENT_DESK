@@ -1,6 +1,7 @@
 'use client';
 
 import * as React from 'react';
+import Link from 'next/link';
 import {
   Sheet,
   SheetContent,
@@ -20,13 +21,14 @@ import {
   AlertCircle,
   Clock,
   MessageCircle,
+  Layers,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { PaymentStatusBadge } from '@/components/payments/payment-status-badge';
 import { PaymentAcknowledgementModal } from '@/components/payments/payment-acknowledgement-modal';
 import { getSignedFileUrl } from '@/actions/storage';
 import { getPaymentAuditLogs } from '@/actions/payments';
-import { formatHumanDate, formatINR, formatDateTime } from '@/lib/format';
+import { formatHumanDate, formatINR, formatDateTime, formatPaymentMode } from '@/lib/format';
 import type { AuditLog, Company, PaymentItem } from '@/types/database';
 
 interface PaymentDetailDrawerProps {
@@ -35,6 +37,7 @@ interface PaymentDetailDrawerProps {
   payment: PaymentItem | null;
   activeCompany?: Company | null;
   fallbackUserName?: string;
+  onReceiptSent?: (paymentId: string, sentAt: string) => void;
 }
 
 export function PaymentDetailDrawer({
@@ -43,6 +46,7 @@ export function PaymentDetailDrawer({
   payment,
   activeCompany,
   fallbackUserName,
+  onReceiptSent,
 }: PaymentDetailDrawerProps) {
   const [copiedUtr, setCopiedUtr] = React.useState<boolean>(false);
   const [isViewingInvoice, setIsViewingInvoice] = React.useState<boolean>(false);
@@ -150,11 +154,11 @@ export function PaymentDetailDrawer({
           case 'PENDING_VERIFICATION':
             return 'Submitted for Senior Accountant verification';
           case 'PENDING_APPROVAL':
-            return 'Verified & forwarded for Owner approval';
+            return 'Verified & forwarded for Approval';
           case 'APPROVED':
-            return 'Authorized & Approved by Owner';
+            return 'Authorized & Approved by Approver';
           case 'ON_HOLD':
-            return 'Placed on hold by Owner';
+            return 'Placed on hold by Approver';
           case 'REJECTED':
             return `Rejected / Returned: "${newData.rejection_reason || ''}"`;
           case 'PAID':
@@ -260,9 +264,9 @@ export function PaymentDetailDrawer({
               </span>
             </div>
             <div className="px-3.5 py-2.5 flex justify-between gap-3">
-              <span className="text-slate-500">Purpose & Type</span>
+              <span className="text-slate-500">Purpose</span>
               <span className="font-medium text-slate-900">
-                {payment.purpose} ({payment.payment_type === 'ON_ACCOUNT' ? 'On Account' : 'Against Bill'})
+                {payment.purpose}
               </span>
             </div>
             <div className="px-3.5 py-2.5 flex justify-between gap-3">
@@ -280,7 +284,7 @@ export function PaymentDetailDrawer({
             <div className="px-3.5 py-2.5 flex justify-between gap-3 items-center">
               <span className="text-slate-500">Source Bank & Mode</span>
               <span className="font-medium text-slate-900">
-                {bankName} ({bankShort}) · {payment.payment_mode === 'CHEQUE' ? 'Cheque' : 'NEFT/RTGS'}
+                {bankName} ({bankShort}) · {formatPaymentMode(payment.payment_mode, true)}
               </span>
             </div>
 
@@ -311,6 +315,21 @@ export function PaymentDetailDrawer({
                 <span className="font-mono font-bold text-blue-900 text-xs">
                   #{payment.cheque_number} ({formatHumanDate(payment.cheque_date)})
                 </span>
+              </div>
+            )}
+
+            {payment.batch_id && (
+              <div className="px-3.5 py-2.5 flex justify-between gap-3 items-center bg-slate-50/70">
+                <span className="text-slate-600 font-medium">Settlement Batch</span>
+                <Link
+                  href={`/audit?batch=${encodeURIComponent(payment.batch_id)}`}
+                  onClick={() => onOpenChange(false)}
+                  className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-brand-tint hover:bg-brand/15 border border-brand/25 text-brand font-mono font-bold text-xs transition-colors"
+                >
+                  <Layers className="w-3.5 h-3.5 shrink-0" />
+                  <span>{payment.batch?.batch_code || 'View Batch'}</span>
+                  <ExternalLink className="w-3 h-3 shrink-0" />
+                </Link>
               </div>
             )}
 
@@ -578,6 +597,8 @@ export function PaymentDetailDrawer({
         payment={payment}
         activeCompany={activeCompany}
         fallbackUserName={fallbackUserName}
+        receiptSentAt={payment.receipt_sent_at}
+        onReceiptSent={onReceiptSent}
       />
     </Sheet>
   );

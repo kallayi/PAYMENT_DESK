@@ -7,18 +7,32 @@ export default function manifest(): MetadataRoute.Manifest {
     description: 'Internal payment approval and bank execution desk for INDFURN and VINMORE.',
     start_url: '/',
     display: 'standalone',
-    background_color: '#F8FAFC',
-    theme_color: '#7F1D1D',
+    background_color: '#0e0e11',
+    theme_color: '#0e0e11',
     icons: [
       {
-        src: '/icon-192.png',
+        src: '/icon-192.png?v=2',
         sizes: '192x192',
         type: 'image/png',
+        purpose: 'any',
       },
       {
-        src: '/icon-512.png',
+        src: '/icon-192.png?v=2',
+        sizes: '192x192',
+        type: 'image/png',
+        purpose: 'maskable',
+      },
+      {
+        src: '/icon-512.png?v=2',
         sizes: '512x512',
         type: 'image/png',
+        purpose: 'any',
+      },
+      {
+        src: '/icon-512.png?v=2',
+        sizes: '512x512',
+        type: 'image/png',
+        purpose: 'maskable',
       },
     ],
   };
