@@ -19,30 +19,26 @@ function getTodayISTParts(): { ddmmyyyy: string; yyyymmdd: string } {
   };
 }
 
-function getTodayDDMMYYYY(): string {
-  const now = new Date();
-  const dd = String(now.getDate()).padStart(2, '0');
-  const mm = String(now.getMonth() + 1).padStart(2, '0');
-  const yyyy = now.getFullYear();
-  return `${dd}/${mm}/${yyyy}`;
-}
-
-function getTodayYYYYMMDD(): string {
-  const now = new Date();
-  const dd = String(now.getDate()).padStart(2, '0');
-  const mm = String(now.getMonth() + 1).padStart(2, '0');
-  const yyyy = now.getFullYear();
-  return `${yyyy}${mm}${dd}`;
-}
-
-function buildCustomerRef(row: BulkExportRow, index: number): string {
+function buildCustomerRef(row: BulkExportRow, index: number, yyyymmdd: string): string {
   const company = (row.companyCode || 'INDFURN')
     .replace(/[^a-zA-Z0-9]/g, '')
     .toUpperCase()
     .slice(0, 10);
-  const datePart = getTodayYYYYMMDD();
   const seq = String(index + 1).padStart(2, '0');
-  return `${company}${datePart}${seq}`.slice(0, 20);
+  return `${company}${yyyymmdd}${seq}`.slice(0, 20);
+}
+
+/**
+ * Strip leading spreadsheet formula trigger characters (=, +, -, @, \t, \r)
+ * from free-text Axis Neo bulk upload fields without adding quotes,
+ * keeping bank portal uploads valid while neutralizing Excel formulas.
+ */
+function sanitizeAxisFreeText(val: string | null | undefined): string {
+  let str = (val || '').trim();
+  while (/^[=+\-@\t\r]/.test(str)) {
+    str = str.replace(/^[=+\-@\t\r]+/, '').trimStart();
+  }
+  return str;
 }
 
 function buildBeneficiaryCode(partyName: string): string {
@@ -55,15 +51,15 @@ function buildBeneficiaryCode(partyName: string): string {
 }
 
 function buildDebitNarration(row: BulkExportRow): string {
-  const party = (row.partyName || '').trim();
-  const inv = (row.invoiceRef || '').trim();
-  return `${party} ${inv}`.replace(/\s+/g, ' ').trim().slice(0, 30);
+  const party = sanitizeAxisFreeText(row.partyName);
+  const inv = sanitizeAxisFreeText(row.invoiceRef);
+  return sanitizeAxisFreeText(`${party} ${inv}`.replace(/\s+/g, ' ')).slice(0, 30);
 }
 
 function buildCreditNarration(row: BulkExportRow): string {
-  const company = (row.companyCode || 'INDFURN').trim().toUpperCase();
-  const inv = (row.invoiceRef || '').trim();
-  return `${company} ${inv}`.replace(/\s+/g, ' ').trim().slice(0, 30);
+  const company = sanitizeAxisFreeText(row.companyCode || 'INDFURN').toUpperCase();
+  const inv = sanitizeAxisFreeText(row.invoiceRef);
+  return sanitizeAxisFreeText(`${company} ${inv}`.replace(/\s+/g, ' ')).slice(0, 30);
 }
 
 function resolveAxisPaymentMode(row: BulkExportRow): 'I' | 'IMPS' | 'RTGS' | 'NEFT' {
@@ -123,28 +119,28 @@ async function buildWithinAxisBankWorkbook(rows: BulkExportRow[]): Promise<Buffe
 
   styleAxisHeaderRow(sheet);
 
-  const todayDDMMYYYY = getTodayDDMMYYYY();
+  const { ddmmyyyy, yyyymmdd } = getTodayISTParts();
 
   rows.forEach((item, index) => {
     const amount = Math.round((Number(item.netPayable) || 0) * 100) / 100;
     const debitAccount = String(item.sourceBankDebitAccount || '').trim();
     const beneficiaryAccount = String(item.accountNumber || '').trim();
-    const customerRef = buildCustomerRef(item, index);
+    const customerRef = buildCustomerRef(item, index, yyyymmdd);
 
     const addedRow = sheet.addRow({
       debitAccount,
       amount,
       currency: 'INR',
-      beneficiaryName: item.beneficiaryName.trim(),
+      beneficiaryName: sanitizeAxisFreeText(item.beneficiaryName),
       beneficiaryAccount,
-      transactionDate: todayDDMMYYYY,
+      transactionDate: ddmmyyyy,
       customerRef,
       beneficiaryCode: buildBeneficiaryCode(item.partyName),
     });
 
     enforceTextCell(addedRow, 'debitAccount', debitAccount);
     enforceTextCell(addedRow, 'beneficiaryAccount', beneficiaryAccount);
-    enforceTextCell(addedRow, 'transactionDate', todayDDMMYYYY);
+    enforceTextCell(addedRow, 'transactionDate', ddmmyyyy);
     enforceTextCell(addedRow, 'customerRef', customerRef);
   });
 
@@ -199,22 +195,22 @@ async function buildAcrossAllBanksWorkbook(rows: BulkExportRow[]): Promise<Buffe
 
   styleAxisHeaderRow(sheet);
 
-  const todayDDMMYYYY = getTodayDDMMYYYY();
+  const { ddmmyyyy, yyyymmdd } = getTodayISTParts();
 
   rows.forEach((item, index) => {
     const amount = Math.round((Number(item.netPayable) || 0) * 100) / 100;
     const debitAccount = String(item.sourceBankDebitAccount || '').trim();
     const beneficiaryAccount = String(item.accountNumber || '').trim();
-    const customerRef = buildCustomerRef(item, index);
+    const customerRef = buildCustomerRef(item, index, yyyymmdd);
 
     const addedRow = sheet.addRow({
       debitAccount,
       amount,
       currency: 'INR',
-      beneficiaryName: item.beneficiaryName.trim(),
+      beneficiaryName: sanitizeAxisFreeText(item.beneficiaryName),
       beneficiaryAccount,
       ifscCode: (item.ifscCode || '').trim().toUpperCase(),
-      transactionDate: todayDDMMYYYY,
+      transactionDate: ddmmyyyy,
       paymentMode: resolveAxisPaymentMode(item),
       customerRef,
       beneficiaryCode: buildBeneficiaryCode(item.partyName),
@@ -223,7 +219,7 @@ async function buildAcrossAllBanksWorkbook(rows: BulkExportRow[]): Promise<Buffe
       lei: '',
       debitNarration: buildDebitNarration(item),
       creditNarration: buildCreditNarration(item),
-      invoiceNumber: (item.invoiceRef || '').trim(),
+      invoiceNumber: sanitizeAxisFreeText(item.invoiceRef),
       addr1: '',
       addr2: '',
       addr3: '',
@@ -243,7 +239,7 @@ async function buildAcrossAllBanksWorkbook(rows: BulkExportRow[]): Promise<Buffe
 
     enforceTextCell(addedRow, 'debitAccount', debitAccount);
     enforceTextCell(addedRow, 'beneficiaryAccount', beneficiaryAccount);
-    enforceTextCell(addedRow, 'transactionDate', todayDDMMYYYY);
+    enforceTextCell(addedRow, 'transactionDate', ddmmyyyy);
     enforceTextCell(addedRow, 'customerRef', customerRef);
   });
 
@@ -286,7 +282,9 @@ function buildSalaryDebitNarration(row: BulkExportRow): string {
     inv.length > 0 &&
     !['NA', 'ON ACCOUNT'].includes(inv.toUpperCase()) &&
     inv.toUpperCase().includes('SAL');
-  return `${party} ${useInv ? inv : 'SALARY'}`.replace(/\s+/g, ' ').trim().slice(0, 30);
+  return sanitizeAxisFreeText(
+    `${party} ${useInv ? inv : 'SALARY'}`.replace(/\s+/g, ' ')
+  ).slice(0, 30);
 }
 
 function buildSalaryCreditNarration(row: BulkExportRow): string {
@@ -295,7 +293,7 @@ function buildSalaryCreditNarration(row: BulkExportRow): string {
     .replace(/\s+/g, ' ')
     .trim()
     .toUpperCase();
-  return `${company} SALARY`.replace(/\s+/g, ' ').trim().slice(0, 30);
+  return sanitizeAxisFreeText(`${company} SALARY`.replace(/\s+/g, ' ')).slice(0, 30);
 }
 
 function resolveSalaryPaymentMode(row: BulkExportRow): 'I' | 'IMPS' | 'RTGS' | 'NEFT' {
@@ -350,7 +348,7 @@ export async function buildSalarySameBankWorkbook(rows: BulkExportRow[]): Promis
     const debitAccount = String(item.sourceBankDebitAccount || '').trim();
     const beneficiaryAccount = String(item.accountNumber || '').trim();
     const customerRef = buildSalaryCustomerRef(item, index, yyyymmdd);
-    const beneficiaryName = (item.beneficiaryName || item.partyName || '').trim();
+    const beneficiaryName = sanitizeAxisFreeText(item.beneficiaryName || item.partyName);
     const beneficiaryCode = buildBeneficiaryCode(item.partyName || item.beneficiaryName);
 
     const addedRow = sheet.addRow({
@@ -429,7 +427,7 @@ export async function buildSalaryOtherBankWorkbook(rows: BulkExportRow[]): Promi
     const beneficiaryAccount = String(item.accountNumber || '').trim();
     const ifscCode = (item.ifscCode || '').trim().toUpperCase();
     const customerRef = buildSalaryCustomerRef(item, index, yyyymmdd);
-    const beneficiaryName = (item.beneficiaryName || item.partyName || '').trim();
+    const beneficiaryName = sanitizeAxisFreeText(item.beneficiaryName || item.partyName);
     const beneficiaryCode = buildBeneficiaryCode(item.partyName || item.beneficiaryName);
 
     const addedRow = sheet.addRow({

@@ -19,10 +19,12 @@ import {
   markAllNotificationsRead,
 } from '@/actions/notifications';
 import { switchActiveCompany } from '@/actions/company';
-import type { Company, Notification, NotificationEvent } from '@/types/database';
+import type { Company, Notification, NotificationEvent, UserRole } from '@/types/database';
 
 interface NotificationBellProps {
   userId: string;
+  userRole?: UserRole;
+  isAdmin?: boolean;
   initialNotifications: Notification[];
   initialUnreadCount: number;
   allowedCompanies?: Company[];
@@ -43,7 +45,11 @@ function appendHighlightParam(url: string, paymentId: string | null | undefined)
   return `${url}${sep}highlight=${encodeURIComponent(paymentId)}`;
 }
 
-function resolveNotificationTargetUrl(item: ActionableNotification): string {
+function resolveNotificationTargetUrl(
+  item: ActionableNotification,
+  userRole?: UserRole,
+  isAdmin?: boolean
+): string {
   const paymentId = item.payment_item_id || item.payment_id || null;
   const requestId = item.payment_request_id || null;
   const directUrl = (item.action_url || item.link || '').trim();
@@ -83,7 +89,7 @@ function resolveNotificationTargetUrl(item: ActionableNotification): string {
     case 'PAYMENT_REQUEST_SUBMITTED':
       return appendHighlightParam('/tracker', paymentId);
     case 'BATCH_SETTLED':
-      baseUrl = '/audit';
+      baseUrl = userRole === 'AUDITOR' || isAdmin ? '/audit' : '/history';
       break;
     default:
       if (titleLower.includes('payment request')) {
@@ -434,6 +440,8 @@ export function PushOptInBanner() {
 
 export function NotificationBell({
   userId,
+  userRole,
+  isAdmin = false,
   initialNotifications,
   initialUnreadCount,
   allowedCompanies = [],
@@ -455,7 +463,6 @@ export function NotificationBell({
   // Web Push opt-in status
   const { isSecureContext, pushSupported, isPushEnabled, setIsPushEnabled } = usePushStatus();
   const [isTogglingPush, setIsTogglingPush] = React.useState<boolean>(false);
-  const [isSendingTest, setIsSendingTest] = React.useState<boolean>(false);
 
   const containerRef = React.useRef<HTMLDivElement | null>(null);
 
@@ -551,26 +558,9 @@ export function NotificationBell({
     }
   };
 
-  const handleSendTestPush = async () => {
-    setIsSendingTest(true);
-    try {
-      const res = await fetch('/api/push/test', { method: 'POST' });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        toast.error(body.error || 'Failed to send test alert.');
-        return;
-      }
-      toast.success('Test alert sent! Check your device notification tray.');
-    } catch {
-      toast.error('Network error while sending test alert.');
-    } finally {
-      setIsSendingTest(false);
-    }
-  };
-
   const handleNotificationClick = async (item: ActionableNotification) => {
     setIsOpen(false);
-    const targetUrl = resolveNotificationTargetUrl(item);
+    const targetUrl = resolveNotificationTargetUrl(item, userRole, isAdmin);
 
     if (!item.is_read) {
       setNotifications((prev) =>
@@ -685,17 +675,6 @@ export function NotificationBell({
                   {isPushEnabled ? 'Device push alerts active' : 'Get instant mobile/desktop alerts'}
                 </span>
                 <div className="flex items-center gap-1.5 shrink-0">
-                  {isPushEnabled && (
-                    <button
-                      type="button"
-                      onClick={handleSendTestPush}
-                      disabled={isSendingTest}
-                      className="px-2 py-1 rounded-md font-semibold border border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100 inline-flex items-center gap-1 transition-colors cursor-pointer disabled:opacity-60"
-                    >
-                      {isSendingTest && <Loader2 className="w-3 h-3 animate-spin" />}
-                      <span>{isSendingTest ? 'Sending...' : 'Send Test'}</span>
-                    </button>
-                  )}
                   <button
                     type="button"
                     onClick={handleTogglePush}

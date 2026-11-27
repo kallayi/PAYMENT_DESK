@@ -2,9 +2,24 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
+import { z } from 'zod';
 import { companyBankSchema, type CompanyBankInput } from '@/lib/validators';
 import { getCurrentUserContext } from '@/lib/auth';
 import type { ActionResult, CompanyBank } from '@/types/database';
+
+const updateBankBalancesSchema = z
+  .array(
+    z.object({
+      bank_id: z.string().uuid('Valid bank ID is required.'),
+      available_balance: z
+        .number({ invalid_type_error: 'Bank balance must be a valid number.' })
+        .finite('Bank balance must be a finite number.')
+        .min(0, 'Bank balance cannot be negative.')
+        .max(999999999999, 'Bank balance exceeds maximum allowed value.'),
+    })
+  )
+  .min(1, 'At least one bank balance update is required.')
+  .max(50, 'Too many bank balance updates in a single request.');
 
 export async function createCompanyBank(
   input: CompanyBankInput
@@ -266,11 +281,21 @@ export async function updateBankBalances(
     return { success: false, error: 'A company workspace must be active.' };
   }
 
-  if (!updates || updates.length === 0) {
-    return { success: false, error: 'No bank balance updates provided.' };
+  const parsed = updateBankBalancesSchema.safeParse(updates);
+  if (!parsed.success) {
+    return {
+      success: false,
+      error: parsed.error.issues[0]?.message || 'Invalid bank balance update payload.',
+    };
   }
 
-  const bankIds = updates.map((u) => u.bank_id);
+  const validatedUpdates = parsed.data;
+  const bankIds = validatedUpdates.map((u) => u.bank_id);
+
+  if (new Set(bankIds).size !== bankIds.length) {
+    return { success: false, error: 'Duplicate bank IDs provided in balance update.' };
+  }
+
   const { data: validBanks, error: fetchError } = await supabase
     .from('company_banks')
     .select('id, company_id')
@@ -284,8 +309,8 @@ export async function updateBankBalances(
   const now = new Date().toISOString();
   const updatedBanks: CompanyBank[] = [];
 
-  for (const update of updates) {
-    const balance = Math.round((Number(update.available_balance) || 0) * 100) / 100;
+  for (const update of validatedUpdates) {
+    const balance = Math.round(update.available_balance * 100) / 100;
     const { data: updated, error: updateError } = await supabase
       .from('company_banks')
       .update({

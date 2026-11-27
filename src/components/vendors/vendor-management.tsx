@@ -242,7 +242,7 @@ export function VendorManagement({
             {isExportingExcel ? (
               <Loader2 className="w-4 h-4 animate-spin text-slate-500" />
             ) : (
-              <Download className="w-4 h-4 text-slate-500" />
+              <Upload className="w-4 h-4 text-slate-500" />
             )}
             <span>Export Excel</span>
           </Button>
@@ -255,7 +255,7 @@ export function VendorManagement({
                 onClick={() => setIsImportModalOpen(true)}
                 className="flex-1 sm:flex-initial min-h-[40px] px-3.5 rounded-lg border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold inline-flex items-center justify-center gap-1.5 shadow-sm transition-colors cursor-pointer"
               >
-                <Upload className="w-4 h-4 text-[#7F1D1D]" />
+                <Download className="w-4 h-4 text-[#7F1D1D]" />
                 <span>Import Excel</span>
               </Button>
 

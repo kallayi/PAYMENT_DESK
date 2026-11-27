@@ -1,20 +1,30 @@
+import crypto from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
-import { checkAndDispatchDueReminders } from '@/actions/reminders';
+import { checkAndDispatchDueReminders } from '@/lib/reminders-server';
 
 export const dynamic = 'force-dynamic';
 
 /**
  * Daily automated reminder check triggered by Vercel Cron (0 4 * * * UTC = 9:30 AM IST).
- * Evaluates all active monthly recurring reminders due today or earlier this month (IST)
- * and dispatches in-app + Web Push notifications strictly to Accounts (PREPARER) & Admin users.
+ * Fail-closed CRON_SECRET verification using constant-time comparison.
  */
 export async function GET(request: NextRequest) {
   const cronSecret = process.env.CRON_SECRET?.trim();
-  if (cronSecret) {
-    const authHeader = request.headers.get('authorization');
-    if (authHeader !== `Bearer ${cronSecret}`) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+  if (!cronSecret) {
+    return NextResponse.json(
+      { error: 'CRON_SECRET is not configured.' },
+      { status: 500 }
+    );
+  }
+
+  const expectedHeader = Buffer.from(`Bearer ${cronSecret}`, 'utf8');
+  const receivedHeader = Buffer.from(request.headers.get('authorization') || '', 'utf8');
+
+  if (
+    receivedHeader.length !== expectedHeader.length ||
+    !crypto.timingSafeEqual(receivedHeader, expectedHeader)
+  ) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   try {

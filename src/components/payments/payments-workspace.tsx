@@ -649,16 +649,15 @@ export function PaymentsWorkspace({
                 <div className="flex flex-wrap items-center gap-2">
                   <button
                     type="button"
-                    disabled={selectedApprovedIds.size === 0}
+                    disabled={approvedItemsList.length === 0}
                     onClick={() => setIsBatchModalOpen(true)}
                     className="min-h-[40px] sm:min-h-[38px] px-3.5 py-1.5 rounded-lg bg-brand hover:bg-brand-hover disabled:opacity-45 disabled:cursor-not-allowed text-white text-xs font-semibold inline-flex items-center justify-center gap-1.5 shadow-sm transition-colors cursor-pointer"
                   >
                     <Layers className="w-4 h-4" />
                     <span>
-                      Settle as Day Batch
                       {selectedApprovedIds.size > 0
-                        ? ` (${selectedApprovedIds.size})`
-                        : ''}
+                        ? `Settle as Day Batch (${selectedApprovedIds.size})`
+                        : `Settle Day Batch (All ${approvedItemsList.length})`}
                     </span>
                   </button>
 
@@ -1265,6 +1264,11 @@ export function PaymentsWorkspace({
         readyToPayItems={itemsForExcelModal}
         banks={banks}
         companyCode={companyCode}
+        onProceedToBatch={(items) => {
+          setIsExcelModalOpen(false);
+          setSelectedApprovedIds(new Set(items.map((item) => item.id)));
+          setIsBatchModalOpen(true);
+        }}
       />
     </div>
   );

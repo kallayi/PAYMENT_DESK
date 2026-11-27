@@ -97,6 +97,7 @@ export async function login(formData: FormData): Promise<ActionResult<{ redirect
         ...authData.user.app_metadata,
         role: profile.role,
         is_admin: profile.is_admin,
+        is_active: profile.is_active,
       },
       user_metadata: {
         ...authData.user.user_metadata,
@@ -180,6 +181,7 @@ export async function createUser(input: CreateUserInput): Promise<ActionResult<P
     app_metadata: {
       role: userData.role,
       is_admin: false,
+      is_active: true,
     },
   });
 
@@ -320,15 +322,17 @@ export async function updateUser(input: UpdateUserInput): Promise<ActionResult<P
     return { success: false, error: profileError?.message || 'Failed to update user profile.' };
   }
 
-  // 2. Sync auth.users.raw_app_meta_data and user_metadata
+  // 2. Sync auth.users app_metadata, ban_duration, and user_metadata
   try {
     const { data: targetAuthUser } = await adminClient.auth.admin.getUserById(user_id);
     if (targetAuthUser?.user) {
       await adminClient.auth.admin.updateUserById(user_id, {
+        ban_duration: is_active ? 'none' : '876000h',
         app_metadata: {
           ...targetAuthUser.user.app_metadata,
           role,
           is_admin: preservedIsAdmin,
+          is_active: Boolean(is_active),
         },
         user_metadata: {
           ...targetAuthUser.user.user_metadata,
@@ -417,6 +421,22 @@ export async function toggleUserActive(targetUserId: string): Promise<ActionResu
   if (error || !updated) {
     console.error('Failed to update user status in admin:', error);
     return { success: false, error: 'Failed to update user status. Please try again.' };
+  }
+
+  // Immediately revoke or restore Auth login capability + sync app_metadata.is_active
+  try {
+    const { data: targetAuthUser } = await adminClient.auth.admin.getUserById(targetUserId);
+    await adminClient.auth.admin.updateUserById(targetUserId, {
+      ban_duration: newStatus ? 'none' : '876000h',
+      app_metadata: {
+        ...(targetAuthUser?.user?.app_metadata || {}),
+        role: currentTarget.role,
+        is_admin: Boolean(currentTarget.is_admin),
+        is_active: newStatus,
+      },
+    });
+  } catch (authSyncErr) {
+    console.error('Failed to sync ban_duration/app_metadata on toggleUserActive:', authSyncErr);
   }
 
   revalidatePath('/settings');

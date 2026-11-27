@@ -4,6 +4,9 @@ import { getCurrentUserContext } from '@/lib/auth';
 import { VendorManagement } from '@/components/vendors/vendor-management';
 import type { Vendor } from '@/types/database';
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 export const metadata = {
   title: 'Vendors | Payment Desk',
   description: 'Lean beneficiary directory and bank routing details for active company.',

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/admin';
 import { getCurrentUserContext } from '@/lib/auth';
 
 const subscribeSchema = z.object({
@@ -32,8 +33,10 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const supabase = await createClient();
-    const { error } = await supabase
+    const db = process.env.SUPABASE_SERVICE_ROLE_KEY
+      ? createAdminClient()
+      : await createClient();
+    const { error } = await db
       .from('push_subscriptions')
       .upsert(
         {

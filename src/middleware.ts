@@ -21,8 +21,9 @@ function getRoleLandingRoute(role: UserRole | string | null): string {
 export async function middleware(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
 
-  // 0. Completely bypass middleware for static assets, PWA files, icons, fonts, and images
+  // 0. Bypass middleware for static assets, PWA files, and Cron endpoints (enforces CRON_SECRET in route handler)
   if (
+    pathname.startsWith('/api/cron/') ||
     pathname === '/manifest.webmanifest' ||
     pathname === '/sw.js' ||
     pathname === '/favicon.ico' ||
@@ -71,8 +72,14 @@ export async function middleware(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  // 1. Unauthenticated users:
+  // 1. Unauthenticated requests: JSON 401 for /api/*, redirect to /login for pages
   if (!user) {
+    if (pathname.startsWith('/api/')) {
+      return NextResponse.json(
+        { error: 'Unauthorized. Please sign in.' },
+        { status: 401 }
+      );
+    }
     if (pathname === '/login') {
       return response;
     }
@@ -81,12 +88,28 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(redirectUrl);
   }
 
-  // 2. Fetch authenticated user role & admin status strictly from admin-controlled app_metadata:
+  // 2. Immediate Disabled-User Block
+  if (user.app_metadata?.is_active === false) {
+    if (pathname.startsWith('/api/')) {
+      return NextResponse.json(
+        { error: 'Unauthorized. Account is disabled.' },
+        { status: 401 }
+      );
+    }
+    if (pathname === '/login') {
+      return response;
+    }
+    const redirectUrl = request.nextUrl.clone();
+    redirectUrl.pathname = '/login';
+    redirectUrl.searchParams.set('error', 'account_disabled');
+    return NextResponse.redirect(redirectUrl);
+  }
+
+  // 3. Fetch authenticated user role & admin status strictly from admin-controlled app_metadata
   const role: UserRole | string | null = (user.app_metadata?.role as UserRole) || null;
   const isAdmin: boolean = Boolean(user.app_metadata?.is_admin);
 
-  // If role is not in app_metadata, do not guess; allow request to pass to Server Component
-  // layer (getCurrentUserContext()), which reads public.profiles and syncs app_metadata in background.
+  // If role is not yet cached in app_metadata, allow page/API request to reach server layer
   if (!role) {
     if (pathname === '/login') {
       const redirectUrl = request.nextUrl.clone();
@@ -98,7 +121,7 @@ export async function middleware(request: NextRequest) {
 
   const landingRoute = getRoleLandingRoute(role);
 
-  // 3. Authenticated user visiting /login -> redirect to landing route
+  // 4. Authenticated user visiting /login -> redirect to landing route
   if (pathname === '/login') {
     const redirectUrl = request.nextUrl.clone();
     redirectUrl.searchParams.delete('error');
@@ -106,15 +129,14 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(redirectUrl);
   }
 
-  // 4. Authenticated user visiting root / -> redirect to role landing route
+  // 5. Authenticated user visiting root / -> redirect to role landing route
   if (pathname === '/') {
     const redirectUrl = request.nextUrl.clone();
     redirectUrl.pathname = landingRoute;
     return NextResponse.redirect(redirectUrl);
   }
 
-  // 5. Strict Role Guards (ONLY when role is definitively known)
-  // Admins with is_admin = true have access across routes
+  // 6. Strict Role Guards (Admins with is_admin = true have access across routes)
   if (isAdmin) {
     return response;
   }
@@ -131,6 +153,20 @@ export async function middleware(request: NextRequest) {
     if (role !== 'PREPARER' && role !== 'VERIFIER') {
       const redirectUrl = request.nextUrl.clone();
       redirectUrl.pathname = landingRoute;
+      return NextResponse.redirect(redirectUrl);
+    }
+  }
+
+  // Explicit Auditor Guard: non-admin AUDITOR may not access /tracker or /requests
+  if (role === 'AUDITOR') {
+    if (
+      pathname === '/tracker' ||
+      pathname.startsWith('/tracker/') ||
+      pathname === '/requests' ||
+      pathname.startsWith('/requests/')
+    ) {
+      const redirectUrl = request.nextUrl.clone();
+      redirectUrl.pathname = '/audit';
       return NextResponse.redirect(redirectUrl);
     }
   }
@@ -176,15 +212,6 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    /*
-     * Match all request paths except for:
-     * - _next/static (static files)
-     * - _next/image (image optimization files)
-     * - favicon.ico, sitemap.xml, robots.txt
-     * - manifest.webmanifest (PWA manifest)
-     * - sw.js (service worker)
-     * - public files (icons, images, fonts)
-     */
     '/((?!_next/static|_next/image|favicon.ico|manifest\\.webmanifest|sw\\.js|logo\\.png|icon-192\\.png|icon-512\\.png|icons/|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|webmanifest|woff|woff2|ttf|eot)$).*)',
   ],
 };

@@ -444,8 +444,8 @@ export function PaymentRequestsWorkspace({
   async function handleNewBillUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (file.size > 5 * 1024 * 1024) {
-      toast.error('File exceeds 5 MB limit.');
+    if (file.size > 4 * 1024 * 1024) {
+      toast.error('File exceeds 4 MB limit.');
       if (newFileInputRef.current) newFileInputRef.current.value = '';
       return;
     }
@@ -1256,7 +1256,7 @@ export function PaymentRequestsWorkspace({
                   ) : (
                     <>
                       <Upload className="w-3.5 h-3.5" />
-                      <span>Attach PDF or Image (max 5 MB)</span>
+                      <span>Attach PDF or Image (max 4 MB)</span>
                     </>
                   )}
                 </button>

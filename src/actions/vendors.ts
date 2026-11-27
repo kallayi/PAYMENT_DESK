@@ -1,6 +1,7 @@
 'use server';
 
 import { createClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/admin';
 import { revalidatePath } from 'next/cache';
 import {
   leanVendorSchema,
@@ -15,6 +16,13 @@ import type { ActionResult, Profile, Vendor } from '@/types/database';
 function canManageVendors(profile: Profile | null): boolean {
   if (!profile || !profile.is_active) return false;
   return profile.role === 'PREPARER' || profile.role === 'VERIFIER' || profile.is_admin;
+}
+
+function maskAccountForAudit(accountNo: string | null | undefined): string {
+  const clean = (accountNo || '').trim();
+  if (!clean) return 'NA';
+  if (clean.length <= 4) return `••••${clean}`;
+  return `••••${clean.slice(-4)}`;
 }
 
 export async function createVendor(
@@ -163,10 +171,12 @@ export async function updateVendor(
     return { success: false, error: 'A company workspace must be active.' };
   }
 
-  // Fetch current vendor to verify ownership within activeCompany
+  // Fetch current vendor to verify ownership & inspect current banking details within activeCompany
   const { data: currentVendor } = await supabase
     .from('vendors')
-    .select('id, company_id')
+    .select(
+      'id, company_id, party_name, beneficiary_name, account_number, bank_account_no, ifsc_code'
+    )
     .eq('id', vendorId)
     .eq('company_id', activeCompany.id)
     .single();
@@ -176,23 +186,77 @@ export async function updateVendor(
   }
 
   const partyName = (vendorData.party_name || vendorData.name || '').trim();
-  if (!partyName) {
-    return { success: false, error: 'Vendor party name is required.' };
+  const beneficiaryName = (vendorData.beneficiary_name || '').trim();
+  const accountNumber = (vendorData.account_number || vendorData.bank_account_no || '').trim();
+  const ifscCode = (vendorData.ifsc_code || '').trim().toUpperCase();
+
+  const strictParsed = leanVendorSchema.safeParse({
+    party_name: partyName,
+    beneficiary_name: beneficiaryName,
+    account_number: accountNumber,
+    ifsc_code: ifscCode,
+    whatsapp_number: vendorData.whatsapp_number ?? null,
+    remarks: vendorData.remarks ?? vendorData.notes ?? null,
+  });
+
+  if (!strictParsed.success) {
+    return {
+      success: false,
+      error:
+        strictParsed.error.issues[0]?.message ||
+        'Complete vendor banking details are required.',
+    };
   }
 
-  const beneficiaryName = (vendorData.beneficiary_name || partyName).trim();
-  const accountNumber = (vendorData.account_number || vendorData.bank_account_no || '000000000000').trim();
-  const ifscCode = (vendorData.ifsc_code || 'UTIB0000000').trim().toUpperCase();
+  // Verify IFSC prefix resolves cleanly without fallback corruption
+  getBankNameFromIfsc(strictParsed.data.ifsc_code);
+
+  const validPartyName = strictParsed.data.party_name;
+  const validBeneficiaryName = strictParsed.data.beneficiary_name;
+  const validAccountNumber = strictParsed.data.account_number;
+  const validIfscCode = strictParsed.data.ifsc_code;
   const whatsappNumber = vendorData.whatsapp_number?.replace(/[\s-]/g, '').trim() || null;
   const remarks = vendorData.remarks?.trim() || vendorData.notes?.trim() || null;
 
   const companyId = currentVendor.company_id || activeCompany?.id;
 
+  // Detect changes to critical banking fields
+  const prevBeneficiary = (currentVendor.beneficiary_name || '').trim();
+  const prevAccount = (
+    currentVendor.account_number ||
+    currentVendor.bank_account_no ||
+    ''
+  ).trim();
+  const prevIfsc = (currentVendor.ifsc_code || '').trim().toUpperCase();
+
+  const beneficiaryChanged = validBeneficiaryName !== prevBeneficiary;
+  const accountChanged = validAccountNumber !== prevAccount;
+  const ifscChanged = validIfscCode !== prevIfsc;
+  const criticalBankingChanged = beneficiaryChanged || accountChanged || ifscChanged;
+
+  // Financial Fraud Guard: Block non-admin bank detail edits when vendor has APPROVED payments awaiting disbursement
+  if (criticalBankingChanged) {
+    const { count: approvedCount } = await supabase
+      .from('payment_items')
+      .select('id', { count: 'exact', head: true })
+      .eq('company_id', activeCompany.id)
+      .eq('vendor_id', vendorId)
+      .eq('status', 'APPROVED');
+
+    if ((approvedCount ?? 0) > 0 && !profile.is_admin) {
+      return {
+        success: false,
+        error:
+          'Cannot change vendor bank account or IFSC while this vendor has approved payment(s) awaiting disbursement. Complete or cancel approved payments first, or ask an Administrator.',
+      };
+    }
+  }
+
   // Check for duplicate party_name in the same company excluding current vendor
   let dupQuery = supabase
     .from('vendors')
     .select('id, party_name')
-    .ilike('party_name', partyName)
+    .ilike('party_name', validPartyName)
     .neq('id', vendorId);
 
   if (companyId) {
@@ -204,31 +268,60 @@ export async function updateVendor(
   if (duplicate) {
     return {
       success: false,
-      error: `Another vendor named "${partyName}" already exists in this company.`,
+      error: `Another vendor named "${validPartyName}" already exists in this company.`,
     };
   }
 
   const { data: updated, error } = await supabase
     .from('vendors')
     .update({
-      party_name: partyName,
-      beneficiary_name: beneficiaryName,
-      account_number: accountNumber,
-      ifsc_code: ifscCode,
+      party_name: validPartyName,
+      beneficiary_name: validBeneficiaryName,
+      account_number: validAccountNumber,
+      ifsc_code: validIfscCode,
       whatsapp_number: whatsappNumber,
       remarks: remarks,
       // Backward compatibility columns
-      name: partyName,
-      bank_account_no: accountNumber,
+      name: validPartyName,
+      bank_account_no: validAccountNumber,
       notes: remarks,
       updated_at: new Date().toISOString(),
     })
     .eq('id', vendorId)
+    .eq('company_id', activeCompany.id)
     .select()
     .single();
 
   if (error || !updated) {
     return { success: false, error: error?.message || 'Failed to update vendor record.' };
+  }
+
+  // Non-blocking audit log entry whenever critical banking fields are updated
+  if (criticalBankingChanged) {
+    try {
+      const db = process.env.SUPABASE_SERVICE_ROLE_KEY ? createAdminClient() : supabase;
+      await db.from('audit_logs').insert({
+        table_name: 'vendors',
+        record_id: vendorId,
+        company_id: activeCompany.id,
+        action: 'VENDOR_BANK_DETAILS_UPDATED',
+        old_data: {
+          party_name: currentVendor.party_name,
+          beneficiary_name: prevBeneficiary,
+          account_number_masked: maskAccountForAudit(prevAccount),
+          ifsc_code: prevIfsc,
+        },
+        new_data: {
+          party_name: validPartyName,
+          beneficiary_name: validBeneficiaryName,
+          account_number_masked: maskAccountForAudit(validAccountNumber),
+          ifsc_code: validIfscCode,
+        },
+        changed_by: user.id,
+      });
+    } catch (auditErr) {
+      console.warn('[Vendors] Non-blocking bank audit log insert error:', auditErr);
+    }
   }
 
   revalidatePath('/vendors');

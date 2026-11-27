@@ -1,8 +1,8 @@
-// Payment Desk Lightweight PWA Service Worker (v5 — Payment Desk folder icon)
+// Payment Desk Lightweight PWA Service Worker (v6 — Payment Desk rupee icon)
 // No aggressive HTML caching (preserves Next.js SSR & auth isolation).
 // Handles Web Push workflow notifications and deep-link navigation.
 
-const CACHE_NAME = 'payment-desk-static-v5';
+const CACHE_NAME = 'payment-desk-static-v6';
 
 self.addEventListener('install', () => {
   self.skipWaiting();
@@ -89,8 +89,8 @@ self.addEventListener('push', (event) => {
   event.waitUntil(
     self.registration.showNotification(payload.title, {
       body: payload.body,
-      icon: '/icon-192.png',
-      badge: '/badge-72.png',
+      icon: '/icon-192.png?v=3',
+      badge: '/badge-72.png?v=3',
       silent: false,
       data: { url: payload.url, action_url: payload.url },
       tag: `payment-desk-${Date.now()}`,

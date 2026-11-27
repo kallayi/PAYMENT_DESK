@@ -201,32 +201,49 @@ export async function deleteStaffUser(input: {
     }
   }
 
-  // Financial & Audit History Guard
-  const [paymentsRefRes, auditRefRes] = await Promise.all([
+  // Financial, Batch, Request & Audit History Guard
+  const [paymentsRefRes, batchesRefRes, requestsRefRes, auditRefRes] = await Promise.all([
     admin
       .from('payment_items')
       .select('id', { count: 'exact', head: true })
       .or(
-        `created_by.eq.${targetUserId},verified_by.eq.${targetUserId},approved_by.eq.${targetUserId},paid_by.eq.${targetUserId},audited_by.eq.${targetUserId}`
+        `created_by.eq.${targetUserId},verified_by.eq.${targetUserId},approved_by.eq.${targetUserId},paid_by.eq.${targetUserId},audited_by.eq.${targetUserId},receipt_sent_by.eq.${targetUserId}`
       ),
+    admin
+      .from('payment_batches')
+      .select('id', { count: 'exact', head: true })
+      .or(`created_by.eq.${targetUserId},audited_by.eq.${targetUserId}`),
+    admin
+      .from('payment_requests')
+      .select('id', { count: 'exact', head: true })
+      .or(`requested_by.eq.${targetUserId},processed_by.eq.${targetUserId}`),
     admin
       .from('audit_logs')
       .select('id', { count: 'exact', head: true })
       .eq('changed_by', targetUserId),
   ]);
 
-  if (paymentsRefRes.error || auditRefRes.error) {
+  if (
+    paymentsRefRes.error ||
+    batchesRefRes.error ||
+    requestsRefRes.error ||
+    auditRefRes.error
+  ) {
     return {
       success: false,
       error: 'Failed to verify user financial and audit references.',
     };
   }
 
-  const linkedCount = (paymentsRefRes.count ?? 0) + (auditRefRes.count ?? 0);
+  const linkedCount =
+    (paymentsRefRes.count ?? 0) +
+    (batchesRefRes.count ?? 0) +
+    (requestsRefRes.count ?? 0) +
+    (auditRefRes.count ?? 0);
   if (linkedCount > 0) {
     return {
       success: false,
-      error: `Cannot permanently delete this user because they have ${linkedCount} linked payment/audit record(s). Please Disable the account instead to preserve the audit trail.`,
+      error: `Cannot permanently delete this user because they have ${linkedCount} linked payment, batch, request, or audit record(s). Please Disable the account instead to preserve the audit trail.`,
     };
   }
 

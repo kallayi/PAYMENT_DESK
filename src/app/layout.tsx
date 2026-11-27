@@ -10,11 +10,11 @@ export const metadata: Metadata = {
   manifest: '/manifest.webmanifest',
   icons: {
     icon: [
-      { url: '/favicon.ico', sizes: '32x32' },
-      { url: '/icon-192.png?v=2', sizes: '192x192', type: 'image/png' },
+      { url: '/favicon.png?v=3', sizes: '32x32', type: 'image/png' },
+      { url: '/icon-192.png?v=3', sizes: '192x192', type: 'image/png' },
     ],
-    shortcut: '/favicon.ico',
-    apple: '/apple-touch-icon.png',
+    shortcut: '/favicon.png?v=3',
+    apple: '/apple-touch-icon.png?v=3',
   },
   appleWebApp: {
     capable: true,
@@ -34,7 +34,7 @@ export const viewport: Viewport = {
   maximumScale: 1,
 };
 
-const themeBootScript = `(function(){try{var p=localStorage.getItem('payment-desk-theme');if(p!=='light'&&p!=='dark'&&p!=='system'){p='light';}var d=p==='dark'||(p==='system'&&window.matchMedia('(prefers-color-scheme: dark)').matches);document.documentElement.classList.toggle('dark',d);document.documentElement.style.colorScheme=d?'dark':'light';var c=d?'#0e0e11':'#ffffff';var ms=document.querySelectorAll('meta[name="theme-color"]');if(ms.length){for(var i=0;i<ms.length;i++){ms[i].setAttribute('content',c);ms[i].removeAttribute('media');}}else{var m=document.createElement('meta');m.name='theme-color';m.content=c;document.head.appendChild(m);}}catch(e){}})();`;
+const themeBootScript = `(function(){try{var p=localStorage.getItem('payment-desk-theme');if(p!=='light'&&p!=='dark'&&p!=='system'){p='system';}var d=p==='dark'||(p==='system'&&window.matchMedia('(prefers-color-scheme: dark)').matches);document.documentElement.classList.toggle('dark',d);document.documentElement.style.colorScheme=d?'dark':'light';var c=d?'#0e0e11':'#ffffff';var ms=document.querySelectorAll('meta[name="theme-color"]');if(ms.length){for(var i=0;i<ms.length;i++){ms[i].setAttribute('content',c);ms[i].removeAttribute('media');}}else{var m=document.createElement('meta');m.name='theme-color';m.content=c;document.head.appendChild(m);}}catch(e){}})();`;
 
 export default function RootLayout({
   children,

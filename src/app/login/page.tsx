@@ -19,7 +19,7 @@ function LoginForm() {
   const [password, setPassword] = React.useState('');
   const [showPassword, setShowPassword] = React.useState(false);
   const [error, setError] = React.useState<string | null>(
-    initialError === 'disabled'
+    initialError === 'disabled' || initialError === 'account_disabled'
       ? 'Your account has been disabled. Please contact the administrator.'
       : null
   );

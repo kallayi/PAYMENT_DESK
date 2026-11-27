@@ -2,11 +2,14 @@ import * as React from 'react';
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import { getCurrentUserContext } from '@/lib/auth';
-import { checkAndDispatchDueReminders } from '@/actions/reminders';
+import { checkAndDispatchDueReminders } from '@/lib/reminders-server';
 import { getCurrentISTInfo } from '@/lib/format';
 import { RemindersView } from '@/components/reminders/reminders-view';
 import { Loader2 } from 'lucide-react';
 import type { RecurringReminder, ReminderLinkedPayment, Vendor } from '@/types/database';
+
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 export const metadata = {
   title: 'Monthly Reminders | Payment Desk',

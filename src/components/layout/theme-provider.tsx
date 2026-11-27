@@ -47,7 +47,7 @@ function applyThemeToDocument(pref: ThemePreference): ResolvedTheme {
 }
 
 function readStoredPreference(): ThemePreference {
-  if (typeof window === 'undefined') return 'light';
+  if (typeof window === 'undefined') return 'system';
   try {
     const stored = window.localStorage.getItem(THEME_STORAGE_KEY);
     if (stored === 'light' || stored === 'dark' || stored === 'system') {
@@ -56,11 +56,11 @@ function readStoredPreference(): ThemePreference {
   } catch {
     // Ignore storage read errors
   }
-  return 'light';
+  return 'system';
 }
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setThemeState] = React.useState<ThemePreference>('light');
+  const [theme, setThemeState] = React.useState<ThemePreference>('system');
   const [resolvedTheme, setResolvedTheme] = React.useState<ResolvedTheme>('light');
   const [mounted, setMounted] = React.useState<boolean>(false);
 
@@ -149,7 +149,7 @@ export function ThemeSegmentedControl({
   className?: string;
 }) {
   const { theme, mounted, setTheme } = useTheme();
-  const activePref: ThemePreference = mounted ? theme : 'light';
+  const activePref: ThemePreference = mounted ? theme : 'system';
 
   return (
     <div
@@ -168,13 +168,11 @@ export function ThemeSegmentedControl({
             aria-checked={selected}
             aria-pressed={selected}
             onClick={() => setTheme(opt.value)}
-            className={`min-h-[38px] inline-flex items-center justify-center rounded-lg transition-all cursor-pointer touch-manipulation active:scale-[0.98] ${
-              compact ? 'gap-1 px-2 py-1.5 text-[11px]' : 'gap-1.5 px-3 py-1.5 text-xs'
-            } ${
-              selected
+            className={`min-h-[38px] inline-flex items-center justify-center rounded-lg transition-all cursor-pointer touch-manipulation active:scale-[0.98] ${compact ? 'gap-1 px-2 py-1.5 text-[11px]' : 'gap-1.5 px-3 py-1.5 text-xs'
+              } ${selected
                 ? 'bg-brand text-white font-semibold shadow-sm'
                 : 'text-slate-600 hover:text-slate-900 font-medium'
-            }`}
+              }`}
           >
             <Icon className={compact ? 'w-3.5 h-3.5 shrink-0' : 'w-3.5 h-3.5 shrink-0'} />
             <span>{opt.label}</span>
@@ -212,7 +210,7 @@ export function ThemeToggle() {
     };
   }, [isOpen]);
 
-  const activePref: ThemePreference = mounted ? theme : 'light';
+  const activePref: ThemePreference = mounted ? theme : 'system';
   const ActiveIcon =
     activePref === 'light' ? Sun : activePref === 'dark' ? Moon : Monitor;
 
@@ -248,11 +246,10 @@ export function ThemeToggle() {
                   setTheme(opt.value);
                   setIsOpen(false);
                 }}
-                className={`w-full px-3 py-2 text-xs flex items-center justify-between gap-2 transition-colors cursor-pointer touch-manipulation ${
-                  selected
+                className={`w-full px-3 py-2 text-xs flex items-center justify-between gap-2 transition-colors cursor-pointer touch-manipulation ${selected
                     ? 'font-bold text-brand bg-brand-tint'
                     : 'font-medium text-slate-700 hover:bg-slate-50'
-                }`}
+                  }`}
               >
                 <span className="flex items-center gap-2">
                   <Icon className="w-3.5 h-3.5 shrink-0" />

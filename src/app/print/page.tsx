@@ -47,6 +47,9 @@ function formatFullMonthLabel(monthKey: string): string {
   return `${MONTHS_FULL[mIdx] || mStr} ${yStr}`;
 }
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 export const metadata = {
   title: 'Settled Payment Report & Voucher | Payment Desk',
   description: 'Printable A4 PDF Payment Approval & Settled History Report.',

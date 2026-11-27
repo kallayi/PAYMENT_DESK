@@ -31,6 +31,19 @@ export function round2(val: number): number {
 }
 
 /**
+ * Neutralize spreadsheet formula injection trigger characters (=, +, -, @, \t, \r)
+ * on free-text CSV / Excel cells without modifying numeric cells or validated bank codes.
+ */
+export function sanitizeSpreadsheetText(val: string | null | undefined): string {
+  if (val === null || val === undefined) return '';
+  const str = String(val);
+  if (/^[=+\-@\t\r]/.test(str) || /^[=+\-@]/.test(str.trim())) {
+    return `'${str}`;
+  }
+  return str;
+}
+
+/**
  * Calculate Net Payable: Amount - TDS
  */
 export function calculateNetPayable(amount: number, tds: number = 0): number {

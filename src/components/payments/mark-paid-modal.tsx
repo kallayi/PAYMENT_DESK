@@ -99,8 +99,8 @@ export function MarkPaidModal({
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (file.size > 5 * 1024 * 1024) {
-      toast.error('Receipt file exceeds 5 MB limit.');
+    if (file.size > 4 * 1024 * 1024) {
+      toast.error('Receipt file exceeds 4 MB limit.');
       if (fileInputRef.current) fileInputRef.current.value = '';
       return;
     }
@@ -426,7 +426,7 @@ export function MarkPaidModal({
                     </div>
                   )}
                   <p className="text-[11px] text-slate-400 mt-1">
-                    Accepted: PDF, JPG, PNG, WEBP up to 5 MB. Stored privately for Auditor review.
+                    Accepted: PDF, JPG, PNG, WEBP up to 4 MB. Stored privately for Auditor review.
                   </p>
                 </div>
 

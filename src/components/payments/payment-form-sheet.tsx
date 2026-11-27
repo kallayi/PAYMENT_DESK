@@ -381,8 +381,8 @@ export function PaymentFormSheet({
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (file.size > 5 * 1024 * 1024) {
-      toast.error('File size exceeds the 5 MB limit.');
+    if (file.size > 4 * 1024 * 1024) {
+      toast.error('File size exceeds the 4 MB limit.');
       if (fileInputRef.current) fileInputRef.current.value = '';
       return;
     }
@@ -992,7 +992,7 @@ export function PaymentFormSheet({
           <div className="bg-white rounded-xl border border-slate-200/90 p-3.5 sm:p-4 shadow-sm space-y-3.5">
             <div>
               <label className="block text-xs font-semibold text-slate-800 tracking-tight mb-1">
-                Invoice Attachment (PDF or Image, max 5 MB)
+                Invoice Attachment (PDF or Image, max 4 MB)
               </label>
               <input
                 ref={fileInputRef}

@@ -557,6 +557,26 @@ export type Database = {
         Args: { p_company_id: string };
         Returns: boolean;
       };
+      settle_payment_batch_atomic: {
+        Args: {
+          p_company_id: string;
+          p_batch_date: string;
+          p_receipt_file_path: string;
+          p_notes: string | null;
+          p_items: Array<{
+            payment_id: string;
+            utr_number: string | null;
+            cheque_number: string | null;
+            cheque_date: string | null;
+          }>;
+        };
+        Returns: {
+          batch_id: string;
+          batch_code: string;
+          item_count: number;
+          total_amount: number;
+        };
+      };
     };
     Enums: {
       user_role: UserRole;

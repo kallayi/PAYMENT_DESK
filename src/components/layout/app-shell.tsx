@@ -338,7 +338,12 @@ export function AppShell({
             aria-label="Go to Home Workspace"
             className="inline-flex items-center cursor-pointer hover:opacity-90 active:opacity-80 transition-opacity w-fit"
           >
-            <PaymentDeskLogo size="sm" showWordmark={true} showSubtitle={false} />
+            <PaymentDeskLogo
+              size="sm"
+              showWordmark={true}
+              showSubtitle={false}
+              companyCode={activeCompany?.code}
+            />
           </Link>
         </div>
 
@@ -398,7 +403,11 @@ export function AppShell({
               aria-label="Go to Home Workspace"
               className="lg:hidden shrink-0 inline-flex items-center cursor-pointer hover:opacity-90 active:opacity-80 transition-opacity"
             >
-              <PaymentDeskLogo size="sm" showWordmark={false} />
+              <PaymentDeskLogo
+                size="sm"
+                showWordmark={false}
+                companyCode={activeCompany?.code}
+              />
             </Link>
             <span className="text-sm font-bold text-slate-900 truncate">
               {pageTitle}
@@ -416,6 +425,8 @@ export function AppShell({
 
             <NotificationBell
               userId={profile.id}
+              userRole={profile.role}
+              isAdmin={profile.is_admin}
               initialNotifications={initialNotifications}
               initialUnreadCount={initialUnreadCount}
               allowedCompanies={allowedCompanies}

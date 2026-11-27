@@ -132,124 +132,77 @@ interface SlipViewData {
   paidUserName: string;
 }
 
-/**
- * Loads a PNG asset, auto-crops transparent borders (a > 10), and recolors
- * via `source-in` onto an offscreen canvas so white or oversized-padding logos
- * render crisply in Screen Preview, Exported PNG, and Print/PDF.
- */
-async function buildCanvasRecoloredDataUrl(
-  logoSrc: string,
-  fillColor: string
-): Promise<string | null> {
-  if (typeof window === 'undefined' || typeof document === 'undefined') {
-    return null;
-  }
+const TEMPLATE_PATHS: Record<BrandKey, string> = {
+  INDFURN: '/indfurn-acknowledgement-template.jpg',
+  VINMORE: '/vinmore-acknowledgement-template.jpg',
+};
 
-  let objectUrl: string | null = null;
+const templateDataUrlCache = new Map<BrandKey, string>();
+const templateLoadPromises = new Map<BrandKey, Promise<string | null>>();
+
+/**
+ * Fetches an official full-page letterhead JPG template and converts it to a
+ * base64 Data URL via FileReader so `html-to-image` `toPng()` never exports a
+ * blank background or fails due to external image timing.
+ */
+async function loadImageAsDataUrl(url: string): Promise<string | null> {
+  if (typeof window === 'undefined') return null;
+
   try {
-    const res = await fetch(logoSrc, { cache: 'force-cache' });
+    const res = await fetch(url, { cache: 'force-cache' });
     if (!res.ok) return null;
     const blob = await res.blob();
-    objectUrl = URL.createObjectURL(blob);
-
-    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
-      const el = new Image();
-      el.crossOrigin = 'anonymous';
-      el.onload = () => resolve(el);
-      el.onerror = () => reject(new Error('Failed to decode logo image'));
-      el.src = objectUrl!;
+    return await new Promise<string | null>((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        resolve(typeof reader.result === 'string' ? reader.result : null);
+      };
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(blob);
     });
-
-    if (typeof img.decode === 'function') {
-      try {
-        await img.decode();
-      } catch {
-        // Proceed with loaded image
-      }
-    }
-
-    const srcW = img.naturalWidth || img.width;
-    const srcH = img.naturalHeight || img.height;
-    if (!srcW || !srcH) return null;
-
-    const srcCanvas = document.createElement('canvas');
-    srcCanvas.width = srcW;
-    srcCanvas.height = srcH;
-    const srcCtx = srcCanvas.getContext('2d', { willReadFrequently: true });
-    if (!srcCtx) return null;
-
-    srcCtx.drawImage(img, 0, 0, srcW, srcH);
-
-    // Find tight bounding box of non-transparent pixels (a > 10)
-    const { data } = srcCtx.getImageData(0, 0, srcW, srcH);
-    let minX = srcW;
-    let minY = srcH;
-    let maxX = -1;
-    let maxY = -1;
-
-    for (let y = 0; y < srcH; y += 1) {
-      const rowOffset = y * srcW * 4;
-      for (let x = 0; x < srcW; x += 1) {
-        const alpha = data[rowOffset + x * 4 + 3];
-        if (alpha > 10) {
-          if (x < minX) minX = x;
-          if (x > maxX) maxX = x;
-          if (y < minY) minY = y;
-          if (y > maxY) maxY = y;
-        }
-      }
-    }
-
-    if (maxX < minX || maxY < minY) {
-      return null;
-    }
-
-    const cropW = maxX - minX + 1;
-    const cropH = maxY - minY + 1;
-
-    const outCanvas = document.createElement('canvas');
-    outCanvas.width = cropW;
-    outCanvas.height = cropH;
-    const outCtx = outCanvas.getContext('2d');
-    if (!outCtx) return null;
-
-    outCtx.drawImage(srcCanvas, minX, minY, cropW, cropH, 0, 0, cropW, cropH);
-    outCtx.globalCompositeOperation = 'source-in';
-    outCtx.fillStyle = fillColor;
-    outCtx.fillRect(0, 0, cropW, cropH);
-    outCtx.globalCompositeOperation = 'source-over';
-
-    return outCanvas.toDataURL('image/png');
   } catch {
     return null;
-  } finally {
-    if (objectUrl) {
-      URL.revokeObjectURL(objectUrl);
-    }
   }
+}
+
+async function getCachedTemplateDataUrl(brandKey: BrandKey): Promise<string | null> {
+  const cached = templateDataUrlCache.get(brandKey);
+  if (cached) return cached;
+
+  const inFlight = templateLoadPromises.get(brandKey);
+  if (inFlight) return inFlight;
+
+  const promise = loadImageAsDataUrl(TEMPLATE_PATHS[brandKey]).then((dataUrl) => {
+    if (dataUrl) {
+      templateDataUrlCache.set(brandKey, dataUrl);
+    }
+    templateLoadPromises.delete(brandKey);
+    return dataUrl;
+  });
+
+  templateLoadPromises.set(brandKey, promise);
+  return promise;
 }
 
 function AdviceSlipDocument({
   data,
-  watermarkDataUrl,
-  headerLogoDataUrl,
+  templateDataUrl,
   id,
   className = '',
   style,
 }: {
   data: SlipViewData;
-  watermarkDataUrl?: string | null;
-  headerLogoDataUrl?: string | null;
+  templateDataUrl?: string | null;
   id?: string;
   className?: string;
   style?: React.CSSProperties;
 }) {
-  const isVinmore = data.brandKey === 'VINMORE';
+  const fallbackTemplatePath = TEMPLATE_PATHS[data.brandKey];
 
   return (
     <div
       id={id}
-      className={`keep-light relative w-[620px] min-h-[775px] bg-white overflow-hidden px-[28px] py-[24px] text-[#111111] ${className}`}
+      className={`keep-light relative w-[620px] min-h-[877px] bg-white overflow-hidden text-[#111111] ${className}`}
       style={{
         fontFamily: 'Arial, Helvetica, Inter, sans-serif',
         backgroundColor: '#ffffff',
@@ -260,197 +213,162 @@ function AdviceSlipDocument({
         ...style,
       }}
     >
-      {/* Background Centered Watermark (Strictly Company-Isolated) */}
-      {watermarkDataUrl ? (
-        <div
-          aria-hidden="true"
-          className={
-            isVinmore
-              ? 'pointer-events-none select-none absolute top-[235px] left-1/2 -translate-x-1/2 w-[330px] max-w-[60%] z-0 flex items-center justify-center bg-transparent'
-              : 'pointer-events-none select-none absolute top-[118px] left-1/2 -translate-x-1/2 w-[300px] z-0 flex items-center justify-center bg-transparent'
-          }
-        >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={watermarkDataUrl}
-            alt=""
-            className={
-              isVinmore
-                ? 'w-[330px] max-w-full h-auto object-contain block'
-                : 'w-[300px] h-auto object-contain block'
-            }
-            style={{
-              WebkitPrintColorAdjust: 'exact',
-              printColorAdjust: 'exact',
-            }}
-          />
-        </div>
-      ) : null}
+      {/* Full-Bleed Official A4 Letterhead Template (Contains Company Header & Watermark) */}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={templateDataUrl || fallbackTemplatePath}
+        alt=""
+        aria-hidden="true"
+        className="pointer-events-none select-none absolute inset-0 w-full h-full object-fill z-0"
+        style={{ WebkitPrintColorAdjust: 'exact', printColorAdjust: 'exact' }}
+      />
 
-      {/* Foreground Content */}
-      <div className="relative z-10 bg-transparent">
-        {/* Top-Right Company Letterhead Header (Strictly Company-Isolated) */}
-        {isVinmore ? (
-          <div className="flex justify-end pr-[64px] min-h-[26px] items-center">
-            {headerLogoDataUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={headerLogoDataUrl}
-                alt="Vinmore"
-                className="h-[22px] w-auto object-contain block"
-                style={{
-                  WebkitPrintColorAdjust: 'exact',
-                  printColorAdjust: 'exact',
-                }}
-              />
-            ) : null}
-          </div>
-        ) : (
-          <div className="text-right pr-[88px]">
-            <span className="text-[19px] font-semibold tracking-[0.22em] text-[#B8B8B8] uppercase">
-              INDFURN
-            </span>
-          </div>
-        )}
-
-        {/* Salutation & Intro Paragraph */}
-        <p className="mt-3 mb-2 text-[13.5px] leading-[1.5] text-[#111111]">
-          Dear Sir/Madam,
-        </p>
-        <p className="mb-3 text-[13.5px] leading-[1.5] text-[#111111]">
-          We would like to inform you that we have successfully processed your payment.
-          <br />
-          Please find the payment details below for your reference.
-        </p>
-
-        {/* Section 1: Payment Details */}
-        <h3 className="text-[14px] font-bold text-[#111111] mt-3 mb-2">
-          Payment Details
-        </h3>
-        <div className="text-[13px] leading-[1.62] text-[#111111]">
-          <div className="grid grid-cols-[168px_14px_1fr] items-baseline">
-            <span>Reference ID</span>
-            <span>:</span>
-            <span>{data.referenceId}</span>
+      {/* Crisp Foreground Content Layout */}
+      <div className="relative z-10 flex flex-col justify-between min-h-[877px] px-[38px] pt-[66px] pb-[34px] bg-transparent text-[#111111]">
+        {/* Top Content Block */}
+        <div className="bg-transparent text-[#111111]">
+          {/* Salutation & Intro */}
+          <div className="text-[13.5px] leading-[1.55] text-[#111111]">
+            <p className="mb-3">Dear Sir/Madam,</p>
+            <p>
+              We would like to inform you that we have successfully processed your payment.
+              <br />
+              Please find the payment details below for your reference.
+            </p>
           </div>
 
-          {!data.isCheque ? (
-            <div className="grid grid-cols-[168px_14px_1fr] items-baseline">
-              <span>UTR Number</span>
+          {/* Section 1: Payment Details */}
+          <h3 className="text-[14px] font-bold text-[#111111] mt-6 mb-2.5">
+            Payment Details
+          </h3>
+          <div className="text-[13.2px] leading-[1.72] text-[#111111]">
+            <div className="grid grid-cols-[172px_14px_1fr] items-baseline">
+              <span>Reference ID</span>
               <span>:</span>
-              <span className="font-bold">{data.settlementRef}</span>
+              <span>{data.referenceId}</span>
             </div>
-          ) : (
-            <>
-              <div className="grid grid-cols-[168px_14px_1fr] items-baseline">
-                <span>Cheque Number</span>
+
+            {!data.isCheque ? (
+              <div className="grid grid-cols-[172px_14px_1fr] items-baseline">
+                <span>UTR Number</span>
                 <span>:</span>
                 <span className="font-bold">{data.settlementRef}</span>
               </div>
-              <div className="grid grid-cols-[168px_14px_1fr] items-baseline">
-                <span>Cheque Date</span>
-                <span>:</span>
-                <span className="tabular-nums">{data.chequeDateFormatted}</span>
-              </div>
-            </>
+            ) : (
+              <>
+                <div className="grid grid-cols-[172px_14px_1fr] items-baseline">
+                  <span>Cheque Number</span>
+                  <span>:</span>
+                  <span className="font-bold">{data.settlementRef}</span>
+                </div>
+                <div className="grid grid-cols-[172px_14px_1fr] items-baseline">
+                  <span>Cheque Date</span>
+                  <span>:</span>
+                  <span className="tabular-nums">{data.chequeDateFormatted}</span>
+                </div>
+              </>
+            )}
+
+            <div className="grid grid-cols-[172px_14px_1fr] items-baseline">
+              <span>Mode of Transfer</span>
+              <span>:</span>
+              <span>{data.modeOfTransfer}</span>
+            </div>
+
+            <div className="grid grid-cols-[172px_14px_1fr] items-baseline">
+              <span>Bank Name</span>
+              <span>:</span>
+              <span>{data.sourceBankName}</span>
+            </div>
+
+            <div className="grid grid-cols-[172px_14px_1fr] items-baseline">
+              <span>Account Number</span>
+              <span>:</span>
+              <span className="tabular-nums">{data.sourceAccountMasked}</span>
+            </div>
+
+            <div className="grid grid-cols-[172px_14px_1fr] items-baseline">
+              <span>Amount</span>
+              <span>:</span>
+              <span className="font-bold tabular-nums">{data.amountFormatted}</span>
+            </div>
+
+            <div className="grid grid-cols-[172px_14px_1fr] items-baseline">
+              <span>Transaction Date</span>
+              <span>:</span>
+              <span className="tabular-nums">{data.transactionDateFormatted}</span>
+            </div>
+
+            <div className="grid grid-cols-[172px_14px_1fr] items-baseline">
+              <span>Remark</span>
+              <span>:</span>
+              <span className="break-words">{data.remarkText}</span>
+            </div>
+          </div>
+
+          {/* Section 2: Payee Details */}
+          <h3 className="text-[14px] font-bold text-[#111111] mt-6 mb-2.5">
+            Payee Details
+          </h3>
+          <div className="text-[13.2px] leading-[1.72] text-[#111111]">
+            <div className="grid grid-cols-[172px_14px_1fr] items-baseline">
+              <span>Payee Type</span>
+              <span>:</span>
+              <span>Registered Payee</span>
+            </div>
+
+            <div className="grid grid-cols-[172px_14px_1fr] items-baseline">
+              <span>Payee Name</span>
+              <span>:</span>
+              <span className="font-bold uppercase break-words">{data.beneficiaryName}</span>
+            </div>
+
+            <div className="grid grid-cols-[172px_14px_1fr] items-baseline">
+              <span>Payee Bank</span>
+              <span>:</span>
+              <span>{data.payeeBankName}</span>
+            </div>
+
+            <div className="grid grid-cols-[172px_14px_1fr] items-baseline">
+              <span>Payee Account Number</span>
+              <span>:</span>
+              <span className="tabular-nums">{data.payeeAccountNo}</span>
+            </div>
+          </div>
+
+          {/* Closing Block */}
+          <div className="mt-8 text-[13.5px] leading-[1.55] text-[#111111]">
+            <p>For any clarifications, please feel free to contact us.</p>
+            <div className="mt-5">
+              <p>Best Regards</p>
+              <p className="font-bold">{data.companyTitle}</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Bottom Footer Block */}
+        <div className="mt-10 bg-transparent">
+          {/* Bottom-Left Audit Stamp */}
+          <div className="text-[11.5px] leading-[1.75] text-[#222222] tabular-nums">
+            <div>
+              Date : &nbsp;&nbsp;{data.paidTimestampFormatted}
+            </div>
+            <div>
+              User : &nbsp;&nbsp;{data.paidUserName}
+            </div>
+          </div>
+
+          {/* Bottom-Center Contact Footer */}
+          {(data.companyEmail || data.companyPhone) && (
+            <div className="mt-6 text-center">
+              <span className="text-[13px] text-[#5B767A] underline underline-offset-4">
+                {data.companyEmail}
+                {data.companyEmail && data.companyPhone ? '\u00A0\u00A0\u00A0' : ''}
+                {data.companyPhone}
+              </span>
+            </div>
           )}
-
-          <div className="grid grid-cols-[168px_14px_1fr] items-baseline">
-            <span>Mode of Transfer</span>
-            <span>:</span>
-            <span>{data.modeOfTransfer}</span>
-          </div>
-
-          <div className="grid grid-cols-[168px_14px_1fr] items-baseline">
-            <span>Bank Name</span>
-            <span>:</span>
-            <span>{data.sourceBankName}</span>
-          </div>
-
-          <div className="grid grid-cols-[168px_14px_1fr] items-baseline">
-            <span>Account Number</span>
-            <span>:</span>
-            <span className="tabular-nums">{data.sourceAccountMasked}</span>
-          </div>
-
-          <div className="grid grid-cols-[168px_14px_1fr] items-baseline">
-            <span>Amount</span>
-            <span>:</span>
-            <span className="font-bold tabular-nums">{data.amountFormatted}</span>
-          </div>
-
-          <div className="grid grid-cols-[168px_14px_1fr] items-baseline">
-            <span>Transaction Date</span>
-            <span>:</span>
-            <span className="tabular-nums">{data.transactionDateFormatted}</span>
-          </div>
-
-          <div className="grid grid-cols-[168px_14px_1fr] items-baseline">
-            <span>Remark</span>
-            <span>:</span>
-            <span className="break-words">{data.remarkText}</span>
-          </div>
         </div>
-
-        {/* Section 2: Payee Details */}
-        <h3 className="text-[14px] font-bold text-[#111111] mt-4 mb-2">
-          Payee Details
-        </h3>
-        <div className="text-[13px] leading-[1.62] text-[#111111]">
-          <div className="grid grid-cols-[168px_14px_1fr] items-baseline">
-            <span>Payee Type</span>
-            <span>:</span>
-            <span>Registered Payee</span>
-          </div>
-
-          <div className="grid grid-cols-[168px_14px_1fr] items-baseline">
-            <span>Payee Name</span>
-            <span>:</span>
-            <span className="font-bold uppercase break-words">{data.beneficiaryName}</span>
-          </div>
-
-          <div className="grid grid-cols-[168px_14px_1fr] items-baseline">
-            <span>Payee Bank</span>
-            <span>:</span>
-            <span>{data.payeeBankName}</span>
-          </div>
-
-          <div className="grid grid-cols-[168px_14px_1fr] items-baseline">
-            <span>Payee Account Number</span>
-            <span>:</span>
-            <span className="tabular-nums">{data.payeeAccountNo}</span>
-          </div>
-        </div>
-
-        {/* Closing Block */}
-        <div className="mt-6 mb-3 text-[13.5px] leading-[1.5] text-[#111111]">
-          <p className="mb-3">For any clarifications, please feel free to contact us.</p>
-          <div className="mt-4">
-            <p>Best Regards</p>
-            <p className="font-bold">{data.companyTitle}</p>
-          </div>
-        </div>
-
-        {/* Bottom-Left Audit Stamp */}
-        <div className="mt-8 text-[11px] leading-[1.7] text-[#111111] tabular-nums">
-          <div>
-            Date : &nbsp;&nbsp;{data.paidTimestampFormatted}
-          </div>
-          <div>
-            User : &nbsp;&nbsp;{data.paidUserName}
-          </div>
-        </div>
-
-        {/* Bottom-Center Contact Footer */}
-        {(data.companyEmail || data.companyPhone) && (
-          <div className="mt-5 text-center">
-            <span className="text-[13px] text-[#5B767A] underline underline-offset-4">
-              {data.companyEmail}
-              {data.companyEmail && data.companyPhone ? '\u00A0\u00A0\u00A0' : ''}
-              {data.companyPhone}
-            </span>
-          </div>
-        )}
       </div>
     </div>
   );
@@ -469,7 +387,7 @@ export function PaymentAcknowledgementModal({
   const previewSlipRef = React.useRef<HTMLDivElement | null>(null);
   const exportRef = React.useRef<HTMLDivElement | null>(null);
   const [previewScale, setPreviewScale] = React.useState<number>(1);
-  const [previewHeight, setPreviewHeight] = React.useState<number>(775);
+  const [previewHeight, setPreviewHeight] = React.useState<number>(877);
   const [isExporting, setIsExporting] = React.useState<
     'WHATSAPP' | 'COPY' | 'PNG' | null
   >(null);
@@ -479,50 +397,39 @@ export function PaymentAcknowledgementModal({
   );
   const [isMarkingManualSent, setIsMarkingManualSent] = React.useState<boolean>(false);
   const autoMarkInFlightRef = React.useRef<string | null>(null);
-  const [watermarkDataUrl, setWatermarkDataUrl] = React.useState<string | null>(null);
-  const [headerLogoDataUrl, setHeaderLogoDataUrl] = React.useState<string | null>(null);
-  const brandAssetsPromiseRef = React.useRef<
-    Promise<{ watermark: string | null; header: string | null }> | null
-  >(null);
 
   React.useEffect(() => {
     setLocalReceiptSentAt(receiptSentAt ?? payment?.receipt_sent_at ?? null);
     autoMarkInFlightRef.current = null;
   }, [open, payment?.id, payment?.receipt_sent_at, receiptSentAt]);
 
-  // Strictly key brandKey off company.code so editing display name never breaks logo/watermark isolation
+  // Strictly key brandKey off company.code so editing display name never breaks template isolation
   const companyCodeHint = (activeCompany?.code || payment?.company?.code || '').trim().toUpperCase();
   const fallbackIdentity = companyCodeHint || (activeCompany?.name || payment?.company?.name || '').trim().toUpperCase();
   const brandKey: BrandKey = fallbackIdentity.includes('VINMORE') ? 'VINMORE' : 'INDFURN';
 
-  // Reset & pre-bake company-specific canvas assets whenever brandKey or modal open state changes
+  const [templateDataUrl, setTemplateDataUrl] = React.useState<string | null>(
+    () => templateDataUrlCache.get(brandKey) ?? null
+  );
+  const templatePromiseRef = React.useRef<Promise<string | null> | null>(null);
+
+  // Preload company-specific A4 letterhead template Data URL whenever brandKey or modal open state changes
   React.useEffect(() => {
     let active = true;
-    setWatermarkDataUrl(null);
-    setHeaderLogoDataUrl(null);
+    const cached = templateDataUrlCache.get(brandKey) ?? null;
+    setTemplateDataUrl(cached);
 
     if (!open) {
-      brandAssetsPromiseRef.current = null;
+      templatePromiseRef.current = cached ? Promise.resolve(cached) : null;
       return;
     }
 
-    const promise =
-      brandKey === 'VINMORE'
-        ? Promise.all([
-          buildCanvasRecoloredDataUrl('/vinmore-centre-logo.png', '#E8E8E8'),
-          buildCanvasRecoloredDataUrl('/vinmore-titles-logo.png', '#A3A3A3'),
-        ]).then(([watermark, header]) => ({ watermark, header }))
-        : buildCanvasRecoloredDataUrl('/logo.png', '#E8E8E8').then((watermark) => ({
-          watermark,
-          header: null,
-        }));
+    const promise = getCachedTemplateDataUrl(brandKey);
+    templatePromiseRef.current = promise;
 
-    brandAssetsPromiseRef.current = promise;
-
-    promise.then(({ watermark, header }) => {
-      if (!active) return;
-      setWatermarkDataUrl(watermark);
-      setHeaderLogoDataUrl(header);
+    promise.then((dataUrl) => {
+      if (!active || !dataUrl) return;
+      setTemplateDataUrl(dataUrl);
     });
 
     return () => {
@@ -589,7 +496,7 @@ export function PaymentAcknowledgementModal({
   const sourceAccountMasked =
     payment.source_bank?.account_number_masked ||
     payment.source_bank?.account_mask ||
-    'XXXX XXXX XXX 5074';
+    '—';
 
   const transactionDateFormatted = formatISTDate(
     payment.paid_at || payment.sheet_date
@@ -673,20 +580,20 @@ export function PaymentAcknowledgementModal({
       throw new Error('Payment advice slip is not ready.');
     }
 
-    const needsAssets =
-      !watermarkDataUrl || (brandKey === 'VINMORE' && !headerLogoDataUrl);
-
-    if (needsAssets && brandAssetsPromiseRef.current) {
-      const assets = await brandAssetsPromiseRef.current;
-      setWatermarkDataUrl(assets.watermark);
-      setHeaderLogoDataUrl(assets.header);
-      await new Promise<void>((resolve) =>
-        requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+    if (!templateDataUrl) {
+      const loadedUrl = await (
+        templatePromiseRef.current ?? getCachedTemplateDataUrl(brandKey)
       );
+      if (loadedUrl) {
+        setTemplateDataUrl(loadedUrl);
+        await new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+        );
+      }
     }
 
     await ensureExportImagesLoaded(targetNode);
-    const captureHeight = Math.max(775, targetNode.scrollHeight);
+    const captureHeight = Math.max(877, targetNode.scrollHeight);
     return toPng(targetNode, {
       width: 620,
       height: captureHeight,
@@ -934,8 +841,7 @@ export function PaymentAcknowledgementModal({
                 <AdviceSlipDocument
                   id="advice-preview-slip"
                   data={slipData}
-                  watermarkDataUrl={watermarkDataUrl}
-                  headerLogoDataUrl={headerLogoDataUrl}
+                  templateDataUrl={templateDataUrl}
                 />
               </div>
             </div>
@@ -950,8 +856,7 @@ export function PaymentAcknowledgementModal({
               <AdviceSlipDocument
                 id="advice-export-slip"
                 data={slipData}
-                watermarkDataUrl={watermarkDataUrl}
-                headerLogoDataUrl={headerLogoDataUrl}
+                templateDataUrl={templateDataUrl}
               />
             </div>
           </div>
@@ -1057,8 +962,7 @@ export function PaymentAcknowledgementModal({
           <AdviceSlipDocument
             id="printable-advice-slip"
             data={slipData}
-            watermarkDataUrl={watermarkDataUrl}
-            headerLogoDataUrl={headerLogoDataUrl}
+            templateDataUrl={templateDataUrl}
             className="hidden print:block"
           />,
           document.body

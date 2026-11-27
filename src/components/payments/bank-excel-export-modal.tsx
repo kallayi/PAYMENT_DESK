@@ -17,6 +17,8 @@ import {
   AlertCircle,
   Info,
   Landmark,
+  CheckCircle2,
+  ArrowRight,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { splitRowsByIfsc } from '@/lib/excel/ifsc';
@@ -30,6 +32,7 @@ interface BankExcelExportModalProps {
   readyToPayItems: PaymentItem[];
   banks: CompanyBank[];
   companyCode?: string;
+  onProceedToBatch?: (items: PaymentItem[]) => void;
 }
 
 function isAxisBank(bank: CompanyBank): boolean {
@@ -49,6 +52,7 @@ export function BankExcelExportModal({
   readyToPayItems,
   banks,
   companyCode = 'INDFURN',
+  onProceedToBatch,
 }: BankExcelExportModalProps) {
   const axisBanks = React.useMemo(
     () => banks.filter((b) => b.is_active && isAxisBank(b)),
@@ -64,7 +68,10 @@ export function BankExcelExportModal({
   const [selectedBankId, setSelectedBankId] = React.useState<string>('');
   const [templateCategory, setTemplateCategory] = React.useState<'vendor' | 'salary'>('vendor');
   const [autoDetectedSalary, setAutoDetectedSalary] = React.useState<boolean>(false);
-  const [downloadingType, setDownloadingType] = React.useState<BankBatchType | 'both' | null>(null);
+  const [downloadingType, setDownloadingType] = React.useState<BankBatchType | null>(null);
+  const [downloadedTypes, setDownloadedTypes] = React.useState<Set<BankBatchType>>(
+    () => new Set()
+  );
 
   React.useEffect(() => {
     if (!open) return;
@@ -89,7 +96,12 @@ export function BankExcelExportModal({
     const shouldDefaultSalary = defaultVendorCount === 0 && defaultSalaryCount > 0;
     setTemplateCategory(shouldDefaultSalary ? 'salary' : 'vendor');
     setAutoDetectedSalary(shouldDefaultSalary);
+    setDownloadedTypes(new Set());
   }, [open, axisBanks, axisBankIds, readyToPayItems]);
+
+  React.useEffect(() => {
+    setDownloadedTypes(new Set());
+  }, [selectedBankId, templateCategory]);
 
   const selectedBank = axisBanks.find((b) => b.id === selectedBankId) || null;
   const bankShortCode = (selectedBank?.short_code || selectedBank?.short_name || 'AXIS').toUpperCase();
@@ -213,6 +225,11 @@ export function BankExcelExportModal({
     URL.revokeObjectURL(url);
 
     toast.success(`Downloaded ${filename} (${targetRows.length} entries)`);
+    setDownloadedTypes((prev) => {
+      const next = new Set(prev);
+      next.add(batchType);
+      return next;
+    });
     return true;
   };
 
@@ -222,29 +239,6 @@ export function BankExcelExportModal({
       await triggerSingleDownload(batchType);
     } catch {
       toast.error('Network error while downloading Excel file.');
-    } finally {
-      setDownloadingType(null);
-    }
-  };
-
-  const handleDownloadBothSeparate = async () => {
-    if (
-      splitResult.sameBankRows.length === 0 ||
-      splitResult.otherBankRows.length === 0 ||
-      !selectedBankId
-    ) {
-      return;
-    }
-
-    setDownloadingType('both');
-    try {
-      const okFirst = await triggerSingleDownload('same_bank');
-      if (okFirst) {
-        await new Promise((resolve) => setTimeout(resolve, 250));
-        await triggerSingleDownload('other_bank');
-      }
-    } catch {
-      toast.error('Network error while downloading Excel files.');
     } finally {
       setDownloadingType(null);
     }
@@ -388,71 +382,33 @@ export function BankExcelExportModal({
             </div>
           )}
 
-          {/* SEPARATE TEMPLATE NOTICE & SEQUENTIAL DUAL DOWNLOAD */}
-          {(() => {
-            const hasBothBuckets =
-              splitResult.sameBankRows.length > 0 &&
-              splitResult.otherBankRows.length > 0;
-            const hasDebitAccount = Boolean(
-              selectedBank?.full_debit_account_number?.trim()
-            );
-            const isAxisBankSelected =
-              bankShortCode === 'AXIS' || bankIfscPrefix === 'UTIB';
-            const acrossColLabel =
-              templateCategory === 'salary' ? '29-Col' : '31-Col';
+          {/* CORPORATE DEBIT ACCOUNT HINT */}
+          {selectedBank && !selectedBank.full_debit_account_number?.trim() && (
+            <p className="text-[11px] text-amber-700 bg-amber-50/90 border border-amber-200 rounded-md px-2.5 py-1.5">
+              Note: Full Corporate Debit A/C is not set for {bankShortCode} in Settings; column 1 will be left blank so you can fill it or set it once in Settings → Company Banks.
+            </p>
+          )}
 
-            return (
-              <div className="space-y-2.5">
-                {hasBothBuckets && (
-                  <div className="p-3.5 rounded-xl border border-brand/25 bg-brand/5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                    <div>
-                      <p className="text-xs font-bold text-slate-900">
-                        Separate Axis Neo Templates Required
-                      </p>
-                      <p className="text-[11px] text-slate-600 mt-0.5">
-                        {isAxisBankSelected
-                          ? `Same-Bank (${bankIfscPrefix} 8-Col) and Other-Bank (NEFT/RTGS/IMPS ${acrossColLabel}) are never merged into one broken file — download both cleanly as two separate .xlsx workbooks.`
-                          : 'Same-Bank and Other-Bank transfers download cleanly as separate .xlsx workbooks.'}
-                      </p>
-                    </div>
-                    <Button
-                      type="button"
-                      size="sm"
-                      disabled={downloadingType !== null}
-                      onClick={handleDownloadBothSeparate}
-                      className="bg-brand hover:bg-brand-hover text-white text-xs font-semibold shrink-0"
-                    >
-                      {downloadingType === 'both' ? (
-                        <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
-                      ) : (
-                        <Download className="w-3.5 h-3.5 mr-1.5" />
-                      )}
-                      <span>Download Both Separate Files</span>
-                    </Button>
-                  </div>
-                )}
-
-                {selectedBank && !hasDebitAccount && (
-                  <p className="text-[11px] text-amber-700 bg-amber-50/90 border border-amber-200 rounded-md px-2.5 py-1.5">
-                    Note: Full Corporate Debit A/C is not set for {bankShortCode} in Settings; column 1 will be left blank so you can fill it or set it once in Settings → Company Banks.
-                  </p>
-                )}
-              </div>
-            );
-          })()}
-
-          {/* SPLIT BATCH SUMMARY & DOWNLOAD CARDS */}
+          {/* SPLIT BATCH SUMMARY & INDIVIDUAL DOWNLOAD CARDS */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {/* Same-Bank Card */}
+            {/* File 1: Same-Bank Card */}
             <div className="p-4 rounded-xl border border-slate-200 bg-white space-y-3 shadow-sm flex flex-col justify-between">
               <div>
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
                   <span className="text-xs font-bold text-slate-900">
-                    Same-Bank ({bankIfscPrefix || bankShortCode} IFT)
+                    File 1: Same-Bank ({bankIfscPrefix || bankShortCode})
                   </span>
-                  <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-slate-100 text-slate-700 tabular-nums">
-                    {splitResult.sameBankRows.length} item{splitResult.sameBankRows.length === 1 ? '' : 's'}
-                  </span>
+                  <div className="flex items-center gap-1.5">
+                    {downloadedTypes.has('same_bank') && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                        <CheckCircle2 className="w-3 h-3" />
+                        <span>Downloaded ✓</span>
+                      </span>
+                    )}
+                    <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-slate-100 text-slate-700 tabular-nums">
+                      {splitResult.sameBankRows.length} item{splitResult.sameBankRows.length === 1 ? '' : 's'}
+                    </span>
+                  </div>
                 </div>
                 <p className="text-[11px] text-slate-500 mt-0.5">
                   {bankShortCode === 'AXIS' || bankIfscPrefix === 'UTIB'
@@ -482,22 +438,30 @@ export function BankExcelExportModal({
                   {bankShortCode === 'AXIS' || bankIfscPrefix === 'UTIB'
                     ? templateCategory === 'salary'
                       ? 'Download Salary — Within Axis Bank (8-Col)'
-                      : 'Download Axis Same-Bank (.xlsx)'
+                      : 'Download Within Axis Bank (.xlsx)'
                     : 'Download Same-Bank Excel'}
                 </span>
               </Button>
             </div>
 
-            {/* Other-Bank Card */}
+            {/* File 2: Other-Bank Card */}
             <div className="p-4 rounded-xl border border-slate-200 bg-white space-y-3 shadow-sm flex flex-col justify-between">
               <div>
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
                   <span className="text-xs font-bold text-slate-900">
-                    Other-Bank (NEFT / RTGS / IMPS)
+                    File 2: Other-Bank (NEFT / RTGS / IMPS)
                   </span>
-                  <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-slate-100 text-slate-700 tabular-nums">
-                    {splitResult.otherBankRows.length} item{splitResult.otherBankRows.length === 1 ? '' : 's'}
-                  </span>
+                  <div className="flex items-center gap-1.5">
+                    {downloadedTypes.has('other_bank') && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                        <CheckCircle2 className="w-3 h-3" />
+                        <span>Downloaded ✓</span>
+                      </span>
+                    )}
+                    <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-slate-100 text-slate-700 tabular-nums">
+                      {splitResult.otherBankRows.length} item{splitResult.otherBankRows.length === 1 ? '' : 's'}
+                    </span>
+                  </div>
                 </div>
                 <p className="text-[11px] text-slate-500 mt-0.5">
                   {bankShortCode === 'AXIS' || bankIfscPrefix === 'UTIB'
@@ -527,7 +491,7 @@ export function BankExcelExportModal({
                   {bankShortCode === 'AXIS' || bankIfscPrefix === 'UTIB'
                     ? templateCategory === 'salary'
                       ? 'Download Salary — Across All Banks (29-Col)'
-                      : 'Download Other-Bank NEFT/RTGS/IMPS (.xlsx)'
+                      : 'Download Across All Banks (.xlsx)'
                     : 'Download Other-Bank Excel'}
                 </span>
               </Button>
@@ -608,7 +572,7 @@ export function BankExcelExportModal({
           )}
         </div>
 
-        <DialogFooter className="pt-2 border-t border-slate-100">
+        <DialogFooter className="pt-2 border-t border-slate-100 flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-2">
           <Button
             type="button"
             variant="outline"
@@ -617,6 +581,20 @@ export function BankExcelExportModal({
           >
             Close
           </Button>
+          {onProceedToBatch && (
+            <Button
+              type="button"
+              size="sm"
+              disabled={activeExportPayments.length === 0 || downloadingType !== null}
+              onClick={() => onProceedToBatch(activeExportPayments)}
+              className="bg-brand hover:bg-brand-hover text-white text-xs font-semibold inline-flex items-center gap-1.5"
+            >
+              <span>
+                Proceed to Settle Day Batch ({activeExportPayments.length})
+              </span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

@@ -3,24 +3,18 @@
  * Strictly prevents CSV Formula Injection (CWE-1236) by neutralizing formula prefixes.
  */
 
-import { formatPaymentMode } from '@/lib/format';
+import { formatPaymentMode, sanitizeSpreadsheetText } from '@/lib/format';
 import type { PaymentItem } from '@/types/database';
 
 /**
- * Sanitize a string cell to prevent spreadsheet formula injection.
- * If a value starts with `=`, `+`, `-`, `@`, `\t`, or `\r`, prepend with a single quote `'`.
+ * Escape a CSV cell cleanly and guard non-numeric string values against CSV Formula Injection (CWE-1236).
  */
-export function sanitizeCSVCell(value: unknown): string {
+export function sanitizeCSVCell(value: unknown, isNumeric: boolean = false): string {
   if (value === null || value === undefined) {
     return '""';
   }
 
-  let str = String(value);
-
-  // Check for dangerous formula injection trigger characters
-  if (/^[=+\-@\t\r]/.test(str)) {
-    str = `'${str}`;
-  }
+  const str = isNumeric ? String(value) : sanitizeSpreadsheetText(String(value));
 
   // Escape internal double quotes by doubling them
   const escaped = str.replace(/"/g, '""');
@@ -68,19 +62,22 @@ export function generatePaymentsCSV(items: PaymentItem[]): string {
         : '—';
 
     return [
-      sanitizeCSVCell(index + 1),
+      sanitizeCSVCell(index + 1, true),
       sanitizeCSVCell(item.sheet_date),
       sanitizeCSVCell(item.due_date),
       sanitizeCSVCell(partyName),
       sanitizeCSVCell(beneficiaryName),
-      sanitizeCSVCell(item.vendor?.account_number || ''),
-      sanitizeCSVCell(item.vendor?.ifsc_code || ''),
+      sanitizeCSVCell(item.vendor?.account_number || '', true),
+      sanitizeCSVCell(item.vendor?.ifsc_code || '', true),
       sanitizeCSVCell(item.invoice_ref),
       sanitizeCSVCell(item.purpose),
       sanitizeCSVCell(formatPaymentMode(item.payment_mode, true)),
-      sanitizeCSVCell(Number(item.amount || 0).toFixed(2)),
-      sanitizeCSVCell(Number(item.tds || 0) > 0 ? Number(item.tds).toFixed(2) : 'NA'),
-      sanitizeCSVCell(Number(item.net_payable || 0).toFixed(2)),
+      sanitizeCSVCell(Number(item.amount || 0).toFixed(2), true),
+      sanitizeCSVCell(
+        Number(item.tds || 0) > 0 ? Number(item.tds).toFixed(2) : 'NA',
+        Number(item.tds || 0) > 0
+      ),
+      sanitizeCSVCell(Number(item.net_payable || 0).toFixed(2), true),
       sanitizeCSVCell(item.source_bank?.short_code || item.source_bank?.short_name || 'Bank'),
       sanitizeCSVCell(item.status),
       sanitizeCSVCell(refNo),
@@ -90,7 +87,7 @@ export function generatePaymentsCSV(items: PaymentItem[]): string {
     ].join(',');
   });
 
-  return [headers.map(sanitizeCSVCell).join(','), ...rows].join('\r\n');
+  return [headers.map((h) => sanitizeCSVCell(h)).join(','), ...rows].join('\r\n');
 }
 
 /**

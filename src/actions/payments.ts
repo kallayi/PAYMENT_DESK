@@ -18,7 +18,8 @@ import {
 } from '@/lib/validators';
 import type { ActionResult, AuditLog, Database, PaymentBatch, PaymentItem } from '@/types/database';
 import { getCurrentUserContext } from '@/lib/auth';
-import { dispatchWorkflowNotification } from '@/actions/notifications';
+import { dispatchWorkflowNotification } from '@/lib/notifications-server';
+import { validateDocumentMagicBytes } from '@/lib/file-validation';
 import { sendPushToUsers } from '@/lib/push';
 import { formatINR, getCurrentISTInfo, getTodayISTDateString, round2 } from '@/lib/format';
 
@@ -110,7 +111,7 @@ async function syncReminderCompletionOnTransition(params: {
   }
 }
 
-const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 MB
+const MAX_FILE_SIZE = 4 * 1024 * 1024; // 4 MB
 const ALLOWED_MIME_TYPES = [
   'application/pdf',
   'image/jpeg',
@@ -234,7 +235,7 @@ export async function uploadInvoiceFile(
   }
 
   if (file.size > MAX_FILE_SIZE) {
-    return { success: false, error: 'Invoice file exceeds 5 MB limit.' };
+    return { success: false, error: 'Invoice file exceeds 4 MB limit.' };
   }
 
   if (!ALLOWED_MIME_TYPES.includes(file.type)) {
@@ -252,10 +253,15 @@ export async function uploadInvoiceFile(
   const arrayBuffer = await file.arrayBuffer();
   const buffer = new Uint8Array(arrayBuffer);
 
+  const magicCheck = validateDocumentMagicBytes(buffer, file.type);
+  if (!magicCheck.valid) {
+    return { success: false, error: magicCheck.error || 'Invalid file contents.' };
+  }
+
   const { error: uploadError } = await supabase.storage
     .from('supplier-invoices')
     .upload(filePath, buffer, {
-      contentType: file.type,
+      contentType: magicCheck.detectedMime || file.type,
       upsert: false,
     });
 
@@ -1519,19 +1525,32 @@ export async function getPaymentAuditLogs(
     return { success: false, error: 'Invalid payment ID.' };
   }
 
+  const { user, profile, activeCompany } = await getCurrentUserContext();
+  if (!user || !profile || !profile.is_active) {
+    return { success: false, error: 'Unauthorized. Please sign in.' };
+  }
+
+  if (!activeCompany) {
+    return { success: false, error: 'No active company selected.' };
+  }
+
   const supabase = await createClient();
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { data: paymentRow } = await supabase
+    .from('payment_items')
+    .select('id')
+    .eq('id', paymentId)
+    .eq('company_id', activeCompany.id)
+    .maybeSingle();
 
-  if (!user) {
-    return { success: false, error: 'Unauthorized. Please sign in.' };
+  if (!paymentRow) {
+    return { success: false, error: 'Payment record not found in active company.' };
   }
 
   const { data: logs, error } = await supabase
     .from('audit_logs')
     .select('*, performer:profiles(id, full_name, role)')
+    .eq('company_id', activeCompany.id)
     .eq('record_id', paymentId)
     .order('created_at', { ascending: false });
 
@@ -1577,7 +1596,7 @@ export async function uploadReceiptFile(
   }
 
   if (file.size > MAX_FILE_SIZE) {
-    return { success: false, error: 'Receipt file exceeds 5 MB limit.' };
+    return { success: false, error: 'Receipt file exceeds 4 MB limit.' };
   }
 
   if (!ALLOWED_MIME_TYPES.includes(file.type)) {
@@ -1595,10 +1614,15 @@ export async function uploadReceiptFile(
   const arrayBuffer = await file.arrayBuffer();
   const buffer = new Uint8Array(arrayBuffer);
 
+  const magicCheck = validateDocumentMagicBytes(buffer, file.type);
+  if (!magicCheck.valid) {
+    return { success: false, error: magicCheck.error || 'Invalid file contents.' };
+  }
+
   const { error: uploadError } = await supabase.storage
     .from('bank-receipts')
     .upload(filePath, buffer, {
-      contentType: file.type,
+      contentType: magicCheck.detectedMime || file.type,
       upsert: false,
     });
 
@@ -1968,95 +1992,70 @@ export async function settlePaymentBatch(
     }
   }
 
-  // 3. Compute auto-incrementing unique batch_code: BATCH-YYYYMMDD-01, -02, ...
-  const dateCompact = batchDate.replace(/-/g, '');
-  const codePrefix = `BATCH-${dateCompact}-`;
-  const { data: existingBatches } = await supabase
-    .from('payment_batches')
-    .select('batch_code')
-    .eq('company_id', activeCompany.id)
-    .like('batch_code', `${codePrefix}%`);
+  // 3. Execute single atomic PostgreSQL transaction via RPC (advisory lock + FOR UPDATE + batch insert + items update + audit log)
+  const rpcItemsPayload = resolvedItemUpdates.map((upd) => ({
+    payment_id: upd.payment_id,
+    utr_number: upd.utr_number,
+    cheque_number: upd.cheque_number,
+    cheque_date: upd.cheque_date,
+  }));
 
-  let maxSeq = 0;
-  for (const row of existingBatches || []) {
-    const suffix = row.batch_code.slice(codePrefix.length);
-    const num = parseInt(suffix, 10);
-    if (Number.isFinite(num) && num > maxSeq) {
-      maxSeq = num;
+  const { data: atomicResult, error: rpcError } = await supabase.rpc(
+    'settle_payment_batch_atomic',
+    {
+      p_company_id: activeCompany.id,
+      p_batch_date: batchDate,
+      p_receipt_file_path: receiptFilePath,
+      p_notes: combinedNotes,
+      p_items: rpcItemsPayload,
     }
-  }
-  const batchCode = `${codePrefix}${String(maxSeq + 1).padStart(2, '0')}`;
-
-  // Determine shared source_bank_id (or null if multi-bank)
-  const bankIds = Array.from(new Set(fetchedItems.map((p) => p.source_bank_id).filter(Boolean)));
-  const sharedSourceBankId = bankIds.length === 1 ? bankIds[0] : null;
-  const totalAmount = round2(
-    fetchedItems.reduce((sum, p) => sum + Number(p.net_payable || 0), 0)
   );
 
-  // 4. Create the payment_batches record
-  const { data: createdBatch, error: batchInsertError } = await supabase
-    .from('payment_batches')
-    .insert({
-      company_id: activeCompany.id,
-      batch_code: batchCode,
-      batch_date: batchDate,
-      source_bank_id: sharedSourceBankId,
-      receipt_file_path: receiptFilePath,
-      item_count: fetchedItems.length,
-      total_amount: totalAmount,
-      notes: combinedNotes,
-      audit_status: 'PENDING',
-      created_by: user.id,
-    })
-    .select('*, source_bank:company_banks(*), creator:profiles!created_by(id, full_name, role)')
-    .single();
-
-  if (batchInsertError || !createdBatch) {
+  if (rpcError || !atomicResult?.batch_id) {
+    const errMsg = rpcError?.message || 'Failed to execute atomic batch settlement.';
+    const isUniqueErr =
+      rpcError?.code === '23505' ||
+      errMsg.toLowerCase().includes('duplicate') ||
+      errMsg.toLowerCase().includes('unique');
     return {
       success: false,
-      error: batchInsertError?.message || 'Failed to create batch settlement record.',
+      error: isUniqueErr
+        ? errMsg.includes('UTR')
+          ? errMsg
+          : 'A duplicate UTR or batch code collision occurred. Please verify UTRs and try again.'
+        : errMsg,
     };
   }
 
-  // 5. Transition every item in the batch to PAID linked to createdBatch.id
-  const nowIso = new Date().toISOString();
-  const updatedPayments: PaymentItem[] = [];
-
-  for (const upd of resolvedItemUpdates) {
-    const { data: updatedItem, error: itemError } = await supabase
-      .from('payment_items')
-      .update({
-        status: 'PAID',
-        batch_id: createdBatch.id,
-        utr_number: upd.utr_number,
-        cheque_number: upd.cheque_number,
-        cheque_date: upd.cheque_date,
-        receipt_file_path: receiptFilePath,
-        paid_by: user.id,
-        paid_at: nowIso,
-        updated_at: nowIso,
-      })
-      .eq('id', upd.payment_id)
+  // 4. Fetch created batch + settled items for response payload and notifications
+  const [batchFetchRes, itemsFetchRes] = await Promise.all([
+    supabase
+      .from('payment_batches')
+      .select('*, source_bank:company_banks(*), creator:profiles!created_by(id, full_name, role)')
+      .eq('id', atomicResult.batch_id)
       .eq('company_id', activeCompany.id)
-      .eq('status', 'APPROVED')
+      .single(),
+    supabase
+      .from('payment_items')
       .select(
         '*, vendor:vendors(id, name, party_name, beneficiary_name, account_number, ifsc_code, whatsapp_number, remarks), source_bank:company_banks(id, short_name, full_name, short_code, bank_name, account_number_masked, account_mask), payer:profiles!paid_by(id, full_name, role), batch:payment_batches(*)'
       )
-      .single();
+      .eq('company_id', activeCompany.id)
+      .eq('batch_id', atomicResult.batch_id)
+      .in('id', requestedIds),
+  ]);
 
-    if (itemError || !updatedItem) {
-      const msg =
-        itemError?.code === '23505' || itemError?.message?.toLowerCase().includes('utr')
-          ? `Duplicate UTR "${upd.utr_number}" detected during settlement.`
-          : itemError?.message || 'Failed to settle one of the items in the batch.';
-      return { success: false, error: msg };
-    }
-
-    updatedPayments.push(updatedItem as PaymentItem);
+  if (batchFetchRes.error || !batchFetchRes.data) {
+    return {
+      success: false,
+      error: batchFetchRes.error?.message || 'Batch settled, but failed to load batch summary.',
+    };
   }
 
-  // 6. Sync any linked recurring reminders
+  const createdBatch = batchFetchRes.data;
+  const updatedPayments = (itemsFetchRes.data || []) as PaymentItem[];
+
+  // 5. Sync any linked recurring reminders
   const reminderIds = Array.from(
     new Set(
       resolvedItemUpdates
@@ -2074,28 +2073,8 @@ export async function settlePaymentBatch(
     )
   );
 
-  // 7. Insert batch audit log + dispatch grouped notifications & Web Push
+  // 6. Dispatch role-aware grouped notifications & Web Push (Auditors/Admins -> /audit, Approvers/Verifiers -> /history)
   try {
-    const db =
-      process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY
-        ? createAdminClient()
-        : supabase;
-
-    await db.from('audit_logs').insert({
-      table_name: 'payment_batches',
-      record_id: createdBatch.id,
-      company_id: activeCompany.id,
-      action: 'BATCH_SETTLED',
-      new_data: {
-        batch_code: createdBatch.batch_code,
-        batch_date: createdBatch.batch_date,
-        item_count: createdBatch.item_count,
-        total_amount: createdBatch.total_amount,
-        payment_ids: requestedIds,
-      },
-      changed_by: user.id,
-    });
-
     if (process.env.SUPABASE_SERVICE_ROLE_KEY) {
       const admin = createAdminClient();
       const [profilesRes, accessRes] = await Promise.all([
@@ -2110,41 +2089,64 @@ export async function settlePaymentBatch(
       ]);
 
       const companyUserIds = new Set((accessRes.data || []).map((r) => r.user_id));
-      const recipientIds = (profilesRes.data || [])
-        .filter((p) => {
-          if (p.id === user.id) return false;
-          if (!['APPROVER', 'VERIFIER', 'AUDITOR'].includes(p.role)) return false;
-          return p.is_admin || companyUserIds.has(p.id);
-        })
-        .map((p) => p.id);
+      const recipients = (profilesRes.data || []).filter((p) => {
+        if (p.id === user.id) return false;
+        if (!['APPROVER', 'VERIFIER', 'AUDITOR'].includes(p.role)) return false;
+        return p.is_admin || companyUserIds.has(p.id);
+      });
 
-      if (recipientIds.length > 0) {
+      if (recipients.length > 0) {
         const companyCode = activeCompany.code || 'DESK';
         const title = `[${companyCode}] Batch ${createdBatch.batch_code} Settled`;
         const body = `Batch ${createdBatch.batch_code} Settled: ${createdBatch.item_count} payment${createdBatch.item_count === 1 ? '' : 's'} (${formatINR(createdBatch.total_amount)})`;
-        const actionUrl = `/audit?batch=${encodeURIComponent(createdBatch.id)}`;
+        const auditUrl = `/audit?batch=${encodeURIComponent(createdBatch.id)}`;
+        const historyUrl = updatedPayments[0]?.id
+          ? `/history?highlight=${encodeURIComponent(updatedPayments[0].id)}`
+          : '/history';
 
-        await admin.from('notifications').insert(
-          recipientIds.map((recipientId) => ({
+        const auditorAdminIds: string[] = [];
+        const approverVerifierIds: string[] = [];
+
+        const notificationRows = recipients.map((p) => {
+          const isAuditTarget = p.role === 'AUDITOR' || Boolean(p.is_admin);
+          const actionUrl = isAuditTarget ? auditUrl : historyUrl;
+          if (isAuditTarget) {
+            auditorAdminIds.push(p.id);
+          } else {
+            approverVerifierIds.push(p.id);
+          }
+          return {
             company_id: activeCompany.id,
-            recipient_user_id: recipientId,
+            recipient_user_id: p.id,
             payment_item_id: updatedPayments[0]?.id || null,
             action_url: actionUrl,
             event_type: 'BATCH_SETTLED' as const,
             title,
             body,
             is_read: false,
-          }))
-        );
+          };
+        });
 
-        await Promise.race([
-          sendPushToUsers(recipientIds, { title, body, url: actionUrl }),
-          new Promise<void>((resolve) => setTimeout(resolve, 2500)),
-        ]);
+        await admin.from('notifications').insert(notificationRows);
+
+        const pushTasks: Promise<void>[] = [];
+        if (auditorAdminIds.length > 0) {
+          pushTasks.push(sendPushToUsers(auditorAdminIds, { title, body, url: auditUrl }));
+        }
+        if (approverVerifierIds.length > 0) {
+          pushTasks.push(sendPushToUsers(approverVerifierIds, { title, body, url: historyUrl }));
+        }
+
+        if (pushTasks.length > 0) {
+          await Promise.race([
+            Promise.all(pushTasks).then(() => undefined),
+            new Promise<void>((resolve) => setTimeout(resolve, 2500)),
+          ]);
+        }
       }
     }
   } catch (err) {
-    console.warn('[BatchSettlement] Non-blocking audit/notification error:', err);
+    console.warn('[BatchSettlement] Non-blocking notification error:', err);
   }
 
   revalidatePath('/payments');

@@ -2,7 +2,7 @@ import * as React from 'react';
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import { getCurrentUserContext } from '@/lib/auth';
-import { checkAndDispatchDueReminders } from '@/actions/reminders';
+import { checkAndDispatchDueReminders } from '@/lib/reminders-server';
 import { PaymentsWorkspace } from '@/components/payments/payments-workspace';
 import { Loader2 } from 'lucide-react';
 import type {

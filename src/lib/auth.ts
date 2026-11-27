@@ -81,11 +81,12 @@ export const getCurrentUserContext = cache(async (): Promise<CurrentUserContext>
     }
   }
 
-  // Ensure admin-only app_metadata role and is_admin are in sync with verified database profile
+  // Ensure admin-only app_metadata role, is_admin, and is_active are in sync with verified database profile
   if (profile && process.env.SUPABASE_SERVICE_ROLE_KEY) {
     if (
       user.app_metadata?.role !== profile.role ||
-      user.app_metadata?.is_admin !== profile.is_admin
+      user.app_metadata?.is_admin !== profile.is_admin ||
+      user.app_metadata?.is_active !== profile.is_active
     ) {
       try {
         const admin = createAdminClient();
@@ -95,6 +96,7 @@ export const getCurrentUserContext = cache(async (): Promise<CurrentUserContext>
               ...user.app_metadata,
               role: profile.role,
               is_admin: profile.is_admin,
+              is_active: profile.is_active,
             },
             user_metadata: {
               ...user.user_metadata,
@@ -110,11 +112,11 @@ export const getCurrentUserContext = cache(async (): Promise<CurrentUserContext>
     }
   }
 
-  // Fetch allowed companies
+  // Fetch allowed companies (strictly no silent fallback)
   let allowedCompanies: Company[] = [];
 
   if (profile?.is_admin) {
-    // Admin users have full access to both INDFURN and VINMORE
+    // Admin users have full access to all active companies
     const { data: allCompanies } = await supabase
       .from('companies')
       .select('*')
@@ -123,7 +125,7 @@ export const getCurrentUserContext = cache(async (): Promise<CurrentUserContext>
 
     allowedCompanies = (allCompanies as Company[]) || [];
   } else if (profile) {
-    // Regular users have access based on public.user_company_access
+    // Regular users have access strictly based on public.user_company_access
     const { data: accessRows } = await supabase
       .from('user_company_access')
       .select('company:companies(*)')
@@ -133,19 +135,6 @@ export const getCurrentUserContext = cache(async (): Promise<CurrentUserContext>
       allowedCompanies = accessRows
         .map((row: any) => row.company)
         .filter((c: any): c is Company => Boolean(c && c.is_active));
-    }
-  }
-
-  // Fallback: If no company access row is provisioned yet, default to INDFURN
-  if (allowedCompanies.length === 0) {
-    const { data: defaultCompany } = await supabase
-      .from('companies')
-      .select('*')
-      .eq('code', 'INDFURN')
-      .maybeSingle();
-
-    if (defaultCompany) {
-      allowedCompanies = [defaultCompany as Company];
     }
   }
 

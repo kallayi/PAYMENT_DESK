@@ -5,6 +5,9 @@ import { getCurrentUserContext } from '@/lib/auth';
 import { SettingsManagement, type EnrichedProfile } from '@/components/settings/settings-management';
 import type { Company, CompanyBank, Profile } from '@/types/database';
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 export const metadata = {
   title: 'Settings | Payment Desk',
   description: 'Manage team accounts, permissions, and company disbursement banks.',

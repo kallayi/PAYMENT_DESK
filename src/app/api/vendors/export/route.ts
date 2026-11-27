@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import ExcelJS from 'exceljs';
 import { createClient } from '@/lib/supabase/server';
 import { getCurrentUserContext } from '@/lib/auth';
+import { sanitizeSpreadsheetText } from '@/lib/format';
 
 function styleHeaderRow(sheet: ExcelJS.Worksheet) {
   const headerRow = sheet.getRow(1);
@@ -128,11 +129,11 @@ export async function GET(req: NextRequest) {
       const status = v.is_active ? 'Active' : 'Inactive';
 
       const addedRow = sheet.addRow({
-        partyName,
-        beneficiaryName,
+        partyName: sanitizeSpreadsheetText(partyName),
+        beneficiaryName: sanitizeSpreadsheetText(beneficiaryName),
         accountNumber,
         ifscCode,
-        remarks,
+        remarks: sanitizeSpreadsheetText(remarks),
         status,
       });
 

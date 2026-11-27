@@ -5,11 +5,12 @@ import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { getCurrentUserContext } from '@/lib/auth';
+import { validateDocumentMagicBytes } from '@/lib/file-validation';
 import { sendPushToUsers } from '@/lib/push';
 import { formatINR } from '@/lib/format';
 import type { ActionResult, NotificationEvent, PaymentItem, PaymentRequest } from '@/types/database';
 
-const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 MB
+const MAX_FILE_SIZE = 4 * 1024 * 1024; // 4 MB
 const ALLOWED_MIME_TYPES = [
   'application/pdf',
   'image/jpeg',
@@ -195,7 +196,7 @@ export async function uploadRequestBillFile(
   }
 
   if (file.size > MAX_FILE_SIZE) {
-    return { success: false, error: 'Bill file exceeds 5 MB limit.' };
+    return { success: false, error: 'Bill file exceeds 4 MB limit.' };
   }
 
   if (!ALLOWED_MIME_TYPES.includes(file.type)) {
@@ -208,6 +209,11 @@ export async function uploadRequestBillFile(
   const arrayBuffer = await file.arrayBuffer();
   const buffer = new Uint8Array(arrayBuffer);
 
+  const magicCheck = validateDocumentMagicBytes(buffer, file.type);
+  if (!magicCheck.valid) {
+    return { success: false, error: magicCheck.error || 'Invalid file contents.' };
+  }
+
   const storageClient = process.env.SUPABASE_SERVICE_ROLE_KEY
     ? createAdminClient()
     : await createClient();
@@ -215,7 +221,7 @@ export async function uploadRequestBillFile(
   const { error: uploadError } = await storageClient.storage
     .from('supplier-invoices')
     .upload(filePath, buffer, {
-      contentType: file.type,
+      contentType: magicCheck.detectedMime || file.type,
       upsert: false,
     });
 
