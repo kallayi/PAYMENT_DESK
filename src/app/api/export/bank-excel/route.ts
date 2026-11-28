@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/admin';
 import { getCurrentUserContext } from '@/lib/auth';
 import {
   getBankTemplateAdapter,
@@ -9,6 +10,8 @@ import {
   buildSalaryOtherBankWorkbook,
   type BulkExportRow,
 } from '@/lib/excel';
+
+export const dynamic = 'force-dynamic';
 
 const exportRequestSchema = z.object({
   paymentIds: z.array(z.string().uuid()).min(1, 'At least one approved payment must be selected.'),
@@ -22,7 +25,8 @@ const isSalaryPayment = (p: { purpose?: string | null }) =>
 
 export async function POST(req: NextRequest) {
   try {
-    const { user, profile, activeCompany } = await getCurrentUserContext();
+    const { user, profile, activeCompany, allowedCompanies } =
+      await getCurrentUserContext();
 
     if (!user || !profile || !profile.is_active) {
       return NextResponse.json(
@@ -39,7 +43,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (!activeCompany) {
+    if (!activeCompany || !allowedCompanies.some((c) => c.id === activeCompany.id)) {
       return NextResponse.json(
         { error: 'No active company workspace resolved.' },
         { status: 400 }
@@ -57,9 +61,13 @@ export async function POST(req: NextRequest) {
 
     const { paymentIds, bankId, batchType, templateCategory } = parsed.data;
     const supabase = await createClient();
+    const db =
+      process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY
+        ? createAdminClient()
+        : supabase;
 
-    // Verify source bank belongs to activeCompany (explicitly select full_debit_account_number for PREPARER/is_admin)
-    const { data: bank, error: bankError } = await supabase
+    // Fetch fresh source bank row scoped to activeCompany so newly edited full_debit_account_number is always reflected
+    const { data: bank, error: bankError } = await db
       .from('company_banks')
       .select(
         'id, company_id, short_code, short_name, ifsc_prefix, bank_name, full_name, full_debit_account_number'
@@ -79,7 +87,7 @@ export async function POST(req: NextRequest) {
     const bankIfscPrefix = (bank.ifsc_prefix || '').trim().toUpperCase();
     const bankFullName = (bank.bank_name || bank.full_name || '').trim().toUpperCase();
     const isAxisBank =
-      bankIfscPrefix.startsWith('UTIB') ||
+      bankIfscPrefix.slice(0, 4) === 'UTIB' ||
       bankShortCode.includes('AXIS') ||
       bankFullName.includes('AXIS');
 
@@ -183,21 +191,24 @@ export async function POST(req: NextRequest) {
     let workbookBuffer: Buffer;
     let filename: string;
 
+    const istDateParts = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Asia/Kolkata',
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+    }).formatToParts(new Date());
+    const getPart = (t: string) => istDateParts.find((p) => p.type === t)?.value || '';
+    const istYear = getPart('year');
+    const istMonth = getPart('month');
+    const istDay = getPart('day');
+
     if (templateCategory === 'salary') {
       workbookBuffer =
         batchType === 'same_bank'
           ? await buildSalarySameBankWorkbook(targetRows)
           : await buildSalaryOtherBankWorkbook(targetRows);
 
-      const istDateParts = new Intl.DateTimeFormat('en-GB', {
-        timeZone: 'Asia/Kolkata',
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-      }).formatToParts(new Date());
-      const getPart = (t: string) => istDateParts.find((p) => p.type === t)?.value || '';
-      const todayYYYYMMDD = `${getPart('year')}${getPart('month')}${getPart('day')}`;
-
+      const todayYYYYMMDD = `${istYear}${istMonth}${istDay}`;
       const salaryBatchLabel =
         batchType === 'same_bank' ? 'WithinAxis' : 'AcrossAllBanks';
       filename = `${companyCode}_Axis_Salary_${salaryBatchLabel}_${todayYYYYMMDD}.xlsx`;
@@ -208,7 +219,7 @@ export async function POST(req: NextRequest) {
           ? await adapter.buildSameBankWorkbook(targetRows)
           : await adapter.buildOtherBankWorkbook(targetRows);
 
-      const todayStr = new Date().toISOString().split('T')[0];
+      const todayStr = `${istYear}-${istMonth}-${istDay}`;
       const batchLabel = batchType === 'same_bank' ? 'SAME_BANK' : 'OTHER_BANK';
       filename = `${companyCode}_${bankShortCode}_${batchLabel}_${todayStr}.xlsx`;
     }

@@ -32,7 +32,7 @@ import { createVendor } from '@/actions/vendors';
 import { getSignedFileUrl } from '@/actions/storage';
 import { getBankNameFromIfsc } from '@/lib/bank-names';
 import { leanVendorSchema } from '@/lib/validators';
-import { formatINR, getCurrentISTInfo, getTodayISTDateString } from '@/lib/format';
+import { formatINR, formatINRInWords, getCurrentISTInfo, getTodayISTDateString } from '@/lib/format';
 import { PurposeCombobox } from '@/components/payments/purpose-combobox';
 import { DatePicker } from '@/components/ui/date-picker';
 import { IndianAmountInput } from '@/components/ui/indian-amount-input';
@@ -942,23 +942,30 @@ export function PaymentFormSheet({
 
             {/* PROMINENT NET PAYABLE SUMMARY BAR */}
             <div
-              className={`px-3.5 py-2.5 rounded-lg border flex items-center justify-between text-xs ${isTdsInvalid
+              className={`px-3.5 py-2.5 rounded-lg border text-xs ${isTdsInvalid
                 ? 'bg-rose-50 border-rose-300'
                 : 'bg-[#FEF2F2] border-[#7F1D1D]/30'
                 }`}
             >
-              <span
-                className={`font-semibold ${isTdsInvalid ? 'text-rose-800' : 'text-[#7F1D1D]'
-                  }`}
-              >
-                Net Payable to Beneficiary
-              </span>
-              <span
-                className={`text-base font-bold tabular-nums ${isTdsInvalid ? 'text-rose-700' : 'text-[#7F1D1D]'
-                  }`}
-              >
-                {isTdsInvalid ? 'TDS exceeds Gross' : formatINR(netPayable)}
-              </span>
+              <div className="flex items-center justify-between gap-2">
+                <span
+                  className={`font-semibold ${isTdsInvalid ? 'text-rose-800' : 'text-[#7F1D1D]'
+                    }`}
+                >
+                  Net Payable to Beneficiary
+                </span>
+                <span
+                  className={`text-base font-bold tabular-nums ${isTdsInvalid ? 'text-rose-700' : 'text-[#7F1D1D]'
+                    }`}
+                >
+                  {isTdsInvalid ? 'TDS exceeds Gross' : formatINR(netPayable)}
+                </span>
+              </div>
+              {!isTdsInvalid && netPayable > 0 && (
+                <p className="text-[11px] leading-snug text-[#7F1D1D]/80 font-medium mt-1.5 pt-1.5 border-t border-[#7F1D1D]/15">
+                  {formatINRInWords(netPayable)}
+                </p>
+              )}
             </div>
 
             {/* SOURCE BANK */}

@@ -74,6 +74,8 @@ export async function dispatchWorkflowNotification(
     let targetUrl: string;
     let defaultTitle: string;
     let defaultBody: string;
+    let priority: 'urgent' | 'normal' = 'normal';
+    let actionLabel = 'Open Desk';
     const formattedAmount = formatINR(input.netPayable);
 
     const highlightSuffix =
@@ -87,12 +89,16 @@ export async function dispatchWorkflowNotification(
         targetUrl = highlightSuffix ? `/verify?${highlightSuffix}` : '/verify';
         defaultTitle = `[${companyCode}] Pending Verification`;
         defaultBody = `${input.partyName} · ${formattedAmount} submitted for verification.`;
+        priority = 'urgent';
+        actionLabel = 'Verify Bill';
         break;
       case 'VERIFIED_FOR_APPROVAL':
         targetRole = 'APPROVER';
         targetUrl = highlightSuffix ? `/approvals?${highlightSuffix}` : '/approvals';
         defaultTitle = `[${companyCode}] Ready for Approval`;
         defaultBody = `${input.partyName} · ${formattedAmount} verified and awaiting approval.`;
+        priority = 'urgent';
+        actionLabel = 'Review & Approve';
         break;
       case 'APPROVED':
         targetRole = 'PREPARER';
@@ -101,6 +107,8 @@ export async function dispatchWorkflowNotification(
           : '/payments?tab=APPROVED';
         defaultTitle = `[${companyCode}] Payment Approved — Ready to Pay`;
         defaultBody = `${input.partyName} · ${formattedAmount} approved — Ready to Pay.`;
+        priority = 'normal';
+        actionLabel = 'Ready to Pay';
         break;
       case 'HELD':
         targetRole = 'PREPARER';
@@ -109,6 +117,8 @@ export async function dispatchWorkflowNotification(
           : '/payments?tab=ON_HOLD';
         defaultTitle = `[${companyCode}] Payment Placed on Hold`;
         defaultBody = `${input.partyName} · ${formattedAmount} was placed on hold.`;
+        priority = 'normal';
+        actionLabel = 'View Held Bill';
         break;
       case 'REJECTED':
         targetRole = 'PREPARER';
@@ -119,6 +129,8 @@ export async function dispatchWorkflowNotification(
         defaultBody = `${input.partyName} · ${formattedAmount} was rejected${
           input.reason ? `: "${input.reason}"` : '.'
         }`;
+        priority = 'urgent';
+        actionLabel = 'Fix Returned Bill';
         break;
       default:
         return;
@@ -165,8 +177,19 @@ export async function dispatchWorkflowNotification(
       console.warn('[Notifications] Insert error:', insertError.message);
     }
 
+    const pushTag = input.paymentItemId
+      ? `pd-${input.eventType.toLowerCase()}-${input.paymentItemId}`
+      : undefined;
+
     await Promise.race([
-      sendPushToUsers(recipientIds, { title, body, url: targetUrl }),
+      sendPushToUsers(recipientIds, {
+        title,
+        body,
+        url: targetUrl,
+        priority,
+        actionLabel,
+        tag: pushTag,
+      }),
       new Promise<void>((resolve) => setTimeout(resolve, 2500)),
     ]);
   } catch (err) {

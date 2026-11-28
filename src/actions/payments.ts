@@ -2131,10 +2131,26 @@ export async function settlePaymentBatch(
 
         const pushTasks: Promise<void>[] = [];
         if (auditorAdminIds.length > 0) {
-          pushTasks.push(sendPushToUsers(auditorAdminIds, { title, body, url: auditUrl }));
+          pushTasks.push(
+            sendPushToUsers(auditorAdminIds, {
+              title,
+              body,
+              url: auditUrl,
+              priority: 'normal',
+              actionLabel: 'View Batch',
+            })
+          );
         }
         if (approverVerifierIds.length > 0) {
-          pushTasks.push(sendPushToUsers(approverVerifierIds, { title, body, url: historyUrl }));
+          pushTasks.push(
+            sendPushToUsers(approverVerifierIds, {
+              title,
+              body,
+              url: historyUrl,
+              priority: 'normal',
+              actionLabel: 'View History',
+            })
+          );
         }
 
         if (pushTasks.length > 0) {
@@ -2360,4 +2376,278 @@ export async function markReceiptSent(input: {
       receipt_sent_at: nextSentAt,
     },
   };
+}
+
+const notifyApproverBankBatchReadySchema = z.object({
+  paymentIds: z
+    .array(z.string().uuid('Valid payment ID is required.'))
+    .min(1, 'Select at least one approved payment before alerting Approver.')
+    .max(200, 'Too many payments selected in a single alert.'),
+  bankName: z.string().trim().max(120).optional(),
+});
+
+const notifyPreparerBankReleasedSchema = z.object({
+  paymentIds: z
+    .array(z.string().uuid('Valid payment ID is required.'))
+    .max(200)
+    .optional(),
+  note: z.string().trim().max(300).optional(),
+});
+
+async function dispatchRoleAlertNotification(params: {
+  companyId: string;
+  actorId: string;
+  eventType: 'BANK_OTP_READY' | 'BANK_OTP_RELEASED';
+  targetRole: 'APPROVER' | 'PREPARER';
+  actionUrl: string;
+  title: string;
+  body: string;
+  emptyRecipientsError: string;
+  priority?: 'urgent' | 'normal';
+  actionLabel?: string;
+}): Promise<ActionResult<{ notifiedCount: number }>> {
+  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    return {
+      success: false,
+      error: 'Notification service is not configured on the server.',
+    };
+  }
+
+  const admin = createAdminClient();
+  const [profilesRes, accessRes] = await Promise.all([
+    admin
+      .from('profiles')
+      .select('id, role, is_admin, is_active')
+      .eq('is_active', true),
+    admin
+      .from('user_company_access')
+      .select('user_id')
+      .eq('company_id', params.companyId),
+  ]);
+
+  if (profilesRes.error) {
+    return { success: false, error: profilesRes.error.message };
+  }
+  if (accessRes.error) {
+    return { success: false, error: accessRes.error.message };
+  }
+
+  const companyUserIds = new Set((accessRes.data || []).map((r) => r.user_id));
+  const recipientIds = (profilesRes.data || [])
+    .filter((p) => {
+      if (p.id === params.actorId) return false;
+      const hasAccess = p.is_admin || companyUserIds.has(p.id);
+      if (!hasAccess) return false;
+      if (params.targetRole === 'APPROVER') {
+        return p.role === 'APPROVER' || Boolean(p.is_admin);
+      }
+      return p.role === 'PREPARER';
+    })
+    .map((p) => p.id);
+
+  if (recipientIds.length === 0) {
+    return { success: false, error: params.emptyRecipientsError };
+  }
+
+  const notificationRows = recipientIds.map((recipientId) => ({
+    company_id: params.companyId,
+    recipient_user_id: recipientId,
+    payment_item_id: null,
+    action_url: params.actionUrl,
+    event_type: params.eventType,
+    title: params.title,
+    body: params.body,
+    is_read: false,
+  }));
+
+  const { error: insertError } = await admin
+    .from('notifications')
+    .insert(notificationRows);
+
+  if (insertError) {
+    return {
+      success: false,
+      error: insertError.message || 'Failed to save workflow alert notification.',
+    };
+  }
+
+  try {
+    await Promise.race([
+      sendPushToUsers(recipientIds, {
+        title: params.title,
+        body: params.body,
+        url: params.actionUrl,
+        priority: params.priority,
+        actionLabel: params.actionLabel,
+      }),
+      new Promise<void>((resolve) => setTimeout(resolve, 2500)),
+    ]);
+  } catch (err) {
+    console.warn('[Notifications] Non-blocking push delivery failed:', err);
+  }
+
+  return { success: true, data: { notifiedCount: recipientIds.length } };
+}
+
+/**
+ * Manual, non-blocking 1-tap notification from Preparer to active Approvers/Admins
+ * indicating the uploaded Bank Excel batch is ready for OTP authorization.
+ */
+export async function notifyApproverBankBatchReady(input: {
+  paymentIds: string[];
+  bankName?: string;
+}): Promise<ActionResult<{ notifiedCount: number }>> {
+  const parsed = notifyApproverBankBatchReadySchema.safeParse(input);
+  if (!parsed.success) {
+    return {
+      success: false,
+      error: parsed.error.issues[0]?.message || 'Invalid alert request.',
+    };
+  }
+
+  const supabase = await createClient();
+  const { user, profile, activeCompany, allowedCompanies } =
+    await getCurrentUserContext();
+
+  if (!user || !profile || !profile.is_active) {
+    return { success: false, error: 'Unauthorized. Please sign in.' };
+  }
+
+  if (profile.role !== 'PREPARER' && !profile.is_admin) {
+    return {
+      success: false,
+      error: 'Only Accounts Preparers or Administrators can send Bank OTP alerts.',
+    };
+  }
+
+  if (!activeCompany || !allowedCompanies.some((c) => c.id === activeCompany.id)) {
+    return { success: false, error: 'Active company workspace could not be determined.' };
+  }
+
+  const uniqueIds = Array.from(new Set(parsed.data.paymentIds));
+
+  // Strictly verify approved items in activeCompany and compute totals server-side
+  const { data: verifiedItems, error: fetchError } = await supabase
+    .from('payment_items')
+    .select(
+      'id, net_payable, source_bank:company_banks(bank_name, full_name, short_code, short_name)'
+    )
+    .eq('company_id', activeCompany.id)
+    .eq('status', 'APPROVED')
+    .in('id', uniqueIds);
+
+  if (fetchError) {
+    return {
+      success: false,
+      error: fetchError.message || 'Failed to verify approved payments.',
+    };
+  }
+
+  if (!verifiedItems || verifiedItems.length === 0) {
+    return {
+      success: false,
+      error: 'No approved Ready-to-Pay payments found in this selection.',
+    };
+  }
+
+  const count = verifiedItems.length;
+  const totalAmount = round2(
+    verifiedItems.reduce((sum, item) => sum + (Number(item.net_payable) || 0), 0)
+  );
+
+  const bankLabels = Array.from(
+    new Set(
+      verifiedItems
+        .map((item: any) => {
+          const bank = Array.isArray(item.source_bank)
+            ? item.source_bank[0]
+            : item.source_bank;
+          return (
+            bank?.bank_name ||
+            bank?.full_name ||
+            bank?.short_code ||
+            bank?.short_name ||
+            ''
+          ).trim();
+        })
+        .filter(Boolean)
+    )
+  );
+  const bankLabel =
+    (parsed.data.bankName || '').trim() ||
+    (bankLabels.length === 1
+      ? bankLabels[0]
+      : bankLabels.length > 1
+        ? bankLabels.join(' / ')
+        : 'Bank portal');
+
+  const companyCode = (activeCompany.code || 'DESK').trim().toUpperCase();
+  const title = `[${companyCode}] Ready for Bank OTP (${count} payment${count === 1 ? '' : 's'})`;
+  const body = `${count} payment${count === 1 ? '' : 's'} (${formatINR(totalAmount)}) uploaded to ${bankLabel}. Please release payment via OTP in Bank portal.`;
+
+  return dispatchRoleAlertNotification({
+    companyId: activeCompany.id,
+    actorId: user.id,
+    eventType: 'BANK_OTP_READY',
+    targetRole: 'APPROVER',
+    actionUrl: '/approvals?tab=APPROVED',
+    title,
+    body,
+    emptyRecipientsError: 'No active Approver found for this company.',
+    priority: 'urgent',
+    actionLabel: 'Open Approvals',
+  });
+}
+
+/**
+ * Optional 1-tap confirmation from Approver to active Accounts Preparers
+ * indicating Bank OTP release is done so Accounts can download UTRs and settle.
+ */
+export async function notifyPreparerBankReleased(input?: {
+  paymentIds?: string[];
+  note?: string;
+}): Promise<ActionResult<{ notifiedCount: number }>> {
+  const parsed = notifyPreparerBankReleasedSchema.safeParse(input ?? {});
+  if (!parsed.success) {
+    return {
+      success: false,
+      error: parsed.error.issues[0]?.message || 'Invalid notification payload.',
+    };
+  }
+
+  const { user, profile, activeCompany, allowedCompanies } =
+    await getCurrentUserContext();
+
+  if (!user || !profile || !profile.is_active) {
+    return { success: false, error: 'Unauthorized. Please sign in.' };
+  }
+
+  if (profile.role !== 'APPROVER' && !profile.is_admin) {
+    return {
+      success: false,
+      error: 'Only Approvers or Administrators can notify Accounts of Bank OTP release.',
+    };
+  }
+
+  if (!activeCompany || !allowedCompanies.some((c) => c.id === activeCompany.id)) {
+    return { success: false, error: 'Active company workspace could not be determined.' };
+  }
+
+  const companyCode = (activeCompany.code || 'DESK').trim().toUpperCase();
+  const note = (parsed.data.note || '').trim();
+  const title = `[${companyCode}] Bank Payment Released — Enter UTRs`;
+  const body = `${profile.full_name} completed Bank OTP release. You can now download UTRs and settle the batch.${note ? ` (${note})` : ''}`;
+
+  return dispatchRoleAlertNotification({
+    companyId: activeCompany.id,
+    actorId: user.id,
+    eventType: 'BANK_OTP_RELEASED',
+    targetRole: 'PREPARER',
+    actionUrl: '/payments?tab=APPROVED',
+    title,
+    body,
+    emptyRecipientsError: 'No active Accounts Preparer found for this company.',
+    priority: 'urgent',
+    actionLabel: 'Enter UTRs',
+  });
 }

@@ -24,24 +24,35 @@ function getSystemIsDark(): boolean {
   return window.matchMedia('(prefers-color-scheme: dark)').matches;
 }
 
+function upsertThemeMeta(name: string, content: string) {
+  const metas = document.querySelectorAll(`meta[name="${name}"]`);
+  if (metas.length > 0) {
+    metas.forEach((meta) => {
+      meta.setAttribute('content', content);
+      meta.removeAttribute('media');
+    });
+  } else {
+    const meta = document.createElement('meta');
+    meta.name = name;
+    meta.content = content;
+    document.head.appendChild(meta);
+  }
+}
+
 function applyThemeToDocument(pref: ThemePreference): ResolvedTheme {
   const isDark = pref === 'dark' || (pref === 'system' && getSystemIsDark());
   if (typeof document !== 'undefined') {
-    document.documentElement.classList.toggle('dark', isDark);
-    document.documentElement.style.colorScheme = isDark ? 'dark' : 'light';
-    const themeColor = isDark ? '#0e0e11' : '#ffffff';
-    const metas = document.querySelectorAll('meta[name="theme-color"]');
-    if (metas.length > 0) {
-      metas.forEach((meta) => {
-        meta.setAttribute('content', themeColor);
-        meta.removeAttribute('media');
-      });
-    } else {
-      const meta = document.createElement('meta');
-      meta.name = 'theme-color';
-      meta.content = themeColor;
-      document.head.appendChild(meta);
+    const root = document.documentElement;
+    const colorScheme = isDark ? 'dark' : 'only light';
+    root.classList.toggle('dark', isDark);
+    root.classList.toggle('light', !isDark);
+    root.setAttribute('data-theme', isDark ? 'dark' : 'light');
+    root.style.colorScheme = colorScheme;
+    if (document.body) {
+      document.body.style.colorScheme = colorScheme;
     }
+    upsertThemeMeta('color-scheme', colorScheme);
+    upsertThemeMeta('theme-color', isDark ? '#0e0e11' : '#ffffff');
   }
   return isDark ? 'dark' : 'light';
 }
@@ -81,6 +92,11 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     window.addEventListener('storage', handleStorage);
     return () => window.removeEventListener('storage', handleStorage);
   }, []);
+
+  React.useEffect(() => {
+    if (!mounted) return;
+    setResolvedTheme(applyThemeToDocument(theme));
+  }, [theme, mounted]);
 
   React.useEffect(() => {
     if (!mounted) return;
@@ -167,7 +183,10 @@ export function ThemeSegmentedControl({
             role="radio"
             aria-checked={selected}
             aria-pressed={selected}
-            onClick={() => setTheme(opt.value)}
+            onClick={(e) => {
+              e.stopPropagation();
+              setTheme(opt.value);
+            }}
             className={`min-h-[38px] inline-flex items-center justify-center rounded-lg transition-all cursor-pointer touch-manipulation active:scale-[0.98] ${compact ? 'gap-1 px-2 py-1.5 text-[11px]' : 'gap-1.5 px-3 py-1.5 text-xs'
               } ${selected
                 ? 'bg-brand text-white font-semibold shadow-sm'
@@ -191,7 +210,7 @@ export function ThemeToggle() {
   React.useEffect(() => {
     if (!isOpen) return;
 
-    const handleClickOutside = (e: MouseEvent) => {
+    const handlePointerDownOutside = (e: PointerEvent) => {
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
         setIsOpen(false);
       }
@@ -202,10 +221,10 @@ export function ThemeToggle() {
       }
     };
 
-    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('pointerdown', handlePointerDownOutside);
     document.addEventListener('keydown', handleKeyDown);
     return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('pointerdown', handlePointerDownOutside);
       document.removeEventListener('keydown', handleKeyDown);
     };
   }, [isOpen]);
@@ -218,7 +237,10 @@ export function ThemeToggle() {
     <div ref={containerRef} className="relative">
       <button
         type="button"
-        onClick={() => setIsOpen((prev) => !prev)}
+        onClick={(e) => {
+          e.stopPropagation();
+          setIsOpen((prev) => !prev);
+        }}
         aria-label={`Theme: ${activePref}. Switch theme`}
         aria-expanded={isOpen}
         title={`Theme: ${activePref.charAt(0).toUpperCase() + activePref.slice(1)}`}
@@ -231,7 +253,7 @@ export function ThemeToggle() {
         <div
           role="menu"
           aria-label="Select color theme"
-          className="absolute right-0 mt-2 w-36 rounded-xl border border-slate-200 bg-white shadow-xl py-1 z-50 animate-in fade-in-50 zoom-in-95"
+          className="absolute right-0 mt-2 w-40 rounded-xl border border-slate-200 bg-white shadow-xl py-1 z-50 animate-in fade-in-50 zoom-in-95"
         >
           {THEME_OPTIONS.map((opt) => {
             const Icon = opt.icon;
@@ -242,13 +264,14 @@ export function ThemeToggle() {
                 type="button"
                 role="menuitemradio"
                 aria-checked={selected}
-                onClick={() => {
+                onClick={(e) => {
+                  e.stopPropagation();
                   setTheme(opt.value);
                   setIsOpen(false);
                 }}
-                className={`w-full px-3 py-2 text-xs flex items-center justify-between gap-2 transition-colors cursor-pointer touch-manipulation ${selected
-                    ? 'font-bold text-brand bg-brand-tint'
-                    : 'font-medium text-slate-700 hover:bg-slate-50'
+                className={`w-full min-h-[42px] px-3 py-2 text-xs flex items-center justify-between gap-2 transition-colors cursor-pointer touch-manipulation ${selected
+                  ? 'font-bold text-brand bg-brand-tint'
+                  : 'font-medium text-slate-700 hover:bg-slate-50'
                   }`}
               >
                 <span className="flex items-center gap-2">

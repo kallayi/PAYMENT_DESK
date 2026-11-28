@@ -166,22 +166,23 @@ export type VendorInput = z.infer<typeof vendorSchema>;
 
 // Company Bank Schema
 export const companyBankSchema = z.object({
-  company_id: z.string().uuid().optional(),
+  company_id: z.union([z.string().uuid(), z.literal('')]).optional().nullable(),
   bank_name: z.string().trim().min(1, 'Bank name is required').optional(),
   short_code: z.string().trim().min(1, 'Short code is required (e.g. AXIS)').optional(),
   ifsc_prefix: z
     .string()
     .trim()
     .toUpperCase()
-    .optional(),
+    .optional()
+    .nullable(),
   account_number_masked: z.string().trim().optional().nullable(),
   full_debit_account_number: z.string().trim().optional().nullable(),
   available_balance: z.coerce.number().optional().default(0),
   is_primary: z.boolean().optional().default(false),
   is_active: z.boolean().optional().default(true),
   // Backward compatibility
-  short_name: z.string().trim().optional(),
-  full_name: z.string().trim().optional(),
+  short_name: z.string().trim().optional().nullable(),
+  full_name: z.string().trim().optional().nullable(),
   account_mask: z.string().trim().optional().nullable(),
 });
 

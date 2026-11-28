@@ -414,14 +414,14 @@ export function AppShell({
             </span>
           </div>
 
-          {/* Right: Company Switcher + Non-Admin Theme Icon + Notification Bell + Sign Out */}
+          {/* Right: Company Switcher + Theme Toggle + Notification Bell + Sign Out */}
           <div className="flex items-center gap-1 sm:gap-2 shrink-0">
             <CompanySwitcher
               allowedCompanies={allowedCompanies}
               activeCompany={activeCompany}
             />
 
-            {!profile.is_admin && <ThemeToggle />}
+            <ThemeToggle />
 
             <NotificationBell
               userId={profile.id}

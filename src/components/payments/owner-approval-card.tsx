@@ -10,7 +10,7 @@ import {
   CreditCard,
   ExternalLink,
 } from 'lucide-react';
-import { formatINR, formatShortDate } from '@/lib/format';
+import { formatINR, formatINRInWords, formatShortDate } from '@/lib/format';
 import { OwnerBankSwitcher } from '@/components/payments/owner-bank-switcher';
 import { PaymentModeBadge } from '@/components/payments/payment-status-badge';
 import type { CompanyBank, PaymentItem } from '@/types/database';
@@ -133,14 +133,19 @@ export function OwnerApprovalCard({
         </div>
 
         {/* Amount display (Full-width clean row on <640px, right-aligned on sm+) */}
-        <div className="flex items-baseline justify-between gap-2 sm:block sm:text-right shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-100 pl-6 sm:pl-0">
-          <div className="text-base sm:text-lg font-bold text-slate-900 tabular-nums leading-tight">
-            {formatINR(item.net_payable)}
+        <div className="flex flex-col gap-0.5 sm:text-right shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-100 pl-6 sm:pl-0">
+          <div className="flex items-baseline justify-between gap-2 sm:block">
+            <div className="text-base sm:text-lg font-bold text-slate-900 tabular-nums leading-tight">
+              {formatINR(item.net_payable)}
+            </div>
+            <div className="text-[11px] text-slate-500 tabular-nums sm:mt-0.5">
+              Gross: <span className="font-medium text-slate-700">{formatINR(item.amount)}</span>
+              {' · '}
+              TDS: <span className="font-medium text-slate-700">{item.tds > 0 ? formatINR(item.tds) : 'NA'}</span>
+            </div>
           </div>
-          <div className="text-[11px] text-slate-500 tabular-nums sm:mt-0.5">
-            Gross: <span className="font-medium text-slate-700">{formatINR(item.amount)}</span>
-            {' · '}
-            TDS: <span className="font-medium text-slate-700">{item.tds > 0 ? formatINR(item.tds) : 'NA'}</span>
+          <div className="text-[10.5px] leading-snug text-slate-500 font-medium sm:max-w-[240px] sm:ml-auto">
+            {formatINRInWords(item.net_payable)}
           </div>
         </div>
       </div>

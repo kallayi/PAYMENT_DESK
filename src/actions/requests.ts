@@ -96,6 +96,8 @@ async function sendDirectRequestNotifications(params: {
   paymentItemId?: string | null;
   paymentRequestId?: string | null;
   actionUrl?: string | null;
+  priority?: 'urgent' | 'normal';
+  actionLabel?: string;
 }): Promise<void> {
   if (params.recipientIds.length === 0 || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
     return;
@@ -127,6 +129,8 @@ async function sendDirectRequestNotifications(params: {
         title: params.title,
         body: params.body,
         url: params.pushUrl,
+        priority: params.priority,
+        actionLabel: params.actionLabel,
       }),
       new Promise<void>((resolve) => setTimeout(resolve, 2500)),
     ]);
@@ -347,6 +351,8 @@ export async function createPaymentRequest(
     pushUrl: actionUrl,
     paymentRequestId: created.id,
     actionUrl,
+    priority: 'urgent',
+    actionLabel: 'Review Request',
   });
 
   revalidatePath('/requests');
@@ -561,6 +567,8 @@ export async function submitRequestToWorkflow(
       pushUrl: verifyUrl,
       paymentItemId: newPayment.id,
       actionUrl: verifyUrl,
+      priority: 'urgent',
+      actionLabel: 'Verify Bill',
     }),
     existingReq.requested_by !== user.id
       ? sendDirectRequestNotifications({
@@ -573,6 +581,8 @@ export async function submitRequestToWorkflow(
           paymentItemId: newPayment.id,
           paymentRequestId: existingReq.id,
           actionUrl: trackerUrl,
+          priority: 'normal',
+          actionLabel: 'View Request',
         })
       : Promise.resolve(),
   ]);
@@ -683,6 +693,8 @@ export async function declinePaymentRequest(input: {
       pushUrl: actionUrl,
       paymentRequestId: updated.id,
       actionUrl,
+      priority: 'normal',
+      actionLabel: 'View Request',
     });
   }
 

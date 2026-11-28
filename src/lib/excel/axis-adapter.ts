@@ -1,5 +1,6 @@
 import ExcelJS from 'exceljs';
 import { getBankNameFromIfsc } from '@/lib/bank-names';
+import { extractIfscPrefix } from '@/lib/excel/ifsc';
 import type { BankTemplateAdapter, BulkExportRow } from '@/lib/excel/types';
 
 function getTodayISTParts(): { ddmmyyyy: string; yyyymmdd: string } {
@@ -28,50 +29,80 @@ function buildCustomerRef(row: BulkExportRow, index: number, yyyymmdd: string): 
   return `${company}${yyyymmdd}${seq}`.slice(0, 20);
 }
 
+const AXIS_PLACEHOLDER_VALUES = new Set([
+  '',
+  'na',
+  'n/a',
+  'n / a',
+  'n.a.',
+  'n.a',
+  'none',
+  'null',
+  'nil',
+  'undefined',
+  '-',
+  '--',
+  '---',
+  '—',
+  '–',
+  'not applicable',
+  'not-applicable',
+]);
+
 /**
  * Strip leading spreadsheet formula trigger characters (=, +, -, @, \t, \r)
- * from free-text Axis Neo bulk upload fields without adding quotes,
- * keeping bank portal uploads valid while neutralizing Excel formulas.
+ * and unsafe control characters from free-text Axis Neo bulk upload fields
+ * without adding quotes, keeping bank portal uploads valid while neutralizing Excel formulas.
  */
 function sanitizeAxisFreeText(val: string | null | undefined): string {
-  let str = (val || '').trim();
+  let str = (val || '')
+    .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
   while (/^[=+\-@\t\r]/.test(str)) {
     str = str.replace(/^[=+\-@\t\r]+/, '').trimStart();
   }
   return str;
 }
 
+/**
+ * Clean optional Axis Neo fields so empty or placeholder values
+ * ('NA', 'N/A', 'None', 'null', 'nil', '-', '—', etc.) become ''.
+ */
+function cleanOptionalAxisValue(val: string | null | undefined): string {
+  const cleaned = sanitizeAxisFreeText(val);
+  if (!cleaned) return '';
+  if (AXIS_PLACEHOLDER_VALUES.has(cleaned.toLowerCase())) {
+    return '';
+  }
+  return cleaned;
+}
+
+function cleanAxisAccountNumber(val: string | null | undefined): string {
+  const noSpaces = String(val || '').replace(/\s+/g, '').trim();
+  return cleanOptionalAxisValue(noSpaces);
+}
+
 function buildBeneficiaryCode(partyName: string): string {
+  const cleaned = cleanOptionalAxisValue(partyName);
   return (
-    (partyName || 'VENDOR')
+    (cleaned || 'VENDOR')
       .replace(/[^a-zA-Z0-9]/g, '')
       .toUpperCase()
       .slice(0, 15) || 'VENDOR'
   );
 }
 
-function buildDebitNarration(row: BulkExportRow): string {
-  const party = sanitizeAxisFreeText(row.partyName);
-  const inv = sanitizeAxisFreeText(row.invoiceRef);
-  return sanitizeAxisFreeText(`${party} ${inv}`.replace(/\s+/g, ' ')).slice(0, 30);
-}
-
-function buildCreditNarration(row: BulkExportRow): string {
-  const company = sanitizeAxisFreeText(row.companyCode || 'INDFURN').toUpperCase();
-  const inv = sanitizeAxisFreeText(row.invoiceRef);
-  return sanitizeAxisFreeText(`${company} ${inv}`.replace(/\s+/g, ' ')).slice(0, 30);
-}
-
-function resolveAxisPaymentMode(row: BulkExportRow): 'I' | 'IMPS' | 'RTGS' | 'NEFT' {
-  const ifsc = (row.ifscCode || '').trim().toUpperCase();
-  const prefix = (row.sourceBankIfscPrefix || 'UTIB').trim().toUpperCase() || 'UTIB';
-  if (ifsc.startsWith(prefix)) {
+function resolveAxisPaymentMode(row: BulkExportRow): 'I' | 'IMPS' | 'R' | 'N' {
+  const vendorPrefix = extractIfscPrefix(row.ifscCode);
+  const bankPrefix = extractIfscPrefix(row.sourceBankIfscPrefix || 'UTIB') || 'UTIB';
+  if (vendorPrefix && vendorPrefix === bankPrefix) {
     return 'I';
   }
   if (row.paymentMode === 'IMPS') {
     return 'IMPS';
   }
-  return Number(row.netPayable) >= 200000 ? 'RTGS' : 'NEFT';
+  return Number(row.netPayable) >= 200000 ? 'R' : 'N';
 }
 
 function styleAxisHeaderRow(sheet: ExcelJS.Worksheet) {
@@ -92,8 +123,8 @@ function styleAxisHeaderRow(sheet: ExcelJS.Worksheet) {
 
 function enforceTextCell(row: ExcelJS.Row, key: string, value: string) {
   const cell = row.getCell(key);
-  cell.value = value;
   cell.numFmt = '@';
+  cell.value = value ? value : null;
 }
 
 /**
@@ -123,19 +154,23 @@ async function buildWithinAxisBankWorkbook(rows: BulkExportRow[]): Promise<Buffe
 
   rows.forEach((item, index) => {
     const amount = Math.round((Number(item.netPayable) || 0) * 100) / 100;
-    const debitAccount = String(item.sourceBankDebitAccount || '').trim();
-    const beneficiaryAccount = String(item.accountNumber || '').trim();
+    const debitAccount = cleanAxisAccountNumber(item.sourceBankDebitAccount);
+    const beneficiaryAccount = cleanAxisAccountNumber(item.accountNumber);
+    const beneficiaryName =
+      cleanOptionalAxisValue(item.beneficiaryName) ||
+      cleanOptionalAxisValue(item.partyName);
+    const beneficiaryCode = buildBeneficiaryCode(item.partyName || item.beneficiaryName);
     const customerRef = buildCustomerRef(item, index, yyyymmdd);
 
     const addedRow = sheet.addRow({
-      debitAccount,
+      debitAccount: debitAccount || undefined,
       amount,
       currency: 'INR',
-      beneficiaryName: sanitizeAxisFreeText(item.beneficiaryName),
-      beneficiaryAccount,
+      beneficiaryName: beneficiaryName || undefined,
+      beneficiaryAccount: beneficiaryAccount || undefined,
       transactionDate: ddmmyyyy,
       customerRef,
-      beneficiaryCode: buildBeneficiaryCode(item.partyName),
+      beneficiaryCode: beneficiaryCode || undefined,
     });
 
     enforceTextCell(addedRow, 'debitAccount', debitAccount);
@@ -199,42 +234,47 @@ async function buildAcrossAllBanksWorkbook(rows: BulkExportRow[]): Promise<Buffe
 
   rows.forEach((item, index) => {
     const amount = Math.round((Number(item.netPayable) || 0) * 100) / 100;
-    const debitAccount = String(item.sourceBankDebitAccount || '').trim();
-    const beneficiaryAccount = String(item.accountNumber || '').trim();
+    const debitAccount = cleanAxisAccountNumber(item.sourceBankDebitAccount);
+    const beneficiaryAccount = cleanAxisAccountNumber(item.accountNumber);
+    const ifscCode = cleanOptionalAxisValue(item.ifscCode).toUpperCase();
+    const beneficiaryName =
+      cleanOptionalAxisValue(item.beneficiaryName) ||
+      cleanOptionalAxisValue(item.partyName);
     const customerRef = buildCustomerRef(item, index, yyyymmdd);
+    const invoiceNumber = cleanOptionalAxisValue(item.invoiceRef) || undefined;
 
     const addedRow = sheet.addRow({
-      debitAccount,
+      debitAccount: debitAccount || undefined,
       amount,
       currency: 'INR',
-      beneficiaryName: sanitizeAxisFreeText(item.beneficiaryName),
-      beneficiaryAccount,
-      ifscCode: (item.ifscCode || '').trim().toUpperCase(),
+      beneficiaryName: beneficiaryName || undefined,
+      beneficiaryAccount: beneficiaryAccount || undefined,
+      ifscCode: ifscCode || undefined,
       transactionDate: ddmmyyyy,
       paymentMode: resolveAxisPaymentMode(item),
       customerRef,
-      beneficiaryCode: buildBeneficiaryCode(item.partyName),
-      bankAccountType: '',
-      beneficiaryType: '',
-      lei: '',
-      debitNarration: buildDebitNarration(item),
-      creditNarration: buildCreditNarration(item),
-      invoiceNumber: sanitizeAxisFreeText(item.invoiceRef),
-      addr1: '',
-      addr2: '',
-      addr3: '',
-      city: '',
-      state: '',
-      pincode: '',
-      email1: '',
-      email2: '',
-      mobileNo: '',
-      addInfo1: '',
-      addInfo2: '',
-      addInfo3: '',
-      addInfo4: '',
-      addInfo5: '',
-      addInfo6: '',
+      beneficiaryCode: buildBeneficiaryCode(item.partyName || item.beneficiaryName),
+      bankAccountType: undefined,
+      beneficiaryType: undefined,
+      lei: undefined,
+      debitNarration: undefined,
+      creditNarration: undefined,
+      invoiceNumber,
+      addr1: undefined,
+      addr2: undefined,
+      addr3: undefined,
+      city: undefined,
+      state: undefined,
+      pincode: undefined,
+      email1: undefined,
+      email2: undefined,
+      mobileNo: undefined,
+      addInfo1: undefined,
+      addInfo2: undefined,
+      addInfo3: undefined,
+      addInfo4: undefined,
+      addInfo5: undefined,
+      addInfo6: undefined,
     });
 
     enforceTextCell(addedRow, 'debitAccount', debitAccount);
@@ -269,50 +309,16 @@ function buildSalaryCustomerRef(row: BulkExportRow, index: number, yyyymmdd: str
   return `${company}SAL${yyyymmdd}${seq}`.slice(0, 20);
 }
 
-function buildSalaryDebitNarration(row: BulkExportRow): string {
-  const party = (row.partyName || row.beneficiaryName || '')
-    .replace(/[^a-zA-Z0-9 ]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-  const inv = (row.invoiceRef || '')
-    .replace(/[^a-zA-Z0-9 ]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-  const useInv =
-    inv.length > 0 &&
-    !['NA', 'ON ACCOUNT'].includes(inv.toUpperCase()) &&
-    inv.toUpperCase().includes('SAL');
-  return sanitizeAxisFreeText(
-    `${party} ${useInv ? inv : 'SALARY'}`.replace(/\s+/g, ' ')
-  ).slice(0, 30);
+function resolveSalaryPaymentMode(row: BulkExportRow): 'I' | 'IMPS' | 'R' | 'N' {
+  return resolveAxisPaymentMode(row);
 }
 
-function buildSalaryCreditNarration(row: BulkExportRow): string {
-  const company = (row.companyCode || 'INDFURN')
-    .replace(/[^a-zA-Z0-9 ]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .toUpperCase();
-  return sanitizeAxisFreeText(`${company} SALARY`.replace(/\s+/g, ' ')).slice(0, 30);
-}
-
-function resolveSalaryPaymentMode(row: BulkExportRow): 'I' | 'IMPS' | 'RTGS' | 'NEFT' {
-  const ifsc = (row.ifscCode || '').trim().toUpperCase();
-  if (ifsc.startsWith('UTIB')) {
-    return 'I';
-  }
-  if (row.paymentMode === 'IMPS') {
-    return 'IMPS';
-  }
-  return Number(row.netPayable) >= 200000 ? 'RTGS' : 'NEFT';
-}
-
-function resolveSalaryBeneficiaryBankName(ifscCode: string): string {
-  const cleanIfsc = (ifscCode || '').trim().toUpperCase();
-  if (!cleanIfsc) return '';
-  const resolved = getBankNameFromIfsc(cleanIfsc);
-  if (!resolved || resolved === '—' || resolved === cleanIfsc.slice(0, 4)) {
-    return '';
+function resolveSalaryBeneficiaryBankName(ifscCode: string): string | undefined {
+  const cleanIfsc = cleanOptionalAxisValue(ifscCode).toUpperCase();
+  if (!cleanIfsc) return undefined;
+  const resolved = cleanOptionalAxisValue(getBankNameFromIfsc(cleanIfsc));
+  if (!resolved || resolved === cleanIfsc.slice(0, 4)) {
+    return undefined;
   }
   return resolved;
 }
@@ -345,21 +351,23 @@ export async function buildSalarySameBankWorkbook(rows: BulkExportRow[]): Promis
 
   rows.forEach((item, index) => {
     const amount = Math.round((Number(item.netPayable) || 0) * 100) / 100;
-    const debitAccount = String(item.sourceBankDebitAccount || '').trim();
-    const beneficiaryAccount = String(item.accountNumber || '').trim();
+    const debitAccount = cleanAxisAccountNumber(item.sourceBankDebitAccount);
+    const beneficiaryAccount = cleanAxisAccountNumber(item.accountNumber);
     const customerRef = buildSalaryCustomerRef(item, index, yyyymmdd);
-    const beneficiaryName = sanitizeAxisFreeText(item.beneficiaryName || item.partyName);
+    const beneficiaryName =
+      cleanOptionalAxisValue(item.beneficiaryName) ||
+      cleanOptionalAxisValue(item.partyName);
     const beneficiaryCode = buildBeneficiaryCode(item.partyName || item.beneficiaryName);
 
     const addedRow = sheet.addRow({
-      debitAccount,
+      debitAccount: debitAccount || undefined,
       amount,
       currency: 'INR',
-      beneficiaryAccount,
+      beneficiaryAccount: beneficiaryAccount || undefined,
       transactionDate: ddmmyyyy,
       customerRef,
-      beneficiaryCode,
-      beneficiaryName,
+      beneficiaryCode: beneficiaryCode || undefined,
+      beneficiaryName: beneficiaryName || undefined,
     });
 
     enforceTextCell(addedRow, 'debitAccount', debitAccount);
@@ -423,43 +431,45 @@ export async function buildSalaryOtherBankWorkbook(rows: BulkExportRow[]): Promi
 
   rows.forEach((item, index) => {
     const amount = Math.round((Number(item.netPayable) || 0) * 100) / 100;
-    const debitAccount = String(item.sourceBankDebitAccount || '').trim();
-    const beneficiaryAccount = String(item.accountNumber || '').trim();
-    const ifscCode = (item.ifscCode || '').trim().toUpperCase();
+    const debitAccount = cleanAxisAccountNumber(item.sourceBankDebitAccount);
+    const beneficiaryAccount = cleanAxisAccountNumber(item.accountNumber);
+    const ifscCode = cleanOptionalAxisValue(item.ifscCode).toUpperCase();
     const customerRef = buildSalaryCustomerRef(item, index, yyyymmdd);
-    const beneficiaryName = sanitizeAxisFreeText(item.beneficiaryName || item.partyName);
+    const beneficiaryName =
+      cleanOptionalAxisValue(item.beneficiaryName) ||
+      cleanOptionalAxisValue(item.partyName);
     const beneficiaryCode = buildBeneficiaryCode(item.partyName || item.beneficiaryName);
 
     const addedRow = sheet.addRow({
-      debitAccount,
+      debitAccount: debitAccount || undefined,
       amount,
       currency: 'INR',
-      beneficiaryName,
-      beneficiaryAccount,
-      ifscCode,
+      beneficiaryName: beneficiaryName || undefined,
+      beneficiaryAccount: beneficiaryAccount || undefined,
+      ifscCode: ifscCode || undefined,
       transactionDate: ddmmyyyy,
       paymentMode: resolveSalaryPaymentMode(item),
       customerRef,
       beneficiaryCode,
-      bankAccountType: '',
-      debitNarration: buildSalaryDebitNarration(item),
-      creditNarration: buildSalaryCreditNarration(item),
-      addr1: '',
-      addr2: '',
-      addr3: '',
-      city: '',
-      state: '',
-      pincode: '',
+      bankAccountType: undefined,
+      debitNarration: undefined,
+      creditNarration: undefined,
+      addr1: undefined,
+      addr2: undefined,
+      addr3: undefined,
+      city: undefined,
+      state: undefined,
+      pincode: undefined,
       beneficiaryBankName: resolveSalaryBeneficiaryBankName(ifscCode),
-      email1: '',
-      email2: '',
-      mobileNo: '',
-      addInfo1: '',
-      addInfo2: '',
-      addInfo3: '',
-      addInfo4: '',
-      addInfo5: '',
-      addInfo6: '',
+      email1: undefined,
+      email2: undefined,
+      mobileNo: undefined,
+      addInfo1: undefined,
+      addInfo2: undefined,
+      addInfo3: undefined,
+      addInfo4: undefined,
+      addInfo5: undefined,
+      addInfo6: undefined,
     });
 
     enforceTextCell(addedRow, 'debitAccount', debitAccount);

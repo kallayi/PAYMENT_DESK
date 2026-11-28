@@ -32,16 +32,29 @@ function revalidateBankDependentPaths(): void {
   revalidatePath('/print');
 }
 
+function getBankWriteClient(
+  supabase: Awaited<ReturnType<typeof createClient>>
+) {
+  if (process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    return createAdminClient();
+  }
+  return supabase;
+}
+
 function resolveValidatedIfscPrefix(
-  explicitPrefix: string | undefined,
+  explicitPrefix: string | null | undefined,
   fallbackSource: string
 ): { valid: true; prefix: string } | { valid: false; error: string } {
-  const cleanedExplicit = (explicitPrefix || '').trim().toUpperCase();
+  const cleanedExplicit = (explicitPrefix || '').replace(/\s+/g, '').trim().toUpperCase();
   if (cleanedExplicit) {
-    if (!/^[A-Z0-9]{4}$/.test(cleanedExplicit)) {
+    const is4CharPrefix =
+      /^[A-Z]{4}$/.test(cleanedExplicit) || /^[A-Z0-9]{4}$/.test(cleanedExplicit);
+    const is11CharIfsc = /^[A-Z]{4}0[A-Z0-9]{6}$/.test(cleanedExplicit);
+    if (!is4CharPrefix && !is11CharIfsc) {
       return {
         valid: false,
-        error: 'IFSC prefix must be 4 uppercase alphanumeric characters (e.g. UTIB).',
+        error:
+          'Enter either a 4-letter bank prefix (e.g. UTIB) or full 11-character IFSC code (e.g. UTIB0001462).',
       };
     }
     return { valid: true, prefix: cleanedExplicit };
@@ -51,7 +64,8 @@ function resolveValidatedIfscPrefix(
   if (!/^[A-Z0-9]{4}$/.test(derived)) {
     return {
       valid: false,
-      error: 'IFSC prefix must be 4 uppercase alphanumeric characters (e.g. UTIB).',
+      error:
+        'Enter either a 4-letter bank prefix (e.g. UTIB) or full 11-character IFSC code (e.g. UTIB0001462).',
     };
   }
   return { valid: true, prefix: derived };
@@ -74,6 +88,19 @@ function normalizeFullDebitAccount(
   return { valid: true, value: cleaned };
 }
 
+function resolveMaskedAccount(
+  explicitMasked: string | null | undefined,
+  legacyMasked: string | null | undefined,
+  fullDebitAccount: string | null
+): string | null {
+  const manual = explicitMasked?.trim() || legacyMasked?.trim() || '';
+  if (manual) return manual;
+  if (fullDebitAccount && fullDebitAccount.length >= 4) {
+    return `XXXX XXXX XXX ${fullDebitAccount.slice(-4)}`;
+  }
+  return null;
+}
+
 async function logBankAuditEvent(params: {
   supabase: Awaited<ReturnType<typeof createClient>>;
   companyId: string;
@@ -84,10 +111,7 @@ async function logBankAuditEvent(params: {
   newData?: Record<string, unknown> | null;
 }): Promise<void> {
   try {
-    const db =
-      process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY
-        ? createAdminClient()
-        : params.supabase;
+    const db = getBankWriteClient(params.supabase);
 
     await db.from('audit_logs').insert({
       table_name: 'company_banks',
@@ -107,7 +131,8 @@ export async function createCompanyBank(
   input: CompanyBankInput
 ): Promise<ActionResult<CompanyBank>> {
   const supabase = await createClient();
-  const { user, profile, activeCompany } = await getCurrentUserContext();
+  const { user, profile, activeCompany, allowedCompanies } =
+    await getCurrentUserContext();
 
   if (!user) {
     return { success: false, error: 'Unauthorized. Please sign in.' };
@@ -127,14 +152,22 @@ export async function createCompanyBank(
   }
 
   const bankData = parsed.data;
+  const requestedCompanyId = bankData.company_id?.trim() || undefined;
 
   // Strict multi-company isolation: non-admin Preparers are locked to activeCompany.id
   const companyId = profile.is_admin
-    ? bankData.company_id || activeCompany?.id
+    ? requestedCompanyId || activeCompany?.id
     : activeCompany?.id;
 
   if (!companyId) {
     return { success: false, error: 'A company workspace must be active or specified.' };
+  }
+
+  if (!allowedCompanies.some((c) => c.id === companyId)) {
+    return {
+      success: false,
+      error: 'Access denied: You do not have permission to manage banks for this company.',
+    };
   }
 
   const shortCode = (bankData.short_code || bankData.short_name || '').trim().toUpperCase();
@@ -162,8 +195,11 @@ export async function createCompanyBank(
     return { success: false, error: 'Available balance must be a non-negative finite amount.' };
   }
 
+  // Admin write client (after strict server-side role & company verification) avoids RLS blocks for Preparers
+  const db = getBankWriteClient(supabase);
+
   // Check duplicate short_code within the target company
-  const { data: existing } = await supabase
+  const { data: existing } = await db
     .from('company_banks')
     .select('id, short_code')
     .eq('company_id', companyId)
@@ -179,16 +215,19 @@ export async function createCompanyBank(
 
   // If set as primary, unset other primary banks for this company first
   if (bankData.is_primary) {
-    await supabase
+    await db
       .from('company_banks')
       .update({ is_primary: false })
       .eq('company_id', companyId);
   }
 
-  const maskedAccount =
-    bankData.account_number_masked?.trim() || bankData.account_mask?.trim() || null;
+  const maskedAccount = resolveMaskedAccount(
+    bankData.account_number_masked,
+    bankData.account_mask,
+    debitCheck.value
+  );
 
-  const { data: created, error } = await supabase
+  const { data: created, error } = await db
     .from('company_banks')
     .insert({
       company_id: companyId,
@@ -238,7 +277,8 @@ export async function updateCompanyBank(
   input: CompanyBankInput
 ): Promise<ActionResult<CompanyBank>> {
   const supabase = await createClient();
-  const { user, profile, activeCompany } = await getCurrentUserContext();
+  const { user, profile, activeCompany, allowedCompanies } =
+    await getCurrentUserContext();
 
   if (!user) {
     return { success: false, error: 'Unauthorized. Please sign in.' };
@@ -258,9 +298,10 @@ export async function updateCompanyBank(
   }
 
   const bankData = parsed.data;
+  const db = getBankWriteClient(supabase);
 
   // Retrieve existing bank to verify company ownership
-  const { data: currentBank } = await supabase
+  const { data: currentBank } = await db
     .from('company_banks')
     .select('*')
     .eq('id', bankId)
@@ -272,6 +313,13 @@ export async function updateCompanyBank(
 
   if (!activeCompany) {
     return { success: false, error: 'A company workspace must be active.' };
+  }
+
+  if (!allowedCompanies.some((c) => c.id === currentBank.company_id)) {
+    return {
+      success: false,
+      error: 'Access denied: You do not have permission to edit banks for this company.',
+    };
   }
 
   if (!profile.is_admin && currentBank.company_id !== activeCompany.id) {
@@ -313,13 +361,19 @@ export async function updateCompanyBank(
     return { success: false, error: prefixCheck.error };
   }
 
-  const debitCheck = normalizeFullDebitAccount(bankData.full_debit_account_number);
+  const debitInputProvided = input.full_debit_account_number !== undefined;
+  const debitCheck = debitInputProvided
+    ? normalizeFullDebitAccount(bankData.full_debit_account_number)
+    : {
+        valid: true as const,
+        value: (currentBank.full_debit_account_number || '').trim() || null,
+      };
   if (!debitCheck.valid) {
     return { success: false, error: debitCheck.error };
   }
 
   // Check duplicate short_code within the company excluding current bank
-  const { data: existing } = await supabase
+  const { data: existing } = await db
     .from('company_banks')
     .select('id, short_code')
     .eq('company_id', companyId)
@@ -334,22 +388,28 @@ export async function updateCompanyBank(
     };
   }
 
+  const resolvedIsPrimary =
+    input.is_primary !== undefined ? Boolean(bankData.is_primary) : Boolean(currentBank.is_primary);
+  const resolvedIsActive =
+    input.is_active !== undefined ? Boolean(bankData.is_active) : Boolean(currentBank.is_active);
+
   // If marked primary, unset other primary banks for this company
-  if (bankData.is_primary) {
-    await supabase
+  if (resolvedIsPrimary) {
+    await db
       .from('company_banks')
       .update({ is_primary: false })
       .eq('company_id', companyId)
       .neq('id', bankId);
   }
 
-  const maskedAccount =
-    bankData.account_number_masked?.trim() || bankData.account_mask?.trim() || null;
-  const resolvedIsActive =
-    input.is_active !== undefined ? Boolean(bankData.is_active) : Boolean(currentBank.is_active);
+  const maskedAccount = resolveMaskedAccount(
+    bankData.account_number_masked,
+    bankData.account_mask,
+    debitCheck.value
+  );
 
   // Preserve available_balance untouched during details edit (defense-in-depth scoped by company_id)
-  const { data: updated, error } = await supabase
+  const { data: updated, error } = await db
     .from('company_banks')
     .update({
       bank_name: bankName,
@@ -357,7 +417,7 @@ export async function updateCompanyBank(
       ifsc_prefix: prefixCheck.prefix,
       account_number_masked: maskedAccount,
       full_debit_account_number: debitCheck.value,
-      is_primary: Boolean(bankData.is_primary),
+      is_primary: resolvedIsPrimary,
       is_active: resolvedIsActive,
       // Legacy columns fallback
       short_name: shortCode,
@@ -394,7 +454,7 @@ export async function updateCompanyBank(
       bank_name: bankName,
       ifsc_prefix: prefixCheck.prefix,
       account_number_masked: maskedAccount,
-      is_primary: Boolean(bankData.is_primary),
+      is_primary: resolvedIsPrimary,
       is_active: resolvedIsActive,
       has_full_debit_account: Boolean(debitCheck.value),
     },
@@ -408,7 +468,8 @@ export async function toggleCompanyBankActive(
   bankId: string
 ): Promise<ActionResult<CompanyBank>> {
   const supabase = await createClient();
-  const { user, profile, activeCompany } = await getCurrentUserContext();
+  const { user, profile, activeCompany, allowedCompanies } =
+    await getCurrentUserContext();
 
   if (!user) {
     return { success: false, error: 'Unauthorized. Please sign in.' };
@@ -421,7 +482,9 @@ export async function toggleCompanyBankActive(
     };
   }
 
-  const { data: currentBank } = await supabase
+  const db = getBankWriteClient(supabase);
+
+  const { data: currentBank } = await db
     .from('company_banks')
     .select('*')
     .eq('id', bankId)
@@ -435,6 +498,13 @@ export async function toggleCompanyBankActive(
     return { success: false, error: 'A company workspace must be active.' };
   }
 
+  if (!allowedCompanies.some((c) => c.id === currentBank.company_id)) {
+    return {
+      success: false,
+      error: 'Access denied: You do not have permission to manage banks for this company.',
+    };
+  }
+
   if (!profile.is_admin && currentBank.company_id !== activeCompany.id) {
     return {
       success: false,
@@ -446,7 +516,7 @@ export async function toggleCompanyBankActive(
 
   // Prevent disabling if it's the last active bank for this company
   if (currentBank.is_active) {
-    const { count } = await supabase
+    const { count } = await db
       .from('company_banks')
       .select('*', { count: 'exact', head: true })
       .eq('company_id', companyId)
@@ -459,7 +529,7 @@ export async function toggleCompanyBankActive(
 
   const nextActive = !currentBank.is_active;
 
-  const { data: updated, error } = await supabase
+  const { data: updated, error } = await db
     .from('company_banks')
     .update({
       is_active: nextActive,

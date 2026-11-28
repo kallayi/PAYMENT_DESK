@@ -19,6 +19,7 @@ import {
   Filter,
   DollarSign,
   FileCheck2,
+  BellRing,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { OwnerApprovalCard } from '@/components/payments/owner-approval-card';
@@ -39,6 +40,7 @@ import {
   ownerRejectPayment,
   ownerSwitchBank,
   bulkApprovePayments,
+  notifyPreparerBankReleased,
 } from '@/actions/payments';
 import { getSignedFileUrl } from '@/actions/storage';
 import { formatHumanDate, formatINR, formatShortDate } from '@/lib/format';
@@ -53,7 +55,8 @@ interface OwnerApprovalsViewProps {
 type ApproverTab =
   | 'PENDING_APPROVAL'
   | 'ON_HOLD'
-  | 'PENDING_VERIFICATION';
+  | 'PENDING_VERIFICATION'
+  | 'APPROVED';
 
 export function OwnerApprovalsView({
   initialPayments,
@@ -77,9 +80,10 @@ export function OwnerApprovalsView({
   const [selectedBankFilter, setSelectedBankFilter] = React.useState<string>('ALL');
   const [selectedModeFilter, setSelectedModeFilter] = React.useState<'ALL' | PaymentMode>('ALL');
 
-  // Multi-select state
+  // Multi-select & Bank OTP alert state
   const [selectedIds, setSelectedIds] = React.useState<Set<string>>(new Set());
   const [isBulkApproving, setIsBulkApproving] = React.useState<boolean>(false);
+  const [isNotifyingAccounts, setIsNotifyingAccounts] = React.useState<boolean>(false);
 
   // Dialog & Drawer States
   const [rejectingItem, setRejectingItem] = React.useState<PaymentItem | null>(null);
@@ -103,14 +107,14 @@ export function OwnerApprovalsView({
       const normalizedTab = tab?.toUpperCase() || null;
       if (
         normalizedTab &&
-        ['PENDING_APPROVAL', 'ON_HOLD', 'PENDING_VERIFICATION'].includes(normalizedTab)
+        ['PENDING_APPROVAL', 'ON_HOLD', 'PENDING_VERIFICATION', 'APPROVED'].includes(normalizedTab)
       ) {
         setActiveTab(normalizedTab as ApproverTab);
       } else if (highlightId) {
         const target = paymentsRef.current.find((p) => p.id === highlightId);
         if (
           target &&
-          ['PENDING_APPROVAL', 'ON_HOLD', 'PENDING_VERIFICATION'].includes(target.status)
+          ['PENDING_APPROVAL', 'ON_HOLD', 'PENDING_VERIFICATION', 'APPROVED'].includes(target.status)
         ) {
           setActiveTab(target.status as ApproverTab);
         }
@@ -247,6 +251,7 @@ export function OwnerApprovalsView({
   if (activeTab === 'PENDING_APPROVAL') currentTabItems = pendingApprovalItems;
   else if (activeTab === 'ON_HOLD') currentTabItems = holdItems;
   else if (activeTab === 'PENDING_VERIFICATION') currentTabItems = pendingVerificationItems;
+  else if (activeTab === 'APPROVED') currentTabItems = readyToPayItems;
 
   // Prune any selected IDs that were processed on another device via live refresh
   React.useEffect(() => {
@@ -528,6 +533,25 @@ export function OwnerApprovalsView({
     }
   };
 
+  const handleNotifyAccountsOtpDone = async () => {
+    if (isNotifyingAccounts || readyToPayItems.length === 0) return;
+    setIsNotifyingAccounts(true);
+    try {
+      const res = await notifyPreparerBankReleased({
+        paymentIds: readyToPayItems.map((p) => p.id),
+      });
+      if (!res.success) {
+        toast.error(res.error);
+        return;
+      }
+      toast.success('Accounts Preparer notified — ready to download UTRs');
+    } catch {
+      toast.error('Failed to notify Accounts team.');
+    } finally {
+      setIsNotifyingAccounts(false);
+    }
+  };
+
   // Handler: View Bill
   const handleViewBill = async (item: PaymentItem) => {
     if (!item.invoice_file_path) {
@@ -787,7 +811,7 @@ export function OwnerApprovalsView({
       )}
 
       {/* SUBTLE PENDING UTR BANNER */}
-      {readyToPayItems.length > 0 && (
+      {readyToPayItems.length > 0 && activeTab !== 'APPROVED' && (
         <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-900 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
           <div className="flex items-start sm:items-center gap-2 min-w-0">
             <FileCheck2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5 sm:mt-0" />
@@ -795,12 +819,21 @@ export function OwnerApprovalsView({
               <strong>{readyToPayItems.length} payments ({formatINR(readyToPayTotal)})</strong> have been authorized and are awaiting UTR / Cheque settlement.
             </span>
           </div>
-          <Link
-            href="/history"
-            className="text-emerald-700 font-bold hover:underline shrink-0 self-start sm:self-center"
-          >
-            View in History &rarr;
-          </Link>
+          <div className="flex items-center gap-3 shrink-0 self-start sm:self-center">
+            <button
+              type="button"
+              onClick={() => setActiveTab('APPROVED')}
+              className="text-emerald-800 font-bold hover:underline cursor-pointer"
+            >
+              View Approved ({readyToPayItems.length})
+            </button>
+            <Link
+              href="/history"
+              className="text-emerald-700 font-semibold hover:underline"
+            >
+              View in History &rarr;
+            </Link>
+          </div>
         </div>
       )}
 
@@ -809,7 +842,7 @@ export function OwnerApprovalsView({
         <button
           type="button"
           onClick={() => setActiveTab('PENDING_APPROVAL')}
-          className={`min-h-[38px] px-3 sm:px-3.5 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap inline-flex items-center gap-2 transition-colors shrink-0 ${activeTab === 'PENDING_APPROVAL'
+          className={`min-h-[38px] px-3 sm:px-3.5 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap inline-flex items-center gap-2 transition-colors shrink-0 cursor-pointer ${activeTab === 'PENDING_APPROVAL'
               ? 'bg-brand text-white shadow-sm'
               : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
             }`}
@@ -828,7 +861,7 @@ export function OwnerApprovalsView({
         <button
           type="button"
           onClick={() => setActiveTab('ON_HOLD')}
-          className={`min-h-[38px] px-3 sm:px-3.5 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap inline-flex items-center gap-2 transition-colors shrink-0 ${activeTab === 'ON_HOLD'
+          className={`min-h-[38px] px-3 sm:px-3.5 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap inline-flex items-center gap-2 transition-colors shrink-0 cursor-pointer ${activeTab === 'ON_HOLD'
               ? 'bg-amber-600 text-white shadow-sm'
               : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
             }`}
@@ -842,7 +875,7 @@ export function OwnerApprovalsView({
         <button
           type="button"
           onClick={() => setActiveTab('PENDING_VERIFICATION')}
-          className={`min-h-[38px] px-3 sm:px-3.5 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap inline-flex items-center gap-2 transition-colors shrink-0 ${activeTab === 'PENDING_VERIFICATION'
+          className={`min-h-[38px] px-3 sm:px-3.5 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap inline-flex items-center gap-2 transition-colors shrink-0 cursor-pointer ${activeTab === 'PENDING_VERIFICATION'
               ? 'bg-slate-900 text-white shadow-sm'
               : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
             }`}
@@ -853,7 +886,54 @@ export function OwnerApprovalsView({
             {pendingVerificationItems.length}
           </span>
         </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('APPROVED')}
+          className={`min-h-[38px] px-3 sm:px-3.5 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap inline-flex items-center gap-2 transition-colors shrink-0 cursor-pointer ${activeTab === 'APPROVED'
+              ? 'bg-emerald-700 text-white shadow-sm'
+              : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+            }`}
+          title="Approved payments awaiting Bank OTP release or UTR settlement"
+        >
+          <span>Approved</span>
+          <span
+            className={`tabular-nums text-[11px] px-1.5 py-0.5 rounded-full ${activeTab === 'APPROVED'
+              ? 'bg-white/20 text-white'
+              : 'bg-emerald-100 text-emerald-800'
+              }`}
+          >
+            {readyToPayItems.length}
+          </span>
+        </button>
       </div>
+
+      {/* OPTIONAL APPROVER REPLY STRIP ON APPROVED TAB */}
+      {activeTab === 'APPROVED' && readyToPayItems.length > 0 && (
+        <div className="p-3.5 rounded-xl bg-emerald-50/70 border border-emerald-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+          <div className="min-w-0">
+            <p className="text-xs font-semibold text-emerald-950">
+              {readyToPayItems.length} approved payment{readyToPayItems.length === 1 ? '' : 's'} awaiting Bank OTP / UTR entry ({formatINR(readyToPayTotal)})
+            </p>
+            <p className="text-[11px] text-emerald-800/80 mt-0.5">
+              Optional: Once you complete the OTP release in Axis Bank Neo, alert Accounts so they can download UTRs.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={handleNotifyAccountsOtpDone}
+            disabled={isNotifyingAccounts}
+            className="min-h-[38px] px-3.5 py-1.5 rounded-lg border border-emerald-300 bg-white hover:bg-emerald-100/70 disabled:opacity-50 text-emerald-800 text-xs font-semibold inline-flex items-center justify-center gap-1.5 shrink-0 shadow-2xs transition-colors cursor-pointer"
+          >
+            {isNotifyingAccounts ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <BellRing className="w-3.5 h-3.5" />
+            )}
+            <span>Notify Accounts: Bank OTP Done</span>
+          </button>
+        </div>
+      )}
 
       {/* SEARCH & FILTERS BAR */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-3">

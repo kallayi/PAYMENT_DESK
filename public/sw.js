@@ -1,8 +1,8 @@
-// Payment Desk Lightweight PWA Service Worker (v6 — Payment Desk rupee icon)
+// Payment Desk Lightweight PWA Service Worker (v8 — custom-branded urgent/normal alerts & badging)
 // No aggressive HTML caching (preserves Next.js SSR & auth isolation).
 // Handles Web Push workflow notifications and deep-link navigation.
 
-const CACHE_NAME = 'payment-desk-static-v6';
+const CACHE_NAME = 'payment-desk-static-v8';
 
 self.addEventListener('install', () => {
   self.skipWaiting();
@@ -70,15 +70,33 @@ self.addEventListener('push', (event) => {
     title: 'Payment Desk',
     body: 'You have a new payment workflow update.',
     url: '/',
+    priority: 'normal',
+    actionLabel: 'Open Desk',
+    tag: null,
+    badgeCount: 1,
   };
 
   if (event.data) {
     try {
       const parsed = event.data.json();
+      const parsedBadgeCount = Number(parsed.badgeCount);
       payload = {
         title: parsed.title || 'Payment Desk',
         body: parsed.body || payload.body,
         url: parsed.action_url || parsed.url || '/',
+        priority: parsed.priority === 'urgent' ? 'urgent' : 'normal',
+        actionLabel:
+          typeof parsed.actionLabel === 'string' && parsed.actionLabel.trim()
+            ? parsed.actionLabel.trim()
+            : 'Open Desk',
+        tag:
+          typeof parsed.tag === 'string' && parsed.tag.trim()
+            ? parsed.tag.trim()
+            : null,
+        badgeCount:
+          Number.isFinite(parsedBadgeCount) && parsedBadgeCount > 0
+            ? Math.floor(parsedBadgeCount)
+            : 1,
       };
     } catch {
       const text = event.data.text();
@@ -86,24 +104,50 @@ self.addEventListener('push', (event) => {
     }
   }
 
-  event.waitUntil(
+  const isUrgent = payload.priority === 'urgent';
+  const icon = isUrgent ? '/icon-urgent-192.png?v=1' : '/icon-192.png?v=3';
+  const badge = '/badge-72.png?v=4';
+  const vibrate = isUrgent ? [300, 100, 300, 100, 300] : [180, 90, 180];
+  const tag = payload.tag || `payment-desk-${Date.now()}`;
+  const actions = [
+    { action: 'open', title: payload.actionLabel || 'Open Desk' },
+    { action: 'dismiss', title: 'Dismiss' },
+  ];
+
+  const tasks = [
     self.registration.showNotification(payload.title, {
       body: payload.body,
-      icon: '/icon-192.png?v=3',
-      badge: '/badge-72.png?v=3',
+      icon,
+      badge,
       silent: false,
       data: { url: payload.url, action_url: payload.url },
-      tag: `payment-desk-${Date.now()}`,
+      tag,
       renotify: true,
-      vibrate: [250, 100, 250],
-      requireInteraction: false,
-    })
-  );
+      vibrate,
+      requireInteraction: isUrgent,
+      actions,
+    }),
+  ];
+
+  if (
+    self.navigator &&
+    typeof self.navigator.setAppBadge === 'function'
+  ) {
+    tasks.push(
+      Promise.resolve(self.navigator.setAppBadge(payload.badgeCount)).catch(() => {})
+    );
+  }
+
+  event.waitUntil(Promise.all(tasks));
 });
 
 // Notification Click Deep-Link Handler
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
+  if (event.action === 'dismiss') {
+    return;
+  }
+
   const rawUrl =
     (event.notification.data &&
       (event.notification.data.action_url || event.notification.data.url)) ||

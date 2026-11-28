@@ -5,6 +5,9 @@ export interface PushPayload {
   title: string;
   body: string;
   url: string;
+  priority?: 'urgent' | 'normal';
+  actionLabel?: string;
+  tag?: string;
 }
 
 /**
@@ -45,26 +48,58 @@ export async function sendPushToUsers(
     const admin = createAdminClient();
     const uniqueUserIds = Array.from(new Set(userIds));
 
-    const { data: subscriptions, error } = await admin
-      .from('push_subscriptions')
-      .select('id, endpoint, p256dh, auth')
-      .in('user_id', uniqueUserIds);
+    const [subsRes, unreadRes] = await Promise.all([
+      admin
+        .from('push_subscriptions')
+        .select('id, user_id, endpoint, p256dh, auth')
+        .in('user_id', uniqueUserIds),
+      admin
+        .from('notifications')
+        .select('recipient_user_id')
+        .eq('is_read', false)
+        .in('recipient_user_id', uniqueUserIds),
+    ]);
 
+    const { data: subscriptions, error } = subsRes;
     if (error || !subscriptions || subscriptions.length === 0) {
       return;
     }
 
-    const stringifiedPayload = JSON.stringify({
-      title: payload.title,
-      body: payload.body,
-      url: payload.url,
-    });
+    const unreadCountByUser = new Map<string, number>();
+    if (!unreadRes.error && unreadRes.data) {
+      for (const row of unreadRes.data) {
+        if (!row.recipient_user_id) continue;
+        unreadCountByUser.set(
+          row.recipient_user_id,
+          (unreadCountByUser.get(row.recipient_user_id) ?? 0) + 1
+        );
+      }
+    }
 
+    const priority: 'urgent' | 'normal' =
+      payload.priority === 'urgent' ? 'urgent' : 'normal';
+    const actionLabel = payload.actionLabel || 'Open Desk';
+    const payloadByUserId = new Map<string, string>();
     const staleEndpoints: string[] = [];
 
     const results = await Promise.allSettled(
       subscriptions.map(async (sub) => {
         try {
+          let stringifiedPayload = payloadByUserId.get(sub.user_id);
+          if (!stringifiedPayload) {
+            const badgeCount = Math.max(1, unreadCountByUser.get(sub.user_id) ?? 1);
+            stringifiedPayload = JSON.stringify({
+              title: payload.title,
+              body: payload.body,
+              url: payload.url,
+              priority,
+              actionLabel,
+              tag: payload.tag,
+              badgeCount,
+            });
+            payloadByUserId.set(sub.user_id, stringifiedPayload);
+          }
+
           await webpush.sendNotification(
             {
               endpoint: sub.endpoint,
@@ -74,7 +109,10 @@ export async function sendPushToUsers(
               },
             },
             stringifiedPayload,
-            { TTL: 86400 }
+            {
+              TTL: 86400,
+              urgency: priority === 'urgent' ? 'high' : 'normal',
+            }
           );
         } catch (pushErr: any) {
           const statusCode = pushErr?.statusCode;

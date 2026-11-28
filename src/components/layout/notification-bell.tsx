@@ -11,6 +11,8 @@ import {
   ChevronRight,
   Clock,
   CalendarClock,
+  Volume2,
+  VolumeX,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { createClient } from '@/lib/supabase/client';
@@ -19,6 +21,12 @@ import {
   markAllNotificationsRead,
 } from '@/actions/notifications';
 import { switchActiveCompany } from '@/actions/company';
+import {
+  isAlertSoundMuted,
+  setAlertSoundMuted,
+  playNotificationAlertSound,
+  type AlertPriority,
+} from '@/lib/alert-sound';
 import type { Company, Notification, NotificationEvent, UserRole } from '@/types/database';
 
 interface NotificationBellProps {
@@ -91,6 +99,12 @@ function resolveNotificationTargetUrl(
     case 'BATCH_SETTLED':
       baseUrl = userRole === 'AUDITOR' || isAdmin ? '/audit' : '/history';
       break;
+    case 'BANK_OTP_READY':
+      baseUrl = '/approvals?tab=APPROVED';
+      break;
+    case 'BANK_OTP_RELEASED':
+      baseUrl = '/payments?tab=APPROVED';
+      break;
     default:
       if (titleLower.includes('payment request')) {
         return appendHighlightParam('/requests', requestId || paymentId);
@@ -131,47 +145,20 @@ function formatRelativeTime(isoString: string): string {
 const PUSH_STATE_EVENT = 'payment-desk-push-changed';
 const PUSH_BANNER_DISMISSED_KEY = 'payment-desk-push-banner-dismissed';
 
-function playNotificationChime() {
-  try {
-    if (typeof window === 'undefined') return;
-    const AudioCtx =
-      window.AudioContext ||
-      (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-    if (!AudioCtx) return;
+const URGENT_NOTIFICATION_EVENTS = new Set<string>([
+  'SUBMITTED_FOR_VERIFICATION',
+  'VERIFIED_FOR_APPROVAL',
+  'REJECTED',
+  'BANK_OTP_READY',
+  'BANK_OTP_RELEASED',
+  'PAYMENT_REQUEST_CREATED',
+]);
 
-    const ctx = new AudioCtx();
-    if (ctx.state === 'suspended') {
-      void ctx.resume().catch(() => { });
-    }
-
-    const now = ctx.currentTime;
-    const notes = [
-      { freq: 659.25, start: 0, duration: 0.14 }, // E5
-      { freq: 880.0, start: 0.11, duration: 0.22 }, // A5
-    ];
-
-    notes.forEach((n) => {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(n.freq, now + n.start);
-
-      gain.gain.setValueAtTime(0.0001, now + n.start);
-      gain.gain.exponentialRampToValueAtTime(0.07, now + n.start + 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.0001, now + n.start + n.duration);
-
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start(now + n.start);
-      osc.stop(now + n.start + n.duration + 0.02);
-    });
-
-    window.setTimeout(() => {
-      void ctx.close().catch(() => { });
-    }, 600);
-  } catch {
-    // Autoplay policies or unavailable AudioContext should never break notifications
-  }
+function getNotificationAlertPriority(
+  eventType?: NotificationEvent | string | null
+): AlertPriority {
+  const normalized = String(eventType || '').toUpperCase();
+  return URGENT_NOTIFICATION_EVENTS.has(normalized) ? 'urgent' : 'normal';
 }
 
 function urlBase64ToUint8Array(base64String: string): Uint8Array<ArrayBuffer> {
@@ -460,16 +447,37 @@ export function NotificationBell({
     [allowedCompanies]
   );
 
-  // Web Push opt-in status
+  // Web Push opt-in status & sound mute preference
   const { isSecureContext, pushSupported, isPushEnabled, setIsPushEnabled } = usePushStatus();
   const [isTogglingPush, setIsTogglingPush] = React.useState<boolean>(false);
+  const [isSoundMuted, setIsSoundMuted] = React.useState<boolean>(false);
 
   const containerRef = React.useRef<HTMLDivElement | null>(null);
+
+  React.useEffect(() => {
+    setIsSoundMuted(isAlertSoundMuted());
+  }, []);
 
   React.useEffect(() => {
     setNotifications(initialNotifications);
     setUnreadCount(initialUnreadCount);
   }, [initialNotifications, initialUnreadCount]);
+
+  // Keep PWA app icon badge synchronized with live unread count
+  React.useEffect(() => {
+    if (typeof navigator === 'undefined') return;
+    const nav = navigator as Navigator & {
+      setAppBadge?: (count?: number) => Promise<void>;
+      clearAppBadge?: () => Promise<void>;
+    };
+    if (unreadCount > 0) {
+      if (typeof nav.setAppBadge === 'function') {
+        void nav.setAppBadge(unreadCount).catch(() => {});
+      }
+    } else if (typeof nav.clearAppBadge === 'function') {
+      void nav.clearAppBadge().catch(() => {});
+    }
+  }, [unreadCount]);
 
   // Lightweight Supabase Realtime subscription for live unread updates
   React.useEffect(() => {
@@ -489,7 +497,7 @@ export function NotificationBell({
           if (!newNotif?.id) return;
           setNotifications((prev) => [newNotif, ...prev].slice(0, 25));
           setUnreadCount((prev) => prev + 1);
-          playNotificationChime();
+          playNotificationAlertSound(getNotificationAlertPriority(newNotif.event_type));
           toast.info(newNotif.title, { description: newNotif.body });
           startTransition(() => {
             router.refresh();
@@ -514,6 +522,13 @@ export function NotificationBell({
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [isOpen]);
+
+  const handleToggleSoundMute = () => {
+    const nextMuted = !isSoundMuted;
+    setAlertSoundMuted(nextMuted);
+    setIsSoundMuted(nextMuted);
+    toast.info(nextMuted ? 'Alert sound muted' : 'Alert sound enabled');
+  };
 
   const handleTogglePush = async () => {
     if (!pushSupported) {
@@ -655,6 +670,24 @@ export function NotificationBell({
               )}
               <button
                 type="button"
+                onClick={handleToggleSoundMute}
+                title={isSoundMuted ? 'Unmute alert sound' : 'Mute alert sound'}
+                aria-label={isSoundMuted ? 'Unmute alert sound' : 'Mute alert sound'}
+                aria-pressed={isSoundMuted}
+                className={`p-1 rounded transition-colors cursor-pointer ${
+                  isSoundMuted
+                    ? 'text-[#7F1D1D] bg-[#7F1D1D]/10 hover:bg-[#7F1D1D]/15'
+                    : 'text-slate-400 hover:text-slate-700 hover:bg-slate-200/60'
+                }`}
+              >
+                {isSoundMuted ? (
+                  <VolumeX className="w-3.5 h-3.5" />
+                ) : (
+                  <Volume2 className="w-3.5 h-3.5" />
+                )}
+              </button>
+              <button
+                type="button"
                 onClick={() => setIsOpen(false)}
                 className="p-1 text-slate-400 hover:text-slate-700 rounded"
               >
@@ -727,6 +760,24 @@ export function NotificationBell({
                           }`}
                       >
                         <CalendarClock className="w-3.5 h-3.5" />
+                      </span>
+                    ) : item.event_type === 'BANK_OTP_READY' ? (
+                      <span
+                        className={`mt-0.5 w-6 h-6 rounded-full flex items-center justify-center shrink-0 ${!item.is_read
+                          ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                          : 'bg-slate-100 text-slate-500'
+                          }`}
+                      >
+                        <BellRing className="w-3.5 h-3.5" />
+                      </span>
+                    ) : item.event_type === 'BANK_OTP_RELEASED' ? (
+                      <span
+                        className={`mt-0.5 w-6 h-6 rounded-full flex items-center justify-center shrink-0 ${!item.is_read
+                          ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                          : 'bg-slate-100 text-slate-500'
+                          }`}
+                      >
+                        <BellRing className="w-3.5 h-3.5" />
                       </span>
                     ) : (
                       <span

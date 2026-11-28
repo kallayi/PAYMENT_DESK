@@ -150,6 +150,8 @@ export async function checkAndDispatchDueReminders(
             title,
             body,
             url: '/reminders',
+            priority: 'normal',
+            actionLabel: 'Open Reminders',
           });
         }
       }

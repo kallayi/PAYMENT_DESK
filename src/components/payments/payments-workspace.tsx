@@ -21,6 +21,7 @@ import {
   MessageCircle,
   Layers,
   Settings2,
+  BellRing,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { PaymentFormSheet } from '@/components/payments/payment-form-sheet';
@@ -33,9 +34,9 @@ import { ManageBanksModal } from '@/components/payments/manage-banks-modal';
 import { BankExcelExportModal } from '@/components/payments/bank-excel-export-modal';
 import { PaymentStatusBadge, BankBadge, PaymentModeBadge } from '@/components/payments/payment-status-badge';
 import { PaymentUrlSync, usePaymentHighlight } from '@/components/layout/payment-url-sync';
-import { deleteDraftPayment, submitPayment } from '@/actions/payments';
+import { deleteDraftPayment, notifyApproverBankBatchReady, submitPayment } from '@/actions/payments';
 import { getSignedFileUrl } from '@/actions/storage';
-import { formatHumanDate, formatShortDate, formatINR } from '@/lib/format';
+import { formatHumanDate, formatShortDate, formatINR, getTodayISTDateString, toISTDateIso } from '@/lib/format';
 import type {
   Company,
   CompanyBank,
@@ -125,6 +126,7 @@ export function PaymentsWorkspace({
   const [submittingPaymentId, setSubmittingPaymentId] = React.useState<string | null>(null);
   const [deletingPaymentId, setDeletingPaymentId] = React.useState<string | null>(null);
   const [viewingFileId, setViewingFileId] = React.useState<string | null>(null);
+  const [isAlertingApprover, setIsAlertingApprover] = React.useState<boolean>(false);
 
   const { highlightedId, triggerHighlight } = usePaymentHighlight();
   const paymentsRef = React.useRef(payments);
@@ -208,6 +210,44 @@ export function PaymentsWorkspace({
     });
   }, [approvedItemsList]);
 
+  const todayIst = React.useMemo(() => getTodayISTDateString(), []);
+
+  const getApprovedItemDateIso = React.useCallback((p: PaymentItem): string => {
+    return toISTDateIso(p.approved_at || p.sheet_date) || p.sheet_date || '';
+  }, []);
+
+  const todayApprovedItems = React.useMemo(
+    () => approvedItemsList.filter((p) => getApprovedItemDateIso(p) === todayIst),
+    [approvedItemsList, getApprovedItemDateIso, todayIst]
+  );
+
+  const approvedDateGroups = React.useMemo(() => {
+    const map = new Map<
+      string,
+      { dateIso: string; label: string; isToday: boolean; itemIds: string[] }
+    >();
+    for (const p of approvedItemsList) {
+      const dateIso = getApprovedItemDateIso(p);
+      if (!dateIso) continue;
+      const isToday = dateIso === todayIst;
+      const existing = map.get(dateIso);
+      if (existing) {
+        existing.itemIds.push(p.id);
+      } else {
+        map.set(dateIso, {
+          dateIso,
+          label: isToday ? "Today's Batch" : formatShortDate(dateIso),
+          isToday,
+          itemIds: [p.id],
+        });
+      }
+    }
+    return Array.from(map.values()).sort((a, b) => {
+      if (a.isToday !== b.isToday) return a.isToday ? -1 : 1;
+      return b.dateIso.localeCompare(a.dateIso);
+    });
+  }, [approvedItemsList, getApprovedItemDateIso, todayIst]);
+
   const approvedBankGroups = React.useMemo(() => {
     const map = new Map<
       string,
@@ -235,9 +275,11 @@ export function PaymentsWorkspace({
     return Array.from(map.values());
   }, [approvedItemsList]);
 
-  const toggleSelectBankApproved = (itemIds: string[]) => {
+  const toggleSelectIdGroup = (itemIds: string[]) => {
     const allSelected =
-      itemIds.length > 0 && itemIds.every((id) => selectedApprovedIds.has(id));
+      itemIds.length > 0 &&
+      itemIds.every((id) => selectedApprovedIds.has(id)) &&
+      selectedApprovedIds.size === itemIds.length;
     if (allSelected) {
       setSelectedApprovedIds(new Set());
     } else {
@@ -262,12 +304,109 @@ export function PaymentsWorkspace({
     }
   };
 
-  const itemsForExcelModal = React.useMemo(() => {
+  // Strictly scoped batch items: selected rows -> Today's batch -> all pending (only if Today has 0)
+  const activeBatchItems = React.useMemo(() => {
     if (selectedApprovedIds.size > 0) {
       return approvedItemsList.filter((p) => selectedApprovedIds.has(p.id));
     }
+    if (todayApprovedItems.length > 0) {
+      return todayApprovedItems;
+    }
     return approvedItemsList;
-  }, [approvedItemsList, selectedApprovedIds]);
+  }, [approvedItemsList, selectedApprovedIds, todayApprovedItems]);
+
+  const activeBatchTotal = React.useMemo(
+    () =>
+      activeBatchItems.reduce(
+        (sum, p) => sum + Number(p.net_payable || 0),
+        0
+      ),
+    [activeBatchItems]
+  );
+
+  const isTodayAutoDefault =
+    selectedApprovedIds.size === 0 && todayApprovedItems.length > 0;
+
+  const isTodayExplicitSelected =
+    selectedApprovedIds.size > 0 &&
+    todayApprovedItems.length > 0 &&
+    selectedApprovedIds.size === todayApprovedItems.length &&
+    todayApprovedItems.every((p) => selectedApprovedIds.has(p.id));
+
+  const batchScopeLabel = React.useMemo(() => {
+    if (selectedApprovedIds.size > 0) {
+      if (isTodayExplicitSelected) {
+        return `Today's Batch (${formatShortDate(todayIst)})`;
+      }
+      const matchingDate = approvedDateGroups.find(
+        (g) =>
+          g.itemIds.length === selectedApprovedIds.size &&
+          g.itemIds.every((id) => selectedApprovedIds.has(id))
+      );
+      if (matchingDate) {
+        return `${matchingDate.label} Batch`;
+      }
+      return 'Selected Batch';
+    }
+    if (todayApprovedItems.length > 0) {
+      return `Today's Batch (${formatShortDate(todayIst)})`;
+    }
+    return 'All Pending Bills';
+  }, [
+    selectedApprovedIds,
+    isTodayExplicitSelected,
+    approvedDateGroups,
+    todayApprovedItems.length,
+    todayIst,
+  ]);
+
+  const batchCountBadge =
+    selectedApprovedIds.size > 0
+      ? `${activeBatchItems.length}`
+      : todayApprovedItems.length > 0
+        ? `Today ${todayApprovedItems.length}`
+        : `All ${approvedItemsList.length}`;
+
+  const handleNotifyApproverOtp = async () => {
+    if (activeBatchItems.length === 0 || isAlertingApprover) return;
+    setIsAlertingApprover(true);
+    try {
+      const uniqueBankLabels = Array.from(
+        new Set(
+          activeBatchItems
+            .map(
+              (item) =>
+                item.source_bank?.bank_name ||
+                item.source_bank?.full_name ||
+                item.source_bank?.short_code ||
+                item.source_bank?.short_name ||
+                ''
+            )
+            .filter(Boolean)
+        )
+      );
+      const bankName =
+        uniqueBankLabels.length === 1
+          ? uniqueBankLabels[0]
+          : uniqueBankLabels.length > 1
+            ? uniqueBankLabels.join(' / ')
+            : undefined;
+
+      const res = await notifyApproverBankBatchReady({
+        paymentIds: activeBatchItems.map((p) => p.id),
+        bankName,
+      });
+      if (!res.success) {
+        toast.error(res.error);
+        return;
+      }
+      toast.success('Approver notified — Ready for Bank OTP');
+    } catch {
+      toast.error('Failed to send Bank OTP alert to Approver.');
+    } finally {
+      setIsAlertingApprover(false);
+    }
+  };
 
   // Tab live counts
   const draftCount = payments.filter((p) => p.status === 'DRAFT').length;
@@ -593,96 +732,164 @@ export function PaymentsWorkspace({
           </div>
         ) : (
           <div className="space-y-3">
-            {/* READY TO PAY: BATCH SETTLEMENT & BANK BULK EXCEL EXPORT TOOLBAR */}
+            {/* READY TO PAY: BULK-FIRST DATE BATCHES & AXIS EXCEL -> UTR WORKFLOW TOOLBAR */}
             {activeTab === 'APPROVED' && (
               <div className="p-3.5 rounded-xl bg-white border border-slate-200 shadow-sm flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-                <div className="flex items-center gap-3 flex-wrap">
-                  <label className="inline-flex items-center gap-2 text-xs font-semibold text-slate-700 cursor-pointer min-h-[32px]">
-                    <input
-                      type="checkbox"
-                      checked={
-                        approvedItemsList.length > 0 &&
-                        selectedApprovedIds.size === approvedItemsList.length
-                      }
-                      onChange={toggleSelectAllApproved}
-                      className="w-4 h-4 rounded border-slate-300 text-brand focus:ring-brand"
-                    />
-                    <span>Select All ({approvedItemsList.length})</span>
-                  </label>
+                <div className="space-y-2 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <label className="inline-flex items-center gap-2 text-xs font-semibold text-slate-700 cursor-pointer min-h-[30px] pr-1">
+                      <input
+                        type="checkbox"
+                        checked={
+                          approvedItemsList.length > 0 &&
+                          selectedApprovedIds.size === approvedItemsList.length
+                        }
+                        onChange={toggleSelectAllApproved}
+                        className="w-4 h-4 rounded border-slate-300 text-brand focus:ring-brand"
+                      />
+                      <span>Select All ({approvedItemsList.length})</span>
+                    </label>
 
-                  {approvedBankGroups.length >= 2 && (
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      {approvedBankGroups.map((group) => {
-                        const isGroupActive =
-                          group.itemIds.length > 0 &&
-                          group.itemIds.every((id) =>
-                            selectedApprovedIds.has(id)
-                          ) &&
-                          selectedApprovedIds.size === group.itemIds.length;
-                        return (
-                          <button
-                            key={group.bankId}
-                            type="button"
-                            onClick={() =>
-                              toggleSelectBankApproved(group.itemIds)
-                            }
-                            className={`px-2.5 py-1 rounded-md text-[11px] font-semibold border transition-colors cursor-pointer ${
-                              isGroupActive
-                                ? 'bg-brand-tint text-brand border-brand/40'
-                                : 'bg-slate-50 hover:bg-slate-100 text-slate-600 border-slate-200'
-                            }`}
-                          >
-                            {group.label} ({group.itemIds.length})
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
+                    {/* Date Batch Quick-Select Pills */}
+                    {approvedDateGroups.length > 0 && (
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        {approvedDateGroups.map((group) => {
+                          const isGroupActive =
+                            group.itemIds.length > 0 &&
+                            group.itemIds.every((id) =>
+                              selectedApprovedIds.has(id)
+                            ) &&
+                            selectedApprovedIds.size === group.itemIds.length;
+                          const isAutoHighlighted =
+                            selectedApprovedIds.size === 0 && group.isToday;
 
-                  <span className="text-xs text-slate-500">
+                          return (
+                            <button
+                              key={group.dateIso}
+                              type="button"
+                              onClick={() => toggleSelectIdGroup(group.itemIds)}
+                              className={`px-2.5 py-1 rounded-md text-[11px] font-semibold border transition-colors cursor-pointer ${
+                                isGroupActive
+                                  ? 'bg-brand-tint text-brand border-brand/50 shadow-2xs'
+                                  : isAutoHighlighted
+                                    ? 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100/70'
+                                    : 'bg-slate-50 hover:bg-slate-100 text-slate-600 border-slate-200'
+                              }`}
+                            >
+                              {group.label} ({group.itemIds.length})
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {/* Bank Quick-Select Pills */}
+                    {approvedBankGroups.length >= 2 && (
+                      <div className="flex items-center gap-1.5 flex-wrap pl-1 border-l border-slate-200">
+                        {approvedBankGroups.map((group) => {
+                          const isGroupActive =
+                            group.itemIds.length > 0 &&
+                            group.itemIds.every((id) =>
+                              selectedApprovedIds.has(id)
+                            ) &&
+                            selectedApprovedIds.size === group.itemIds.length;
+                          return (
+                            <button
+                              key={group.bankId}
+                              type="button"
+                              onClick={() => toggleSelectIdGroup(group.itemIds)}
+                              className={`px-2.5 py-1 rounded-md text-[11px] font-semibold border transition-colors cursor-pointer ${
+                                isGroupActive
+                                  ? 'bg-brand-tint text-brand border-brand/40'
+                                  : 'bg-slate-50 hover:bg-slate-100 text-slate-600 border-slate-200'
+                              }`}
+                            >
+                              {group.label} ({group.itemIds.length})
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+
+                  <p className="text-xs text-slate-500">
                     {selectedApprovedIds.size > 0 ? (
                       <>
-                        <strong className="text-slate-900">{selectedApprovedIds.size}</strong> selected ·{' '}
+                        <strong className="text-slate-900">
+                          {activeBatchItems.length}
+                        </strong>{' '}
+                        selected ·{' '}
                         <strong className="text-slate-900 tabular-nums">
-                          {formatINR(
-                            itemsForExcelModal.reduce(
-                              (sum, p) => sum + Number(p.net_payable || 0),
-                              0
-                            )
-                          )}
+                          {formatINR(activeBatchTotal)}
                         </strong>
                       </>
+                    ) : isTodayAutoDefault ? (
+                      <>
+                        Defaulting to{' '}
+                        <strong className="text-emerald-700">
+                          Today&apos;s Batch ({todayApprovedItems.length})
+                        </strong>{' '}
+                        ·{' '}
+                        <strong className="text-slate-900 tabular-nums">
+                          {formatINR(activeBatchTotal)}
+                        </strong>
+                        {approvedDateGroups.length > 1 && (
+                          <span className="text-slate-400">
+                            {' '}
+                            — older dates excluded unless selected
+                          </span>
+                        )}
+                      </>
                     ) : (
-                      <span>Select payments to settle as a Day Batch or export Axis Excel</span>
+                      <>
+                        All{' '}
+                        <strong className="text-slate-900">
+                          {activeBatchItems.length}
+                        </strong>{' '}
+                        ready ·{' '}
+                        <strong className="text-slate-900 tabular-nums">
+                          {formatINR(activeBatchTotal)}
+                        </strong>
+                      </>
                     )}
-                  </span>
+                  </p>
                 </div>
 
-                <div className="flex flex-wrap items-center gap-2">
+                {/* Step 1 Primary (Export Excel) -> Step 2 Secondary (Enter UTRs) */}
+                <div className="flex flex-wrap items-center gap-2 shrink-0">
                   <button
                     type="button"
-                    disabled={approvedItemsList.length === 0}
-                    onClick={() => setIsBatchModalOpen(true)}
+                    disabled={activeBatchItems.length === 0}
+                    onClick={() => setIsExcelModalOpen(true)}
                     className="min-h-[40px] sm:min-h-[38px] px-3.5 py-1.5 rounded-lg bg-brand hover:bg-brand-hover disabled:opacity-45 disabled:cursor-not-allowed text-white text-xs font-semibold inline-flex items-center justify-center gap-1.5 shadow-sm transition-colors cursor-pointer"
                   >
-                    <Layers className="w-4 h-4" />
-                    <span>
-                      {selectedApprovedIds.size > 0
-                        ? `Settle as Day Batch (${selectedApprovedIds.size})`
-                        : `Settle Day Batch (All ${approvedItemsList.length})`}
-                    </span>
+                    <FileSpreadsheet className="w-4 h-4" />
+                    <span>1. Export Bulk Excel ({batchCountBadge})</span>
                   </button>
 
                   <button
                     type="button"
-                    onClick={() => setIsExcelModalOpen(true)}
-                    className="min-h-[40px] sm:min-h-[38px] px-3.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold inline-flex items-center justify-center gap-1.5 shadow-sm transition-colors cursor-pointer"
+                    disabled={activeBatchItems.length === 0}
+                    onClick={() => setIsBatchModalOpen(true)}
+                    className="min-h-[40px] sm:min-h-[38px] px-3.5 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-45 disabled:cursor-not-allowed text-slate-800 text-xs font-semibold inline-flex items-center justify-center gap-1.5 shadow-xs transition-colors cursor-pointer"
                   >
-                    <FileSpreadsheet className="w-4 h-4" />
-                    <span>
-                      Export Axis Excel
-                      {selectedApprovedIds.size > 0 ? ` (${selectedApprovedIds.size})` : ''}
-                    </span>
+                    <Layers className="w-4 h-4 text-slate-600" />
+                    <span>2. Enter UTRs &amp; Settle Batch ({batchCountBadge})</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={activeBatchItems.length === 0 || isAlertingApprover}
+                    onClick={handleNotifyApproverOtp}
+                    title="Send manual alert to Approver that uploaded Bank Excel batch is ready for OTP"
+                    className="min-h-[40px] sm:min-h-[38px] px-3 py-1.5 rounded-lg border border-amber-300 bg-amber-50 hover:bg-amber-100 disabled:opacity-45 disabled:cursor-not-allowed text-amber-900 text-xs font-semibold inline-flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                  >
+                    {isAlertingApprover ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-700" />
+                    ) : (
+                      <BellRing className="w-3.5 h-3.5 text-amber-700" />
+                    )}
+                    <span>Notify Approver (OTP)</span>
                   </button>
                 </div>
               </div>
@@ -898,15 +1105,15 @@ export function PaymentsWorkspace({
                               </>
                             )}
 
-                            {/* READY TO PAY (APPROVED) Action: Mark as Paid & Enter UTR */}
+                            {/* READY TO PAY (APPROVED) Action: Secondary Single Payment flow */}
                             {item.status === 'APPROVED' && (
                               <button
                                 type="button"
                                 onClick={() => setUtrPayment(item)}
-                                className="h-8 px-3 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors shadow-sm cursor-pointer"
+                                className="h-8 px-2.5 rounded-md border border-slate-300 bg-white hover:bg-emerald-50 hover:border-emerald-300 text-slate-700 hover:text-emerald-700 text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
                               >
-                                <CheckCircle2 className="w-3.5 h-3.5" />
-                                <span>Mark Paid</span>
+                                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                                <span>Pay Single</span>
                               </button>
                             )}
 
@@ -1104,10 +1311,10 @@ export function PaymentsWorkspace({
                         <button
                           type="button"
                           onClick={() => setUtrPayment(item)}
-                          className="w-full min-h-[44px] px-4 rounded-lg bg-emerald-600 text-white text-xs font-semibold inline-flex items-center justify-center gap-1.5 shadow-sm cursor-pointer"
+                          className="w-full min-h-[42px] px-4 rounded-lg border border-slate-300 bg-white hover:bg-emerald-50 hover:border-emerald-300 text-slate-700 hover:text-emerald-700 text-xs font-semibold inline-flex items-center justify-center gap-1.5 cursor-pointer"
                         >
-                          <CheckCircle2 className="w-4 h-4" />
-                          <span>Mark Paid & Enter UTR</span>
+                          <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                          <span>Pay Single / Enter UTR</span>
                         </button>
                       )}
 
@@ -1212,7 +1419,7 @@ export function PaymentsWorkspace({
       <BatchSettlementModal
         open={isBatchModalOpen}
         onOpenChange={setIsBatchModalOpen}
-        selectedItems={itemsForExcelModal}
+        selectedItems={activeBatchItems}
         activeCompany={activeCompany}
         fallbackUserName={currentUserName}
         onSuccess={({ payments: settledItems }) => {
@@ -1239,30 +1446,25 @@ export function PaymentsWorkspace({
               {selectedApprovedIds.size} selected
             </p>
             <p className="text-[11px] font-semibold text-slate-500 tabular-nums">
-              {formatINR(
-                itemsForExcelModal.reduce(
-                  (sum, p) => sum + Number(p.net_payable || 0),
-                  0
-                )
-              )}
+              {formatINR(activeBatchTotal)}
             </p>
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
             <button
               type="button"
               onClick={() => setIsExcelModalOpen(true)}
-              className="min-h-[40px] px-2.5 rounded-lg border border-slate-200 bg-white text-slate-700 text-xs font-semibold inline-flex items-center gap-1 cursor-pointer"
+              className="min-h-[40px] px-3 rounded-lg bg-brand hover:bg-brand-hover text-white text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
             >
               <FileSpreadsheet className="w-3.5 h-3.5" />
-              <span>Excel</span>
+              <span>Export Excel</span>
             </button>
             <button
               type="button"
               onClick={() => setIsBatchModalOpen(true)}
-              className="min-h-[40px] px-3 rounded-lg bg-brand hover:bg-brand-hover text-white text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
+              className="min-h-[40px] px-2.5 rounded-lg border border-slate-300 bg-white text-slate-800 text-xs font-semibold inline-flex items-center gap-1 cursor-pointer"
             >
               <Layers className="w-3.5 h-3.5" />
-              <span>Settle Batch</span>
+              <span>Enter UTRs</span>
             </button>
           </div>
         </div>
@@ -1283,9 +1485,14 @@ export function PaymentsWorkspace({
       <BankExcelExportModal
         open={isExcelModalOpen}
         onOpenChange={setIsExcelModalOpen}
-        readyToPayItems={itemsForExcelModal}
+        readyToPayItems={activeBatchItems}
+        batchScopeLabel={batchScopeLabel}
         banks={activeBanks}
         companyCode={companyCode}
+        onOpenManageBanks={() => {
+          setIsExcelModalOpen(false);
+          setIsManageBanksModalOpen(true);
+        }}
         onProceedToBatch={(items) => {
           setIsExcelModalOpen(false);
           setSelectedApprovedIds(new Set(items.map((item) => item.id)));

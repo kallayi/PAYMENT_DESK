@@ -31,7 +31,9 @@ export type NotificationEvent =
   | 'PAYMENT_REQUEST_CREATED'
   | 'PAYMENT_REQUEST_SUBMITTED'
   | 'PAYMENT_REQUEST_DECLINED'
-  | 'BATCH_SETTLED';
+  | 'BATCH_SETTLED'
+  | 'BANK_OTP_READY'
+  | 'BANK_OTP_RELEASED';
 
 export type AuditStatus = 'PENDING' | 'AUDITED' | 'FLAGGED';
 

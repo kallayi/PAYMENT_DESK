@@ -32,7 +32,7 @@ import {
 } from '@/components/ui/dialog';
 import { verifyPayment, ownerRejectPayment } from '@/actions/payments';
 import { getSignedFileUrl } from '@/actions/storage';
-import { formatINR, formatHumanDate, formatShortDate } from '@/lib/format';
+import { formatINR, formatINRInWords, formatHumanDate, formatShortDate } from '@/lib/format';
 import { BankBadge, PaymentModeBadge } from '@/components/payments/payment-status-badge';
 import { PaymentUrlSync, usePaymentHighlight } from '@/components/layout/payment-url-sync';
 import type { PaymentItem, CompanyBank, PaymentMode } from '@/types/database';
@@ -271,7 +271,10 @@ export function VerifierQueueView({
             </div>
           </div>
 
-          <div className="p-3 sm:p-4 rounded-xl border border-slate-200 bg-white shadow-sm flex items-center justify-between gap-2 min-w-0">
+          <div
+            className="p-3 sm:p-4 rounded-xl border border-slate-200 bg-white shadow-sm flex items-center justify-between gap-2 min-w-0"
+            title={formatINRInWords(totalNet)}
+          >
             <div className="min-w-0">
               <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider truncate">
                 Total Net Payable
@@ -279,7 +282,9 @@ export function VerifierQueueView({
               <p className="text-base sm:text-lg font-bold text-slate-900 tabular-nums mt-0.5 truncate">
                 {formatINR(totalNet)}
               </p>
-              <p className="text-[11px] text-slate-400 mt-0.5 truncate">Pending authorization</p>
+              <p className="text-[10.5px] leading-snug text-slate-500 mt-0.5 line-clamp-2">
+                {totalNet > 0 ? formatINRInWords(totalNet) : 'Pending authorization'}
+              </p>
             </div>
             <div className="p-2 sm:p-2.5 rounded-lg bg-brand/10 text-brand shrink-0">
               <ShieldCheck className="w-4 h-4 sm:w-5 sm:h-5" />
@@ -557,9 +562,12 @@ export function VerifierQueueView({
                       </td>
 
                       {/* Net Payable */}
-                      <td className="py-3 px-3.5 text-right whitespace-nowrap">
-                        <div className="font-bold tabular-nums text-slate-900 text-sm">
+                      <td className="py-3 px-3.5 text-right align-top">
+                        <div className="font-bold tabular-nums text-slate-900 text-sm whitespace-nowrap">
                           {formatINR(item.net_payable)}
+                        </div>
+                        <div className="text-[10.5px] leading-snug text-slate-500 font-medium max-w-[200px] ml-auto whitespace-normal text-right mt-0.5">
+                          {formatINRInWords(item.net_payable)}
                         </div>
                       </td>
 
@@ -612,13 +620,16 @@ export function VerifierQueueView({
               </tbody>
               <tfoot>
                 <tr className="bg-slate-50/80 border-t-2 border-slate-200 font-bold text-slate-900 text-xs">
-                  <td colSpan={4} className="py-3 px-3.5 text-right uppercase tracking-wider text-[11px] text-slate-600">
+                  <td colSpan={4} className="py-3 px-3.5 text-right uppercase tracking-wider text-[11px] text-slate-600 align-top">
                     Total Queue Net Payable
                   </td>
-                  <td className="py-3 px-3.5 text-right tabular-nums text-slate-900 font-bold text-sm">
-                    {formatINR(totalNet)}
+                  <td className="py-3 px-3.5 text-right tabular-nums text-slate-900 font-bold text-sm align-top">
+                    <div className="whitespace-nowrap">{formatINR(totalNet)}</div>
+                    <div className="text-[10.5px] leading-snug text-slate-500 font-medium max-w-[220px] ml-auto whitespace-normal text-right mt-0.5">
+                      {formatINRInWords(totalNet)}
+                    </div>
                   </td>
-                  <td colSpan={2} className="py-3 px-3.5 text-slate-400 font-normal">
+                  <td colSpan={2} className="py-3 px-3.5 text-slate-400 font-normal align-top">
                     {filtered.length} bill{filtered.length === 1 ? '' : 's'}
                   </td>
                 </tr>
@@ -669,6 +680,11 @@ export function VerifierQueueView({
                         {item.tds > 0 ? `TDS: ${formatINR(item.tds)}` : 'TDS: NA'}
                       </div>
                     </div>
+                  </div>
+
+                  {/* Amount in Words */}
+                  <div className="px-2.5 py-1.5 rounded-md bg-slate-50/80 border border-slate-100 text-[11px] leading-snug font-medium text-slate-600">
+                    {formatINRInWords(item.net_payable)}
                   </div>
 
                   {/* Beneficiary Details Box */}

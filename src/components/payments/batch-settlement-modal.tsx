@@ -248,9 +248,21 @@ export function BatchSettlementModal({
   fallbackUserName,
   onSuccess,
 }: BatchSettlementModalProps) {
+  const dialogContentRef = React.useRef<HTMLDivElement | null>(null);
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
   const utrReportInputRef = React.useRef<HTMLInputElement | null>(null);
   const highlightTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const focusFirstEmptyRefInput = React.useCallback(() => {
+    const root = dialogContentRef.current;
+    if (!root) return;
+    const candidates = Array.from(
+      root.querySelectorAll<HTMLInputElement>('input[data-batch-ref-input="true"]')
+    ).filter((el) => el.offsetParent !== null && !el.disabled);
+    if (candidates.length === 0) return;
+    const firstEmpty = candidates.find((el) => !el.value.trim()) || candidates[0];
+    firstEmpty.focus();
+  }, []);
 
   const [batchItems, setBatchItems] = React.useState<PaymentItem[]>([]);
   const [batchDate, setBatchDate] = React.useState<string>(getTodayISTDateString());
@@ -324,7 +336,12 @@ export function BatchSettlementModal({
       };
     }
     setRowRefs(initialMap);
-  }, [open, selectedItems]);
+
+    const timer = setTimeout(() => {
+      focusFirstEmptyRefInput();
+    }, 60);
+    return () => clearTimeout(timer);
+  }, [open, selectedItems, focusFirstEmptyRefInput]);
 
   React.useEffect(() => {
     return () => {
@@ -792,6 +809,11 @@ export function BatchSettlementModal({
     <>
       <Dialog open={open} onOpenChange={(next) => !isSubmitting && onOpenChange(next)}>
         <DialogContent
+          ref={dialogContentRef}
+          onOpenAutoFocus={(e) => {
+            e.preventDefault();
+            requestAnimationFrame(() => focusFirstEmptyRefInput());
+          }}
           className={cn(
             'w-[calc(100vw-1rem)] sm:w-[calc(100vw-2rem)] p-0 overflow-hidden gap-0 transition-all',
             showSplitPdfPane ? 'max-w-6xl' : 'max-w-4xl'
@@ -926,7 +948,7 @@ export function BatchSettlementModal({
                       {batchItems.length === 1 ? '' : 's'} with Combined Bank PDF
                     </DialogTitle>
                     <DialogDescription className="text-xs text-slate-500">
-                      Upload one combined bank confirmation PDF/image, then auto-fill or enter UTR/Cheque references below.
+                      Enter or auto-fill UTR/Cheque references first, then attach the combined bank confirmation PDF/image below.
                     </DialogDescription>
                   </div>
 
@@ -949,7 +971,7 @@ export function BatchSettlementModal({
                     : 'overflow-y-auto space-y-4'
                 )}
               >
-                {/* LEFT COLUMN: Metadata, Receipt Upload, Auto-Fill Bar & Per-Item UTR List */}
+                {/* LEFT COLUMN: Metadata Strip, Section 1 (UTR List FIRST), Section 2 (Compact Bank PDF Strip) */}
                 <div
                   className={cn(
                     'space-y-4',
@@ -957,32 +979,27 @@ export function BatchSettlementModal({
                       'lg:col-span-7 lg:overflow-y-auto lg:pr-1.5 lg:max-h-[calc(90dvh-165px)]'
                   )}
                 >
-                  {/* Summary Bar (Date + Notes + Bank Total) */}
-                  <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-start">
-                    <div className="sm:col-span-4 space-y-1.5">
-                      <label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
+                  {/* Slim 1-Row Batch Metadata Strip */}
+                  <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-end">
+                    <div className="sm:col-span-4 space-y-1">
+                      <label className="text-[11px] font-semibold text-slate-700 flex items-center gap-1">
                         <CalendarDays className="w-3.5 h-3.5 text-slate-400" />
-                        <span>Batch Settlement Date</span>
+                        <span>Batch Date</span>
                       </label>
                       <DatePicker
+                        size="sm"
                         value={batchDate}
                         onChange={(val) => setBatchDate(val || getTodayISTDateString())}
                         disabled={isSubmitting}
                       />
-                      <p className="text-[11px] text-slate-500">
-                        Auto-label:{' '}
-                        <span className="font-mono font-semibold text-slate-700">
-                          Day Batch · {formatHumanDate(batchDate)}
-                        </span>
-                      </p>
                     </div>
 
-                    <div className="sm:col-span-5 space-y-1.5">
+                    <div className="sm:col-span-5 space-y-1">
                       <label
                         htmlFor="batch-notes"
-                        className="text-xs font-semibold text-slate-700"
+                        className="text-[11px] font-semibold text-slate-700"
                       >
-                        Batch Label / Notes (optional)
+                        Batch Notes (optional)
                       </label>
                       <input
                         id="batch-notes"
@@ -991,157 +1008,33 @@ export function BatchSettlementModal({
                         onChange={(e) => setNotes(e.target.value)}
                         maxLength={500}
                         disabled={isSubmitting}
-                        placeholder="e.g., Axis Afternoon Bulk Run / Supplier Day Batch"
-                        className="w-full h-10 px-3 rounded-lg border border-slate-200 bg-white text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-brand/20 focus:border-brand"
+                        placeholder="e.g., Axis Afternoon Bulk Run"
+                        className="w-full h-9 px-3 rounded-lg border border-slate-200 bg-white text-xs sm:text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-brand/20 focus:border-brand"
                       />
                     </div>
 
-                    <div className="sm:col-span-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 flex sm:flex-col items-center sm:items-end justify-between gap-1">
-                      <span className="text-[11px] font-medium text-slate-500 flex items-center gap-1">
-                        <Landmark className="w-3.5 h-3.5 text-slate-400" />
-                        <span>
+                    <div className="sm:col-span-3 h-9 rounded-lg border border-slate-200 bg-slate-50 px-3 flex items-center justify-between gap-2">
+                      <span className="text-[11px] font-medium text-slate-500 flex items-center gap-1 truncate">
+                        <Landmark className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                        <span className="truncate">
                           {uniqueBankNames.length === 1
                             ? uniqueBankNames[0]
                             : uniqueBankNames.length > 1
                             ? `${uniqueBankNames.length} Banks`
-                            : 'Selected'}
+                            : 'Batch'}
                         </span>
                       </span>
-                      <span className="text-sm sm:text-base font-bold text-slate-900 tabular-nums">
+                      <span className="text-xs sm:text-sm font-bold text-slate-900 tabular-nums shrink-0">
                         {formatINR(totalAmount)}
                       </span>
                     </div>
                   </div>
 
-                  {/* Single Combined Bank Receipt Upload */}
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <label className="text-xs font-semibold text-slate-700">
-                        1. Combined Bank Confirmation Receipt (PDF / Image) *
-                      </label>
-                      {receiptFilePath && (
-                        <button
-                          type="button"
-                          onClick={clearUploadedReceipt}
-                          disabled={isSubmitting}
-                          className="text-xs font-semibold text-rose-600 hover:text-rose-700 inline-flex items-center gap-1 cursor-pointer"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                          <span>Replace File</span>
-                        </button>
-                      )}
-                    </div>
-
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      accept="application/pdf,image/jpeg,image/png,image/webp"
-                      onChange={handleFileInputChange}
-                      className="hidden"
-                    />
-
-                    {!receiptFilePath ? (
-                      <div
-                        role="button"
-                        tabIndex={0}
-                        onClick={() => !isUploading && fileInputRef.current?.click()}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' || e.key === ' ') {
-                            e.preventDefault();
-                            if (!isUploading) fileInputRef.current?.click();
-                          }
-                        }}
-                        onDragOver={(e) => {
-                          e.preventDefault();
-                          setIsDragging(true);
-                        }}
-                        onDragLeave={() => setIsDragging(false)}
-                        onDrop={handleDrop}
-                        className={cn(
-                          'rounded-xl border-2 border-dashed px-4 py-5 text-center transition-colors cursor-pointer',
-                          isDragging
-                            ? 'border-brand bg-brand-tint/40'
-                            : 'border-slate-300 bg-slate-50/70 hover:border-brand/60 hover:bg-slate-50'
-                        )}
-                      >
-                        {isUploading ? (
-                          <div className="flex flex-col items-center gap-2 text-slate-600">
-                            <Loader2 className="w-6 h-6 animate-spin text-brand" />
-                            <p className="text-xs font-semibold">
-                              Uploading combined bank receipt…
-                            </p>
-                          </div>
-                        ) : (
-                          <div className="flex flex-col items-center gap-1.5">
-                            <UploadCloud className="w-6 h-6 text-brand" />
-                            <p className="text-xs sm:text-sm font-semibold text-slate-800">
-                              Drop combined Bank Advice PDF here or{' '}
-                              <span className="text-brand underline">browse file</span>
-                            </p>
-                            <p className="text-[11px] text-slate-500">
-                              One file attaches to all {batchItems.length} payments in this batch (PDF, JPG, PNG, WebP · max 4 MB)
-                            </p>
-                          </div>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-3 space-y-2.5">
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <div className="flex items-center gap-2.5 min-w-0">
-                            <div className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
-                              <FileText className="w-4 h-4" />
-                            </div>
-                            <div className="min-w-0">
-                              <p className="text-xs font-semibold text-slate-900 truncate">
-                                {receiptFileName || 'Combined Bank Receipt'}
-                              </p>
-                              <p className="text-[11px] text-emerald-700 font-medium">
-                                Uploaded · Attached to all {batchItems.length} payment
-                                {batchItems.length === 1 ? '' : 's'}
-                              </p>
-                            </div>
-                          </div>
-
-                          {previewUrl && (
-                            <div className="flex items-center gap-2">
-                              <button
-                                type="button"
-                                onClick={() => setShowInlinePreview((prev) => !prev)}
-                                className="px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 inline-flex items-center gap-1 cursor-pointer"
-                              >
-                                {showInlinePreview ? (
-                                  <>
-                                    <EyeOff className="w-3.5 h-3.5" />
-                                    <span>Hide PDF Preview</span>
-                                  </>
-                                ) : (
-                                  <>
-                                    <Eye className="w-3.5 h-3.5" />
-                                    <span>Show Bank PDF Preview</span>
-                                  </>
-                                )}
-                              </button>
-                              <a
-                                href={previewUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 inline-flex items-center gap-1"
-                              >
-                                <span>Open</span>
-                                <ExternalLink className="w-3 h-3" />
-                              </a>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Per-Item UTR / Cheque Entry + Bulk UTR Entry Helpers */}
+                  {/* SECTION 1 (TOP): Per-Item UTR / Cheque Entry + Bulk UTR Entry Helpers */}
                   <div className="space-y-2.5">
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <label className="text-xs font-semibold text-slate-700">
-                        2. Enter Individual UTR / Cheque Reference ({batchItems.length}) *
+                      <label className="text-xs font-semibold text-slate-800">
+                        1. Enter UTR / Cheque Numbers for This Batch ({batchItems.length}) *
                       </label>
                       <div className="flex items-center gap-2 text-[11px]">
                         {duplicateUtrMap.size > 0 && (
@@ -1343,6 +1236,7 @@ export function BatchSettlementModal({
                                       <div className="grid grid-cols-2 gap-1.5">
                                         <input
                                           type="text"
+                                          data-batch-ref-input="true"
                                           value={ref.cheque_number}
                                           onChange={(e) =>
                                             updateRowField(
@@ -1372,6 +1266,7 @@ export function BatchSettlementModal({
                                       <div className="space-y-1">
                                         <input
                                           type="text"
+                                          data-batch-ref-input="true"
                                           value={ref.utr_number}
                                           onChange={(e) =>
                                             updateRowField(
@@ -1505,6 +1400,7 @@ export function BatchSettlementModal({
                                 <div className="grid grid-cols-2 gap-2">
                                   <input
                                     type="text"
+                                    data-batch-ref-input="true"
                                     value={ref.cheque_number}
                                     onChange={(e) =>
                                       updateRowField(
@@ -1533,6 +1429,7 @@ export function BatchSettlementModal({
                                 <div className="space-y-1">
                                   <input
                                     type="text"
+                                    data-batch-ref-input="true"
                                     value={ref.utr_number}
                                     onChange={(e) =>
                                       updateRowField(
@@ -1564,6 +1461,138 @@ export function BatchSettlementModal({
                         );
                       })}
                     </div>
+                  </div>
+
+                  {/* SECTION 2 (BELOW UTR LIST): Compact Combined Bank Receipt Upload */}
+                  <div className="space-y-2 pt-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <label className="text-xs font-semibold text-slate-800">
+                        2. Attach Combined Bank Confirmation Receipt (PDF / Image) *
+                      </label>
+                      {receiptFilePath && (
+                        <button
+                          type="button"
+                          onClick={clearUploadedReceipt}
+                          disabled={isSubmitting}
+                          className="text-xs font-semibold text-rose-600 hover:text-rose-700 inline-flex items-center gap-1 cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Replace File</span>
+                        </button>
+                      )}
+                    </div>
+
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="application/pdf,image/jpeg,image/png,image/webp"
+                      onChange={handleFileInputChange}
+                      className="hidden"
+                    />
+
+                    {!receiptFilePath ? (
+                      <div
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => !isUploading && fileInputRef.current?.click()}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            if (!isUploading) fileInputRef.current?.click();
+                          }
+                        }}
+                        onDragOver={(e) => {
+                          e.preventDefault();
+                          setIsDragging(true);
+                        }}
+                        onDragLeave={() => setIsDragging(false)}
+                        onDrop={handleDrop}
+                        className={cn(
+                          'rounded-xl border-2 border-dashed px-3.5 py-2.5 flex items-center justify-between gap-3 transition-colors cursor-pointer',
+                          isDragging
+                            ? 'border-brand bg-brand-tint/40'
+                            : 'border-slate-300 bg-slate-50/70 hover:border-brand/60 hover:bg-slate-50'
+                        )}
+                      >
+                        {isUploading ? (
+                          <div className="flex items-center gap-2 text-slate-600 py-0.5">
+                            <Loader2 className="w-4 h-4 animate-spin text-brand shrink-0" />
+                            <p className="text-xs font-semibold">
+                              Uploading combined bank receipt…
+                            </p>
+                          </div>
+                        ) : (
+                          <>
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <UploadCloud className="w-5 h-5 text-brand shrink-0" />
+                              <div className="min-w-0">
+                                <p className="text-xs font-semibold text-slate-800 truncate">
+                                  Drop combined Bank Advice PDF/Image here or{' '}
+                                  <span className="text-brand underline">browse</span>
+                                </p>
+                                <p className="text-[11px] text-slate-500 truncate">
+                                  Attaches to all {batchItems.length} payment
+                                  {batchItems.length === 1 ? '' : 's'} (PDF, JPG, PNG, WebP · max 4 MB)
+                                </p>
+                              </div>
+                            </div>
+                            <span className="px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white text-[11px] font-semibold text-slate-700 shrink-0 shadow-2xs">
+                              Choose File
+                            </span>
+                          </>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-3 space-y-2.5">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <div className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
+                              <FileText className="w-4 h-4" />
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-xs font-semibold text-slate-900 truncate">
+                                {receiptFileName || 'Combined Bank Receipt'}
+                              </p>
+                              <p className="text-[11px] text-emerald-700 font-medium">
+                                Uploaded · Attached to all {batchItems.length} payment
+                                {batchItems.length === 1 ? '' : 's'}
+                              </p>
+                            </div>
+                          </div>
+
+                          {previewUrl && (
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => setShowInlinePreview((prev) => !prev)}
+                                className="px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 inline-flex items-center gap-1 cursor-pointer"
+                              >
+                                {showInlinePreview ? (
+                                  <>
+                                    <EyeOff className="w-3.5 h-3.5" />
+                                    <span>Hide PDF Preview</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Eye className="w-3.5 h-3.5" />
+                                    <span>Show Bank PDF Preview</span>
+                                  </>
+                                )}
+                              </button>
+                              <a
+                                href={previewUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 inline-flex items-center gap-1"
+                              >
+                                <span>Open</span>
+                                <ExternalLink className="w-3 h-3" />
+                              </a>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   {formError && (

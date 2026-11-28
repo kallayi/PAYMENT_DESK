@@ -511,10 +511,19 @@ export function PaymentAcknowledgementModal({
     payment.vendor?.account_number || payment.vendor?.bank_account_no || '—';
 
   const cleanRemarks = (payment.remarks || '').trim();
-  const cleanInvoiceRef = (payment.invoice_ref || '').trim();
-  const hasDistinctRemarks = Boolean(cleanRemarks && cleanRemarks !== cleanInvoiceRef);
-  const referenceId = hasDistinctRemarks ? cleanInvoiceRef || '0' : '0';
-  const remarkText = hasDistinctRemarks ? cleanRemarks : cleanInvoiceRef || '-';
+  const rawInvoiceRef = (payment.invoice_ref || '').trim();
+  const isPlaceholderInvoice =
+    !rawInvoiceRef ||
+    ['na', 'n/a', '-', 'none'].includes(rawInvoiceRef.toLowerCase());
+  const cleanInvoiceRef = isPlaceholderInvoice ? '' : rawInvoiceRef;
+
+  const referenceId = cleanInvoiceRef || 'On Account';
+  const remarkText =
+    cleanRemarks && cleanRemarks.toLowerCase() !== cleanInvoiceRef.toLowerCase()
+      ? cleanRemarks
+      : cleanInvoiceRef
+        ? `Against Invoice ${cleanInvoiceRef}`
+        : payment.purpose || 'Payment Settlement';
 
   const settlementRef = isCheque
     ? payment.cheque_number || '—'

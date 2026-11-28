@@ -133,7 +133,7 @@ export function ManageBanksModal({
 
     const cleanName = bankName.trim();
     const cleanShort = shortCode.trim().toUpperCase();
-    const cleanPrefix = ifscPrefix.trim().toUpperCase();
+    const cleanPrefix = ifscPrefix.replace(/\s+/g, '').trim().toUpperCase();
     const cleanMasked = maskedAccount.trim();
     const cleanFullDebit = fullDebitAccount.replace(/\s+/g, '').trim().toUpperCase();
 
@@ -145,8 +145,13 @@ export function ManageBanksModal({
       setFormError('Short Code is required (e.g. AXIS).');
       return;
     }
-    if (!/^[A-Z0-9]{4}$/.test(cleanPrefix)) {
-      setFormError('IFSC Prefix must be exactly 4 uppercase characters (e.g. UTIB).');
+    const isValidIfsc =
+      /^[A-Z0-9]{4}$/.test(cleanPrefix) ||
+      /^[A-Z]{4}0[A-Z0-9]{6}$/.test(cleanPrefix);
+    if (!isValidIfsc) {
+      setFormError(
+        'Enter either a 4-letter bank prefix (e.g. UTIB) or full 11-character IFSC code (e.g. UTIB0001462).'
+      );
       return;
     }
     if (cleanFullDebit && !/^[A-Z0-9]{6,34}$/.test(cleanFullDebit)) {
@@ -161,6 +166,7 @@ export function ManageBanksModal({
       if (mode === 'add') {
         const numericBalance = Number.parseFloat(openingBalance || '0');
         const res = await createCompanyBank({
+          company_id: activeCompany?.id,
           bank_name: cleanName,
           short_code: cleanShort,
           ifsc_prefix: cleanPrefix,
@@ -385,7 +391,7 @@ export function ManageBanksModal({
 
                         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-600">
                           <span>
-                            IFSC Prefix:{' '}
+                            IFSC:{' '}
                             <strong className="font-mono text-slate-900">
                               {bank.ifsc_prefix || '—'}
                             </strong>
@@ -516,7 +522,7 @@ export function ManageBanksModal({
                     htmlFor="mb-prefix"
                     className="block text-xs font-semibold text-slate-700 mb-1"
                   >
-                    IFSC Prefix <span className="text-rose-600">*</span>
+                    IFSC Code / Prefix <span className="text-rose-600">*</span>
                   </Label>
                   <Input
                     id="mb-prefix"
@@ -524,8 +530,8 @@ export function ManageBanksModal({
                     onChange={(e) =>
                       setIfscPrefix(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))
                     }
-                    maxLength={4}
-                    placeholder="e.g. UTIB, SIBL, HDFC, KKBK"
+                    maxLength={11}
+                    placeholder="e.g. UTIB0001462 or UTIB"
                     disabled={isSaving}
                     required
                     className="w-full min-h-[42px] uppercase font-mono font-bold"

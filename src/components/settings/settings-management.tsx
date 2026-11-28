@@ -111,7 +111,7 @@ export function SettingsManagement({
   const [isPending, startTransition] = React.useTransition();
   const { theme, resolvedTheme, mounted } = useTheme();
   const activeThemeLabel = !mounted
-    ? 'Light'
+    ? 'System'
     : theme === 'system'
       ? `System (${resolvedTheme === 'dark' ? 'Dark' : 'Light'})`
       : theme === 'dark'
@@ -483,11 +483,10 @@ export function SettingsManagement({
                 if (tab.id === 'team') setActiveTab('users');
                 if (tab.id === 'banks') setActiveTab('banks');
               }}
-              className={`min-h-[36px] px-2 rounded-md text-xs font-semibold transition-all cursor-pointer truncate ${
-                isActive
-                  ? 'bg-white text-slate-900 shadow-sm'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
+              className={`min-h-[36px] px-2 rounded-md text-xs font-semibold transition-all cursor-pointer truncate ${isActive
+                ? 'bg-white text-slate-900 shadow-sm'
+                : 'text-slate-600 hover:text-slate-900'
+                }`}
             >
               {tab.label}
             </button>
@@ -1417,13 +1416,13 @@ export function SettingsManagement({
               </div>
               <div>
                 <Label htmlFor="ab-prefix" className="block text-xs font-semibold text-slate-700 mb-1">
-                  IFSC Prefix (4-chars) <span className="text-rose-600">*</span>
+                  IFSC Code / Prefix <span className="text-rose-600">*</span>
                 </Label>
                 <Input
                   id="ab-prefix"
                   {...addBankForm.register('ifsc_prefix')}
-                  maxLength={4}
-                  placeholder="e.g. UTIB"
+                  maxLength={11}
+                  placeholder="e.g. UTIB0001462 or UTIB"
                   disabled={isPending}
                   className="w-full min-h-[42px] uppercase font-mono font-bold"
                 />
@@ -1554,12 +1553,13 @@ export function SettingsManagement({
               </div>
               <div>
                 <Label htmlFor="eb-prefix" className="block text-xs font-semibold text-slate-700 mb-1">
-                  IFSC Prefix (4-chars) <span className="text-rose-600">*</span>
+                  IFSC Code / Prefix <span className="text-rose-600">*</span>
                 </Label>
                 <Input
                   id="eb-prefix"
                   {...editBankForm.register('ifsc_prefix')}
-                  maxLength={4}
+                  maxLength={11}
+                  placeholder="e.g. UTIB0001462 or UTIB"
                   disabled={isPending}
                   className="w-full min-h-[42px] uppercase font-mono font-bold"
                 />
