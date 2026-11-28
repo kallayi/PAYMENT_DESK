@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import ExcelJS from 'exceljs';
 import { createClient } from '@/lib/supabase/server';
 import { getCurrentUserContext } from '@/lib/auth';
-import { sanitizeSpreadsheetText } from '@/lib/format';
+import { getBankNameFromIfsc } from '@/lib/bank-names';
+import { getTodayISTDateString, sanitizeSpreadsheetText } from '@/lib/format';
 
 function styleHeaderRow(sheet: ExcelJS.Worksheet) {
   const headerRow = sheet.getRow(1);
@@ -40,37 +41,44 @@ export async function GET(req: NextRequest) {
     workbook.created = new Date();
 
     if (mode === 'template') {
-      const sheet = workbook.addWorksheet('Vendors_Import_Template');
+      const sheet = workbook.addWorksheet('Sheet 1');
 
       sheet.columns = [
-        { header: 'Party Name', key: 'partyName', width: 28 },
-        { header: 'Beneficiary Name', key: 'beneficiaryName', width: 30 },
-        { header: 'Account Number', key: 'accountNumber', width: 26, style: { numFmt: '@' } },
-        { header: 'IFSC Code', key: 'ifscCode', width: 16 },
-        { header: 'Remarks', key: 'remarks', width: 34 },
+        { header: 'Sr. No', key: 'srNo', width: 10 },
+        {
+          header: 'Beneficiary Account Number',
+          key: 'accountNumber',
+          width: 26,
+          style: { numFmt: '@' },
+        },
+        { header: 'Beneficiary Name', key: 'beneficiaryName', width: 36 },
+        { header: 'Beneficiary Code', key: 'beneficiaryCode', width: 24 },
+        { header: 'IFSC code', key: 'ifscCode', width: 16 },
+        { header: 'Beneficiary Bank Name', key: 'bankName', width: 30 },
       ];
 
       styleHeaderRow(sheet);
 
-      // Explicitly pre-format Column C (Account Number) as Text (@) across template rows
-      const accountCol = sheet.getColumn(3);
+      // Pre-format Column B (Beneficiary Account Number) as Text (@) so leading zeros stay intact
+      const accountCol = sheet.getColumn(2);
       accountCol.numFmt = '@';
 
       const sampleRow = sheet.addRow({
-        partyName: 'Naas Hardware',
-        beneficiaryName: 'Manoj K',
-        accountNumber: '918020045612890',
-        ifscCode: 'UTIB0000412',
-        remarks: 'Sample row - replace or delete',
+        srNo: 1,
+        accountNumber: '0047083000001234',
+        beneficiaryName: 'SAMPLE SUPPLIER PVT LTD',
+        beneficiaryCode: 'SampleSupplierSIB1234',
+        ifscCode: 'SIBL0000047',
+        bankName: 'SOUTH INDIAN BANK',
       });
 
       const sampleAccCell = sampleRow.getCell('accountNumber');
-      sampleAccCell.value = '918020045612890';
+      sampleAccCell.value = '0047083000001234';
       sampleAccCell.numFmt = '@';
 
-      // Pre-format blank data rows 3..200 Account Number column as Text so Excel keeps leading zeros
-      for (let r = 3; r <= 200; r += 1) {
-        sheet.getCell(r, 3).numFmt = '@';
+      // Pre-format rows 2..500 Account Number column as Text (@)
+      for (let r = 2; r <= 500; r += 1) {
+        sheet.getCell(r, 2).numFmt = '@';
       }
 
       const buffer = await workbook.xlsx.writeBuffer();
@@ -87,7 +95,7 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    // Default mode: Export active company's vendors
+    // Default mode: Export active company's vendors aligned with official 6-col bank format
     const supabase = await createClient();
     const { data: vendors, error } = await supabase
       .from('vendors')
@@ -110,30 +118,44 @@ export async function GET(req: NextRequest) {
     const sheet = workbook.addWorksheet(`${companyCode}_Vendors`);
 
     sheet.columns = [
-      { header: 'Party Name', key: 'partyName', width: 28 },
-      { header: 'Beneficiary Name', key: 'beneficiaryName', width: 30 },
-      { header: 'Account Number', key: 'accountNumber', width: 26, style: { numFmt: '@' } },
-      { header: 'IFSC Code', key: 'ifscCode', width: 16 },
-      { header: 'Remarks', key: 'remarks', width: 34 },
+      { header: 'Sr. No', key: 'srNo', width: 10 },
+      {
+        header: 'Beneficiary Account Number',
+        key: 'accountNumber',
+        width: 26,
+        style: { numFmt: '@' },
+      },
+      { header: 'Beneficiary Name', key: 'beneficiaryName', width: 36 },
+      { header: 'Beneficiary Code / Party Name', key: 'partyName', width: 30 },
+      { header: 'IFSC code', key: 'ifscCode', width: 16 },
+      { header: 'Beneficiary Bank Name', key: 'bankName', width: 28 },
+      { header: 'Remarks', key: 'remarks', width: 32 },
       { header: 'Status', key: 'status', width: 12 },
     ];
 
     styleHeaderRow(sheet);
+    sheet.getColumn(2).numFmt = '@';
 
-    (vendors || []).forEach((v) => {
-      const partyName = (v.party_name || v.name || '').trim();
-      const beneficiaryName = (v.beneficiary_name || partyName).trim();
+    (vendors || []).forEach((v, idx) => {
+      const rawPartyName = (v.party_name || v.name || '').trim();
+      const rawBeneficiaryName = (v.beneficiary_name || rawPartyName).trim();
       const accountNumber = String(v.account_number || v.bank_account_no || '').trim();
       const ifscCode = (v.ifsc_code || '').trim().toUpperCase();
-      const remarks = (v.remarks || v.notes || '').trim();
+      const derivedBankName = getBankNameFromIfsc(ifscCode);
+      const rawRemarks = (v.remarks || v.notes || '').trim();
       const status = v.is_active ? 'Active' : 'Inactive';
 
       const addedRow = sheet.addRow({
-        partyName: sanitizeSpreadsheetText(partyName),
-        beneficiaryName: sanitizeSpreadsheetText(beneficiaryName),
+        srNo: idx + 1,
         accountNumber,
+        beneficiaryName: sanitizeSpreadsheetText(rawBeneficiaryName),
+        partyName: sanitizeSpreadsheetText(rawPartyName),
         ifscCode,
-        remarks: sanitizeSpreadsheetText(remarks),
+        bankName:
+          derivedBankName === '—'
+            ? '—'
+            : sanitizeSpreadsheetText(derivedBankName),
+        remarks: sanitizeSpreadsheetText(rawRemarks),
         status,
       });
 
@@ -143,7 +165,7 @@ export async function GET(req: NextRequest) {
     });
 
     const buffer = await workbook.xlsx.writeBuffer();
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = getTodayISTDateString();
     const filename = `${companyCode}_Vendors_${todayStr}.xlsx`;
 
     return new NextResponse(new Uint8Array(buffer), {

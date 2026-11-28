@@ -438,10 +438,10 @@ export async function bulkCreateVendors(
     validatedRows.push(parsed.data);
   }
 
-  // Fetch existing party_name records within activeCompany for strict deduplication
+  // Fetch existing party_name and account_number records within activeCompany for strict deduplication
   const { data: existingVendors, error: existingError } = await supabase
     .from('vendors')
-    .select('party_name, name')
+    .select('party_name, name, account_number, bank_account_no')
     .eq('company_id', activeCompany.id);
 
   if (existingError) {
@@ -451,13 +451,22 @@ export async function bulkCreateVendors(
     };
   }
 
+  const normalizeAccKey = (val: string | null | undefined) =>
+    (val || '').replace(/[\s-]+/g, '').trim().toUpperCase();
+
   const existingPartySet = new Set<string>(
     (existingVendors || [])
       .map((v) => (v.party_name || v.name || '').trim().toLowerCase())
       .filter(Boolean)
   );
+  const existingAccountSet = new Set<string>(
+    (existingVendors || [])
+      .map((v) => normalizeAccKey(v.account_number || v.bank_account_no))
+      .filter(Boolean)
+  );
 
-  const seenBatch = new Set<string>();
+  const seenBatchParties = new Set<string>();
+  const seenBatchAccounts = new Set<string>();
   let skippedDuplicates = 0;
 
   const rowsToInsert: Array<{
@@ -476,17 +485,23 @@ export async function bulkCreateVendors(
 
   for (const r of validatedRows) {
     const partyName = r.party_name.trim();
-    const key = partyName.toLowerCase();
+    const partyKey = partyName.toLowerCase();
+    const accountNumber = r.account_number.replace(/[\s-]+/g, '').trim();
+    const accKey = normalizeAccKey(accountNumber);
 
-    if (existingPartySet.has(key) || seenBatch.has(key)) {
+    if (
+      existingPartySet.has(partyKey) ||
+      seenBatchParties.has(partyKey) ||
+      (accKey && (existingAccountSet.has(accKey) || seenBatchAccounts.has(accKey)))
+    ) {
       skippedDuplicates += 1;
       continue;
     }
 
-    seenBatch.add(key);
+    seenBatchParties.add(partyKey);
+    if (accKey) seenBatchAccounts.add(accKey);
 
     const beneficiaryName = (r.beneficiary_name || partyName).trim();
-    const accountNumber = r.account_number.replace(/[\s-]+/g, '').trim();
     const ifscCode = r.ifsc_code.trim().toUpperCase();
     const remarks = r.remarks?.trim() || null;
 

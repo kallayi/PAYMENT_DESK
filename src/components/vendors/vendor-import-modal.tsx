@@ -116,8 +116,8 @@ export function VendorImportModal({
   const handleFileSelected = async (file: File) => {
     if (!file) return;
 
-    if (file.size > 5 * 1024 * 1024) {
-      toast.error('File size exceeds the 5 MB limit.');
+    if (file.size > 4 * 1024 * 1024) {
+      toast.error('File size exceeds the 4 MB limit.');
       return;
     }
 
@@ -290,8 +290,8 @@ export function VendorImportModal({
                   <div className="text-xs font-semibold text-slate-900">
                     Click to choose an Excel (.xlsx) or CSV file, or drag & drop here
                   </div>
-                  <p className="text-[11px] text-slate-500 max-w-md">
-                    Columns: Party Name, Beneficiary Name, Account Number, IFSC Code, Remarks (max 5 MB, up to 500 rows).
+                  <p className="text-[11px] text-slate-500 max-w-lg">
+                    Supports the Bank Beneficiary Excel format (Sr. No, Beneficiary Account Number, Beneficiary Name, Beneficiary Code, IFSC code, Beneficiary Bank Name) or standard Vendor CSV/XLSX (max 4 MB, up to 500 rows).
                   </p>
                 </div>
               )}
@@ -372,7 +372,7 @@ export function VendorImportModal({
 
                           return (
                             <tr
-                              key={`${row.rowNumber}-${row.party_name}`}
+                              key={`${row.rowNumber}-${row.account_number}-${row.party_name}`}
                               className={
                                 row.status === 'invalid'
                                   ? 'bg-rose-50/30'
