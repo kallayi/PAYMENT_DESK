@@ -20,6 +20,7 @@ import {
   FileSpreadsheet,
   MessageCircle,
   Layers,
+  Settings2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { PaymentFormSheet } from '@/components/payments/payment-form-sheet';
@@ -28,6 +29,7 @@ import { MarkPaidModal } from '@/components/payments/mark-paid-modal';
 import { BatchSettlementModal } from '@/components/payments/batch-settlement-modal';
 import { PaymentAcknowledgementModal } from '@/components/payments/payment-acknowledgement-modal';
 import { UpdateBalancesModal } from '@/components/payments/update-balances-modal';
+import { ManageBanksModal } from '@/components/payments/manage-banks-modal';
 import { BankExcelExportModal } from '@/components/payments/bank-excel-export-modal';
 import { PaymentStatusBadge, BankBadge, PaymentModeBadge } from '@/components/payments/payment-status-badge';
 import { PaymentUrlSync, usePaymentHighlight } from '@/components/layout/payment-url-sync';
@@ -112,6 +114,7 @@ export function PaymentsWorkspace({
   // Drawer & modal state
   const [isDrawerOpen, setIsDrawerOpen] = React.useState<boolean>(Boolean(initialFromReminder));
   const [isBalancesModalOpen, setIsBalancesModalOpen] = React.useState<boolean>(false);
+  const [isManageBanksModalOpen, setIsManageBanksModalOpen] = React.useState<boolean>(false);
   const [selectedEditPayment, setSelectedEditPayment] = React.useState<PaymentItem | null>(null);
   const [detailPayment, setDetailPayment] = React.useState<PaymentItem | null>(null);
   const [utrPayment, setUtrPayment] = React.useState<PaymentItem | null>(null);
@@ -479,6 +482,15 @@ export function PaymentsWorkspace({
           >
             <Landmark className="w-4 h-4 text-brand shrink-0" />
             <span>Update Balances</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setIsManageBanksModalOpen(true)}
+            className="min-h-[40px] sm:min-h-[36px] flex-1 sm:flex-initial px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 inline-flex items-center justify-center gap-1.5 transition-colors shadow-sm cursor-pointer"
+          >
+            <Settings2 className="w-4 h-4 text-slate-500 shrink-0" />
+            <span>Manage Banks</span>
           </button>
 
           <button
@@ -1131,11 +1143,21 @@ export function PaymentsWorkspace({
       <UpdateBalancesModal
         open={isBalancesModalOpen}
         onOpenChange={setIsBalancesModalOpen}
-        banks={banks}
+        banks={activeBanks}
         onSuccess={(updated) => {
-          setBanks(updated);
+          const updatedMap = new Map(updated.map((b) => [b.id, b]));
+          setBanks((prev) => prev.map((b) => updatedMap.get(b.id) || b));
           refreshServerState();
         }}
+      />
+
+      {/* MANAGE COMPANY BANKS MODAL (PREPARER + ADMIN) */}
+      <ManageBanksModal
+        open={isManageBanksModalOpen}
+        onOpenChange={setIsManageBanksModalOpen}
+        banks={banks}
+        activeCompany={activeCompany}
+        onBanksChange={setBanks}
       />
 
       {/* PAYMENT ENTRY SLIDE-OVER DRAWER */}
@@ -1143,7 +1165,7 @@ export function PaymentsWorkspace({
         open={isDrawerOpen}
         onOpenChange={setIsDrawerOpen}
         vendors={vendors}
-        banks={banks}
+        banks={activeBanks}
         reminders={reminders}
         purposes={purposes}
         onPurposesChange={setPurposes}
@@ -1262,7 +1284,7 @@ export function PaymentsWorkspace({
         open={isExcelModalOpen}
         onOpenChange={setIsExcelModalOpen}
         readyToPayItems={itemsForExcelModal}
-        banks={banks}
+        banks={activeBanks}
         companyCode={companyCode}
         onProceedToBatch={(items) => {
           setIsExcelModalOpen(false);

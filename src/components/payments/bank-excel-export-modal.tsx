@@ -385,7 +385,7 @@ export function BankExcelExportModal({
           {/* CORPORATE DEBIT ACCOUNT HINT */}
           {selectedBank && !selectedBank.full_debit_account_number?.trim() && (
             <p className="text-[11px] text-amber-700 bg-amber-50/90 border border-amber-200 rounded-md px-2.5 py-1.5">
-              Note: Full Corporate Debit A/C is not set for {bankShortCode} in Settings; column 1 will be left blank so you can fill it or set it once in Settings → Company Banks.
+              Note: Full Corporate Debit A/C is not set for {bankShortCode}; column 1 will be left blank so you can fill it or set it once in Manage Banks or Settings → Company Banks.
             </p>
           )}
 

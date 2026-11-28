@@ -74,7 +74,7 @@ export default async function PaymentsPage({ searchParams }: PaymentsPageProps) 
   let banksQuery = supabase
     .from('company_banks')
     .select('*, balance_updater:profiles!balance_updated_by(full_name)')
-    .eq('is_active', true)
+    .order('is_primary', { ascending: false })
     .order('short_code', { ascending: true });
 
   let paymentsQuery = supabase
